@@ -113,7 +113,37 @@ def _link_demo_personas() -> dict:
 		result["guardian"] = guardian
 		result["children"] = children
 
+	result["instructor_groups"] = _assign_demo_teacher()
 	return result
+
+
+def _assign_demo_teacher() -> list[str]:
+	"""Attach the demo teacher to groups that actually have seeded results,
+	otherwise their dashboard and reports come back empty."""
+	full_name = frappe.db.get_value("User", "teacher@match-edu.ps", "full_name")
+	if not full_name:
+		return []
+	instructor = frappe.db.get_value("Instructor", {"instructor_name": full_name}, "name")
+	if not instructor:
+		return []
+
+	groups = [
+		r.student_group
+		for r in frappe.db.sql(
+			"SELECT DISTINCT student_group FROM `tabAssessment Result` WHERE docstatus = 1",
+			as_dict=True,
+		)
+		if r.student_group
+	][:3]
+
+	added = []
+	for group in groups:
+		doc = frappe.get_doc("Student Group", group)
+		if not any(i.instructor == instructor for i in doc.instructors):
+			doc.append("instructors", {"instructor": instructor})
+			doc.save(ignore_permissions=True)
+		added.append(group)
+	return added
 
 
 def _pick_company() -> str:
