@@ -18,6 +18,7 @@
   "section_body",
   "body",
   "attachment",
+  "files",
   "section_context",
   "about_student"
  ],
@@ -102,6 +103,12 @@
    "fieldtype": "Link",
    "label": "About Student",
    "options": "Student"
+  },
+  {
+   "fieldname": "files",
+   "fieldtype": "Table",
+   "label": "المرفقات / Attachments",
+   "options": "K12 Attachment"
   }
  ],
  "index_web_pages_for_search": 1,
