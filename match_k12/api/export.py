@@ -310,10 +310,19 @@ def _year_suffix() -> str:
 @k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def export_report_card(student: str, academic_term: str = None, persona: str = None):
 	"""A printable report card for one student."""
-	from match_k12.api.academics import report_card
+	from match_k12.api.gradebook import term_grades
 
-	result = report_card(student=student, academic_term=academic_term)
+	result = term_grades(student=student, academic_term=academic_term)
 	data = result.get("data") if isinstance(result, dict) and "success" in result else result
+
+	# Fall back to the older Assessment Result table for schools that still
+	# grade through exams only, without the gradebook.
+	if not data or not data.get("subjects"):
+		from match_k12.api.academics import report_card
+
+		legacy = report_card(student=student, academic_term=academic_term)
+		data = legacy.get("data") if isinstance(legacy, dict) and "success" in legacy else legacy
+
 	if not data or not data.get("subjects"):
 		return fail(
 			message_en="No results recorded for this student.",
@@ -330,18 +339,27 @@ def export_report_card(student: str, academic_term: str = None, persona: str = N
 
 def _render_report_card_html(data: dict) -> str:
 	school = _school_header()
-	rows = "".join(
-		f"""<tr>
-			<td class="txt">{frappe.utils.escape_html(str(s['subject']))}</td>
-			<td class="num">{flt(s['score']):g}</td>
-			<td class="num">{flt(s['max']):g}</td>
-			<td class="num">{flt(s['percentage']):g}%</td>
-			<td>{frappe.utils.escape_html(str(s.get('grade') or '—'))}</td>
+	def _row(s: dict) -> str:
+		# Gradebook subjects carry `final`/`course`; legacy ones `percentage`/`subject`.
+		name = s.get("course") or s.get("subject") or ""
+		pct = flt(s.get("final") if s.get("final") is not None else s.get("percentage"))
+		bonus = flt(s.get("bonus"))
+		detail = (
+			f"{flt(s.get('percentage')):g}% + {bonus:g}"
+			if s.get("final") is not None and bonus
+			else (f"{flt(s.get('score')):g}/{flt(s.get('max')):g}" if s.get("max") else "—")
+		)
+		badge = f"{s.get('emoji', '')} {s.get('grade') or '—'}".strip()
+		return f"""<tr>
+			<td class="txt">{frappe.utils.escape_html(str(name))}</td>
+			<td class="num">{frappe.utils.escape_html(detail)}</td>
+			<td class="num">{pct:g}%</td>
+			<td>{frappe.utils.escape_html(badge)}</td>
 		</tr>"""
-		for s in data["subjects"]
-	)
 
-	average = flt(data.get("average"))
+	rows = "".join(_row(s) for s in data["subjects"])
+
+	average = flt(data.get("overall") if data.get("overall") is not None else data.get("average"))
 	verdict = "ناجح" if average >= 50 else "راسب"
 
 	return f"""
@@ -393,7 +411,7 @@ def _render_report_card_html(data: dict) -> str:
 
   <table>
     <thead>
-      <tr><th>المادة</th><th>الدرجة</th><th>من</th><th>النسبة</th><th>التقدير</th></tr>
+      <tr><th>المادة</th><th>التفصيل</th><th>النسبة</th><th>التقدير</th></tr>
     </thead>
     <tbody>{rows}</tbody>
   </table>
