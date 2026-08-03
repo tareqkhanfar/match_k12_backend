@@ -4,12 +4,14 @@
 """Dashboard endpoints — one per persona, shaped for the frontend widgets."""
 
 import frappe
+from frappe import _
 from frappe.utils import add_months, flt, getdate, today
 
 from match_k12.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
+	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
 	get_default_academic_year,
@@ -599,4 +601,89 @@ def _parent_dashboard(scope: dict) -> dict:
 		"guardian": scope.get("guardian"),
 		"children": payload,
 		"announcements": _recent_announcements(),
+	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_PARENT, ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def child_overview(student: str, persona: str = None):
+	"""Everything about one child, for the parent's focused view.
+
+	A parent picks a child and sees their whole picture in one call rather
+	than hopping between screens.
+	"""
+	scope = resolve_scope(persona)
+	if persona == ROLE_PARENT and student not in (scope.get("students") or []):
+		frappe.throw(_("You are not allowed to view this student."), frappe.PermissionError)
+
+	from match_k12.api.gradebook import term_grades
+	from match_k12.api.students import _fee_totals
+
+	brief = _student_brief(student)
+	grades = term_grades(student=student, persona=persona)
+	grade_data = grades.get("data") if isinstance(grades, dict) and "success" in grades else grades
+	fees = _fee_totals(student)
+
+	# Behaviour points give parents an at-a-glance conduct summary.
+	behaviour = frappe.db.sql(
+		"""
+		SELECT
+			SUM(CASE WHEN record_type = 'Positive' THEN 1 ELSE 0 END) AS positive,
+			SUM(CASE WHEN record_type = 'Negative' THEN 1 ELSE 0 END) AS negative,
+			SUM(points) AS net_points
+		FROM `tabK12 Behaviour Record`
+		WHERE student = %(student)s
+		""",
+		{"student": student},
+		as_dict=True,
+	)[0]
+
+	return {
+		"student": brief,
+		"kpi": {
+			"attendance_rate": _student_attendance_rate(student),
+			"average": grade_data.get("overall", 0.0),
+			"pending_assignments": _student_pending_assignments_count(student),
+			"outstanding_fees": fees["outstanding"],
+		},
+		"grade": grade_data.get("overall_grade"),
+		"subjects": grade_data.get("subjects", []),
+		"today_schedule": _schedule_for_student(student, today()),
+		"assignments": _assignments_for_student(student, limit=8),
+		"attendance": _attendance_breakdown(student),
+		"behaviour": {
+			"positive": int(behaviour.positive or 0),
+			"negative": int(behaviour.negative or 0),
+			"net_points": int(behaviour.net_points or 0),
+		},
+		"fees": {
+			"total": fees["total"],
+			"paid": fees["paid"],
+			"outstanding": fees["outstanding"],
+			"status": fees["status"],
+		},
+		"announcements": _recent_announcements(),
+	}
+
+
+def _attendance_breakdown(student: str) -> dict:
+	rows = frappe.db.sql(
+		"""
+		SELECT status, COUNT(*) AS count
+		FROM `tabStudent Attendance`
+		WHERE student = %(student)s AND docstatus < 2
+		GROUP BY status
+		""",
+		{"student": student},
+		as_dict=True,
+	)
+	counts = {r.status: r.count for r in rows}
+	total = sum(counts.values())
+	present = counts.get("Present", 0)
+	return {
+		"present": present,
+		"absent": counts.get("Absent", 0),
+		"leave": counts.get("Leave", 0),
+		"total": total,
+		"rate": round(flt(present) / flt(total) * 100, 1) if total else 0.0,
 	}

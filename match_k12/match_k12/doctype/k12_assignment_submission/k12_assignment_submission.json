@@ -18,6 +18,7 @@
   "submitted_on",
   "content",
   "attachment",
+  "files",
   "section_grading",
   "score",
   "maximum_score",
@@ -138,6 +139,12 @@
    "fieldname": "feedback",
    "fieldtype": "Small Text",
    "label": "Feedback"
+  },
+  {
+   "fieldname": "files",
+   "fieldtype": "Table",
+   "label": "المرفقات / Attachments",
+   "options": "K12 Attachment"
   }
  ],
  "index_web_pages_for_search": 1,

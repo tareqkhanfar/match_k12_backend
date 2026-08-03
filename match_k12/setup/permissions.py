@@ -79,6 +79,12 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"K12 Grade Scheme": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"K12 Grade Scheme Component": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"K12 Gradebook Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
+	# --- Assignments and attachments --------------------------------------
+	# Students upload work, so they need to write the child table and File.
+	"K12 Attachment": {
+		ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: WRITE, PARENT: READ,
+	},
+	"File": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: WRITE, PARENT: READ},
 	# Saving a Student makes Education create a linked User and Customer, so
 	# whoever manages students needs to be able to create those too.
 	"User": {ADMIN: WRITE, SECRETARY: WRITE},

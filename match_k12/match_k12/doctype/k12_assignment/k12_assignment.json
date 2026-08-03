@@ -24,7 +24,8 @@
   "status",
   "section_content",
   "description",
-  "attachment"
+  "attachment",
+  "files"
  ],
  "fields": [
   {
@@ -142,6 +143,12 @@
    "fieldname": "attachment",
    "fieldtype": "Attach",
    "label": "Attachment"
+  },
+  {
+   "fieldname": "files",
+   "fieldtype": "Table",
+   "label": "المرفقات / Attachments",
+   "options": "K12 Attachment"
   }
  ],
  "index_web_pages_for_search": 1,

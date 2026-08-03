@@ -23,6 +23,8 @@ TYPE_AR = {"Announcement": "إعلان", "Event": "حدث", "Alert": "تنبيه
 # Which announcement audiences each persona should receive.
 AUDIENCE_FOR_PERSONA = {
 	ROLE_ADMIN: ["All", "Students", "Teachers", "Parents", "Program", "Student Group"],
+	# The secretary runs the front office, so they see everything the admin does.
+	ROLE_SECRETARY: ["All", "Students", "Teachers", "Parents", "Program", "Student Group"],
 	ROLE_TEACHER: ["All", "Teachers"],
 	ROLE_STUDENT: ["All", "Students"],
 	ROLE_PARENT: ["All", "Parents"],
@@ -79,6 +81,10 @@ def list_announcements(limit: int = 25, persona: str = None):
 					rows.append(t)
 			rows.sort(key=lambda r: r.get("posted_on") or "", reverse=True)
 			rows = rows[:limit]
+
+	# An announcement past its expiry date drops out of the feed.
+	stamp = today()
+	rows = [r for r in rows if not r.expires_on or str(r.expires_on) >= stamp]
 
 	return [
 		{
@@ -198,6 +204,20 @@ def delete_announcement(announcement: str, persona: str = None):
 
 
 # --- Messages --------------------------------------------------------------
+
+
+def _as_html(text: str) -> str:
+	"""Message bodies render as HTML, so plain text must be converted.
+
+	A body that already carries markup is left alone; anything else is escaped
+	and its line breaks preserved, so a chat message can never inject markup.
+	"""
+	if not text:
+		return ""
+	if "<" in text and ">" in text:
+		return text
+	escaped = frappe.utils.escape_html(text.strip())
+	return "".join(f"<p>{line}</p>" for line in escaped.split("\n") if line.strip()) or ""
 
 
 @frappe.whitelist()
@@ -340,7 +360,7 @@ def send_message(
 			"sender": frappe.session.user,
 			"recipient": recipient,
 			"subject": subject,
-			"body": body,
+			"body": _as_html(body),
 			"thread": thread,
 			"about_student": about_student,
 			"sent_on": now_datetime(),
@@ -362,30 +382,42 @@ def send_message(
 def contacts(persona: str = None):
 	"""Users the caller is allowed to message."""
 	scope = resolve_scope(persona)
-	out = []
+	out: list[dict] = []
+	seen: set[str] = set()
+
+	def add(user: str | None, name: str, role: str):
+		if not user or user in seen or user == frappe.session.user:
+			return
+		seen.add(user)
+		out.append({"user": user, "name": name or user, "role": role})
 
 	if persona in (ROLE_STUDENT, ROLE_PARENT):
-		# Reach the teachers of the student's groups, plus school admins.
+		# The teachers who actually teach this student's groups.
 		groups = _groups_for_students(scope.get("students") or [])
-		instructors = (
-			frappe.get_all(
+		if groups:
+			for i in frappe.get_all(
 				"Student Group Instructor",
 				filters={"parent": ["in", groups], "parenttype": "Student Group"},
 				fields=["instructor", "instructor_name"],
-			)
-			if groups
-			else []
-		)
-		seen = set()
-		for i in instructors:
-			if i.instructor in seen:
-				continue
-			seen.add(i.instructor)
-			user = _instructor_user(i.instructor)
-			if user:
-				out.append({"user": user, "name": i.instructor_name, "role": "معلم"})
+			):
+				add(_instructor_user(i.instructor), i.instructor_name, "معلم")
+
+			# Instructors named on the timetable but not on the group roster.
+			for cs in frappe.get_all(
+				"Course Schedule",
+				filters={"student_group": ["in", groups]},
+				fields=["instructor", "instructor_name"],
+				limit=200,
+			):
+				if cs.instructor:
+					add(_instructor_user(cs.instructor), cs.instructor_name, "معلم")
+
+		# Everyone can always reach the front office.
+		for user, name in _back_office_users():
+			add(user, name, "إدارة المدرسة")
+
 	else:
-		# Teachers and admins can message guardians of their students.
+		# Staff can reach the guardians of the students they are responsible for.
 		if persona == ROLE_TEACHER:
 			from match_k12.api.students import _students_of_instructor
 
@@ -393,29 +425,79 @@ def contacts(persona: str = None):
 		else:
 			students = frappe.get_all("Student", filters={"enabled": 1}, pluck="name", limit=500)
 
-		guardians = (
-			frappe.get_all(
+		if students:
+			for g in frappe.get_all(
 				"Student Guardian",
 				filters={"parent": ["in", students], "parenttype": "Student"},
 				fields=["guardian", "guardian_name"],
-			)
-			if students
-			else []
-		)
-		seen = set()
-		for g in guardians:
-			if g.guardian in seen:
-				continue
-			seen.add(g.guardian)
-			user = frappe.db.get_value("Guardian", g.guardian, "user")
-			if user:
-				out.append({"user": user, "name": g.guardian_name, "role": "ولي أمر"})
+			):
+				add(
+					frappe.db.get_value("Guardian", g.guardian, "user"),
+					g.guardian_name,
+					"ولي أمر",
+				)
 
+			# ...and the students themselves, where an account exists.
+			for st in frappe.get_all(
+				"Student",
+				filters={"name": ["in", students], "enabled": 1},
+				fields=["student_name", "user"],
+				limit=500,
+			):
+				add(st.user, st.student_name, "طالب")
+
+		# Staff can always reach each other.
+		for user, name in _back_office_users():
+			add(user, name, "إدارة المدرسة")
+		for i in frappe.get_all(
+			"Instructor", fields=["name", "instructor_name"], limit=200
+		):
+			add(_instructor_user(i.name), i.instructor_name, "معلم")
+
+	out.sort(key=lambda c: (c["role"], c["name"]))
 	return out
 
 
+def _back_office_users() -> list[tuple[str, str]]:
+	"""Enabled admin and secretary accounts."""
+	from match_k12.api.utils import FRAPPE_ROLE_BY_PERSONA
+
+	roles = [FRAPPE_ROLE_BY_PERSONA[ROLE_ADMIN], FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY]]
+	users = frappe.get_all(
+		"Has Role",
+		filters={"role": ["in", roles], "parenttype": "User"},
+		pluck="parent",
+	)
+	if not users:
+		return []
+	return [
+		(u.name, u.full_name)
+		for u in frappe.get_all(
+			"User",
+			filters={"name": ["in", list(set(users))], "enabled": 1},
+			fields=["name", "full_name"],
+		)
+	]
+
+
 def _instructor_user(instructor: str) -> str | None:
-	employee = frappe.db.get_value("Instructor", instructor, "employee")
+	"""The User behind an Instructor.
+
+	Mirrors get_linked_instructor: prefer the Employee link, then fall back to
+	matching on full name, since a school running without HR has no Employee
+	records at all.
+	"""
+	employee, instructor_name = frappe.db.get_value(
+		"Instructor", instructor, ["employee", "instructor_name"]
+	) or (None, None)
+
 	if employee:
-		return frappe.db.get_value("Employee", employee, "user_id")
+		user = frappe.db.get_value("Employee", employee, "user_id")
+		if user:
+			return user
+
+	if instructor_name:
+		return frappe.db.get_value(
+			"User", {"full_name": instructor_name, "enabled": 1}, "name"
+		)
 	return None
