@@ -547,6 +547,11 @@ def save_subject(payload: str | dict, persona: str = None):
 		doc.save()
 		msg_en, msg_ar = "Subject updated.", "تم تحديث المادة."
 	else:
+		if frappe.db.exists("Course", {"course_name": fields["course_name"]}):
+			return fail(
+				message_en="A subject with this name already exists.",
+				message_ar="توجد مادة بهذا الاسم بالفعل.",
+			)
 		doc = frappe.get_doc({"doctype": "Course", **fields})
 		doc.insert()
 		msg_en, msg_ar = "Subject added.", "تمت إضافة المادة."
@@ -615,6 +620,11 @@ def save_teacher(payload: str | dict, persona: str = None):
 	}
 	fields.setdefault("status", "Active")
 
+	# `department` is a Link to Department, not free text — drop an unknown
+	# value rather than failing the whole save on it.
+	if fields.get("department") and not frappe.db.exists("Department", fields["department"]):
+		fields.pop("department")
+
 	instructor_id = data.get("id") or data.get("name")
 	if instructor_id:
 		doc = frappe.get_doc("Instructor", instructor_id)
@@ -622,6 +632,12 @@ def save_teacher(payload: str | dict, persona: str = None):
 		doc.save()
 		msg_en, msg_ar = "Teacher updated.", "تم تحديث المعلم."
 	else:
+		# Instructor is named after the person, so a repeat name collides.
+		if frappe.db.exists("Instructor", {"instructor_name": fields["instructor_name"]}):
+			return fail(
+				message_en="A teacher with this name already exists.",
+				message_ar="يوجد معلم بهذا الاسم بالفعل.",
+			)
 		doc = frappe.get_doc({"doctype": "Instructor", **fields})
 		doc.insert()
 		msg_en, msg_ar = "Teacher added.", "تمت إضافة المعلم."
@@ -828,3 +844,10 @@ def exam_roster(assessment_plan: str, persona: str = None):
 		"entered": len(results),
 		"total": len(roster),
 	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def list_departments(persona: str = None):
+	"""Departments an instructor can belong to."""
+	return frappe.get_all("Department", fields=["name"], order_by="name", limit=200)
