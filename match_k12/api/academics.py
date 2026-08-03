@@ -432,9 +432,20 @@ def report_card(student: str, academic_year: str = None, academic_term: str = No
 def save_class(payload: str | dict, persona: str = None):
 	"""Create or update a Student Group (a class section)."""
 	data = parse_json_arg(payload) or {}
-	name = data.get("student_group_name")
-	if not name and not (data.get("id") or data.get("name")):
-		return fail(message_en="Group name is required.", message_ar="اسم الشعبة مطلوب.")
+	group_id = data.get("id") or data.get("name")
+	if not group_id:
+		# Student Group needs both of these; report it in Arabic rather than
+		# letting Frappe raise its own English validation error.
+		missing = []
+		if not data.get("student_group_name"):
+			missing.append("اسم الشعبة")
+		if not data.get("program"):
+			missing.append("الصف")
+		if missing:
+			return fail(
+				message_en="Group name and program are required.",
+				message_ar="الحقول التالية مطلوبة: " + "، ".join(missing) + ".",
+			)
 
 	fields = {
 		k: data.get(k)
@@ -447,7 +458,6 @@ def save_class(payload: str | dict, persona: str = None):
 	fields.setdefault("group_based_on", "Batch")
 	fields.setdefault("academic_year", get_default_academic_year())
 
-	group_id = data.get("id") or data.get("name")
 	if group_id:
 		doc = frappe.get_doc("Student Group", group_id)
 		doc.update(fields)

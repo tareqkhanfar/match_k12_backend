@@ -9,7 +9,19 @@ from match_k12.api.utils import FRAPPE_ROLE_BY_PERSONA
 def after_install():
 	create_k12_roles()
 	patch_fees_income_account_fetch()
+	apply_doctype_permissions()
 	frappe.db.commit()
+
+
+def apply_doctype_permissions():
+	"""Grant the K12 roles their document permissions.
+
+	Without this every write fails with a PermissionError, because Frappe
+	checks doctype permissions independently of our API layer.
+	"""
+	from match_k12.setup.permissions import apply_permissions
+
+	apply_permissions()
 
 
 def patch_fees_income_account_fetch():

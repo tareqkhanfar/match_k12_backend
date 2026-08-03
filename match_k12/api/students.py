@@ -3,6 +3,8 @@
 
 """Student directory and profile endpoints."""
 
+from contextlib import contextmanager
+
 import frappe
 from frappe import _
 from frappe.utils import cint, flt
@@ -490,7 +492,8 @@ def save_student(payload: str | dict, persona: str = None):
 	if student_id:
 		doc = frappe.get_doc("Student", student_id)
 		doc.update(fields)
-		doc.save()
+		with _student_user_creation_guard(doc):
+			doc.save()
 		message_en, message_ar = "Student updated.", "تم تحديث بيانات الطالب."
 	else:
 		if not fields.get("first_name"):
@@ -498,10 +501,18 @@ def save_student(payload: str | dict, persona: str = None):
 				message_en="First name is required.",
 				message_ar="الاسم الأول مطلوب.",
 			)
+		# Some sites mark the student email mandatory on the Student doctype.
+		# Check up front so the user gets a clear message instead of a 500.
+		if _email_is_mandatory() and not fields.get("student_email_id"):
+			return fail(
+				message_en="Student email is required on this site.",
+				message_ar="البريد الإلكتروني للطالب مطلوب.",
+			)
 		fields["doctype"] = "Student"
 		fields.setdefault("enabled", 1)
 		doc = frappe.get_doc(fields)
-		doc.insert()
+		with _student_user_creation_guard(doc):
+			doc.insert()
 		message_en, message_ar = "Student created.", "تم إنشاء الطالب."
 
 	frappe.db.commit()
@@ -528,3 +539,39 @@ def filter_options(persona: str = None):
 			{"value": "late", "label": "متأخر"},
 		],
 	}
+
+
+@contextmanager
+def _student_user_creation_guard(doc):
+	"""Stop Education creating a portal User when the student has no email.
+
+	Student.validate_user() checks `frappe.db.exists("User", self.student_email_id)`.
+	When the email is empty that check is falsy, so it goes on to insert a User
+	with a null name and fails with:
+
+	    AttributeError: 'NoneType' object has no attribute 'strip'
+
+	Students without an email address are perfectly normal in a school, so we
+	flip Education's own `user_creation_skip` setting for the duration of the
+	save and restore it afterwards.
+	"""
+	needs_guard = not (doc.get("student_email_id") or "").strip()
+	previous = None
+
+	if needs_guard:
+		previous = frappe.db.get_single_value("Education Settings", "user_creation_skip")
+		frappe.db.set_single_value("Education Settings", "user_creation_skip", 1)
+
+	try:
+		yield
+	finally:
+		if needs_guard:
+			frappe.db.set_single_value(
+				"Education Settings", "user_creation_skip", previous or 0
+			)
+
+
+def _email_is_mandatory() -> bool:
+	"""Whether this site requires student_email_id on Student."""
+	field = frappe.get_meta("Student").get_field("student_email_id")
+	return bool(field and field.reqd)
