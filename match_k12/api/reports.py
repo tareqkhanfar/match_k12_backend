@@ -7,16 +7,18 @@ import frappe
 from frappe.utils import add_months, flt, getdate, today
 
 from match_k12.api.utils import (
+	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_TEACHER,
 	get_default_academic_year,
 	k12_endpoint,
 	resolve_scope,
+	ROLE_SECRETARY,
 )
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def overview(persona: str = None):
 	"""Everything the reports screen needs in one round trip."""
 	groups = _scope_groups(persona, resolve_scope(persona))
@@ -26,14 +28,14 @@ def overview(persona: str = None):
 	return {
 		"academic": _academic(groups),
 		"attendance": _attendance(groups),
-		"financial": _financial() if persona == ROLE_ADMIN else None,
+		"financial": _financial() if persona in BACK_OFFICE else None,
 		"academic_year": get_default_academic_year(),
 	}
 
 
 def _scope_groups(persona: str, scope: dict) -> list[str] | None:
 	"""None means unrestricted; a list restricts to those student groups."""
-	if persona == ROLE_ADMIN:
+	if persona in BACK_OFFICE:
 		return None
 	instructor = scope.get("instructor")
 	if not instructor:
@@ -49,7 +51,7 @@ def _scope_groups(persona: str, scope: dict) -> list[str] | None:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def academic_report(persona: str = None):
 	"""Average score per course and per program."""
 	return _academic(_scope_groups(persona, resolve_scope(persona)))
@@ -133,7 +135,7 @@ def _academic(groups: list | None) -> dict:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def attendance_summary(persona: str = None, months: int = 6):
 	"""Monthly attendance rate plus the worst-attending groups."""
 	return _attendance(_scope_groups(persona, resolve_scope(persona)), months)
@@ -209,7 +211,7 @@ def _attendance(groups: list | None, months: int = 6) -> dict:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def financial_summary(persona: str = None, months: int = 6):
 	"""Collection trend, per-program totals and payment-status split."""
 	return _financial(months)

@@ -20,20 +20,33 @@ from frappe import _
 # app creates on install (see match_k12/setup/install.py).
 
 ROLE_ADMIN = "admin"
+ROLE_SECRETARY = "secretary"
 ROLE_TEACHER = "teacher"
 ROLE_STUDENT = "student"
 ROLE_PARENT = "parent"
 
 FRAPPE_ROLE_BY_PERSONA = {
 	ROLE_ADMIN: "K12 School Admin",
+	ROLE_SECRETARY: "K12 Secretary",
 	ROLE_TEACHER: "K12 Teacher",
 	ROLE_STUDENT: "K12 Student",
 	ROLE_PARENT: "K12 Parent",
 }
 
+PERSONA_LABELS_AR = {
+	ROLE_ADMIN: "مدير المدرسة",
+	ROLE_SECRETARY: "سكرتارية",
+	ROLE_TEACHER: "معلم",
+	ROLE_STUDENT: "طالب",
+	ROLE_PARENT: "ولي أمر",
+}
+
 # Highest privilege first — a user holding several roles resolves to the first
 # match, so an admin who is also a teacher is treated as an admin.
-PERSONA_PRIORITY = (ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+PERSONA_PRIORITY = (ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+
+# Personas that manage school-wide records rather than only their own scope.
+BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
 
 
 def ok(data: Any = None, message_en: str = "", message_ar: str = "") -> dict:
@@ -115,6 +128,94 @@ def k12_endpoint(*allowed_personas: str):
 		return wrapper
 
 	return decorator
+
+
+# --- List query helpers ----------------------------------------------------
+# Shared by every list endpoint so filtering, sorting and paging behave the
+# same way everywhere (and so the frontend table component can stay generic).
+
+
+def parse_json_arg(value, default=None):
+	"""Accept a value that may arrive as a JSON string over HTTP."""
+	if value is None or value == "":
+		return default
+	if isinstance(value, str):
+		try:
+			return frappe.parse_json(value)
+		except Exception:
+			return default
+	return value
+
+
+def build_conditions(
+	filters: dict | None,
+	allowed: dict[str, str],
+	params: dict,
+	alias: str = "",
+) -> list[str]:
+	"""Turn a {field: value} dict into safe SQL conditions.
+
+	`allowed` maps an incoming filter name to its column, which both whitelists
+	the field and prevents injection through column names. Values are always
+	bound as parameters.
+
+	A value may be a scalar (equality), or a [operator, operand] pair using one
+	of: like, in, between, >, <, >=, <=, !=.
+	"""
+	conditions: list[str] = []
+	filters = filters or {}
+	prefix = f"{alias}." if alias else ""
+
+	for key, raw in filters.items():
+		if key not in allowed or raw in (None, "", []):
+			continue
+		column = f"{prefix}{allowed[key]}"
+		token = f"flt_{len(params)}"
+
+		if isinstance(raw, (list, tuple)) and len(raw) == 2 and isinstance(raw[0], str):
+			operator, operand = raw[0].lower(), raw[1]
+			if operator == "like":
+				conditions.append(f"{column} LIKE %({token})s")
+				params[token] = f"%{operand}%"
+			elif operator == "in" and operand:
+				conditions.append(f"{column} IN %({token})s")
+				params[token] = list(operand)
+			elif operator == "between" and isinstance(operand, (list, tuple)) and len(operand) == 2:
+				lo, hi = f"{token}_lo", f"{token}_hi"
+				conditions.append(f"{column} BETWEEN %({lo})s AND %({hi})s")
+				params[lo], params[hi] = operand
+			elif operator in (">", "<", ">=", "<=", "!="):
+				conditions.append(f"{column} {operator} %({token})s")
+				params[token] = operand
+		else:
+			conditions.append(f"{column} = %({token})s")
+			params[token] = raw
+
+	return conditions
+
+
+def build_order_by(
+	sort_field: str | None,
+	sort_order: str | None,
+	allowed: dict[str, str],
+	default: str,
+	alias: str = "",
+) -> str:
+	"""Validate sorting against the same whitelist used for filtering."""
+	if not sort_field or sort_field not in allowed:
+		return default
+	direction = "DESC" if str(sort_order).lower() in ("desc", "descending") else "ASC"
+	prefix = f"{alias}." if alias else ""
+	return f"{prefix}{allowed[sort_field]} {direction}"
+
+
+def paginate(page, page_size, max_size: int = 200) -> tuple[int, int, int]:
+	"""Return (page, page_size, offset) with sane bounds."""
+	from frappe.utils import cint
+
+	page = max(cint(page) or 1, 1)
+	page_size = min(max(cint(page_size) or 20, 1), max_size)
+	return page, page_size, (page - 1) * page_size
 
 
 # --- Linked-record resolution ---------------------------------------------

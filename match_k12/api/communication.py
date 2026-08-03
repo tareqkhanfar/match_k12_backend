@@ -15,6 +15,7 @@ from match_k12.api.utils import (
 	fail,
 	k12_endpoint,
 	resolve_scope,
+	ROLE_SECRETARY,
 )
 
 TYPE_AR = {"Announcement": "إعلان", "Event": "حدث", "Alert": "تنبيه"}
@@ -29,7 +30,7 @@ AUDIENCE_FOR_PERSONA = {
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def list_announcements(limit: int = 25, persona: str = None):
 	"""Announcements targeted at the caller."""
 	limit = min(max(cint(limit) or 25, 1), 100)
@@ -140,7 +141,7 @@ def _programs_for_students(students: list[str]) -> list[str]:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def save_announcement(payload: str | dict, persona: str = None):
 	data = frappe.parse_json(payload) if isinstance(payload, str) else payload
 	if not data:
@@ -184,7 +185,7 @@ def save_announcement(payload: str | dict, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def delete_announcement(announcement: str, persona: str = None):
 	frappe.delete_doc("K12 Announcement", announcement)
 	frappe.db.commit()
@@ -200,7 +201,7 @@ def delete_announcement(announcement: str, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def inbox(limit: int = 50, persona: str = None):
 	"""Latest message per conversation involving the current user."""
 	user = frappe.session.user
@@ -268,7 +269,7 @@ def _persona_label(user: str) -> str:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def thread(thread: str, persona: str = None):
 	"""Full conversation; marks the caller's incoming messages as read."""
 	user = frappe.session.user
@@ -316,7 +317,7 @@ def thread(thread: str, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def send_message(
 	recipient: str,
 	body: str,
@@ -357,7 +358,7 @@ def send_message(
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def contacts(persona: str = None):
 	"""Users the caller is allowed to message."""
 	scope = resolve_scope(persona)

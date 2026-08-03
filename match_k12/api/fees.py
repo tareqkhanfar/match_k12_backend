@@ -14,6 +14,7 @@ from match_k12.api.utils import (
 	fail,
 	k12_endpoint,
 	resolve_scope,
+	ROLE_SECRETARY,
 )
 
 STATUS_AR = {"paid": "مدفوع", "partial": "جزئي", "late": "متأخر"}
@@ -29,7 +30,7 @@ def _status_of(total: float, outstanding: float) -> str:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_STUDENT, ROLE_PARENT)
 def list_fees(
 	student: str = None,
 	program: str = None,
@@ -148,7 +149,7 @@ def _summary(filters: dict) -> dict:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def collection_report(months: int = 6, persona: str = None):
 	"""Expected vs collected per month, for the finance chart."""
 	months = min(max(cint(months) or 6, 1), 24)
@@ -202,7 +203,7 @@ def _status_breakdown() -> list[dict]:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_STUDENT, ROLE_PARENT)
 def fee_detail(fees: str, persona: str = None):
 	"""One invoice with its component breakdown."""
 	scope = resolve_scope(persona)

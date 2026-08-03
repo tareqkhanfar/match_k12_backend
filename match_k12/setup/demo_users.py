@@ -15,6 +15,7 @@ DEMO_PASSWORD = "Match@12345"
 
 DEMO_USERS = [
 	{"email": "admin@match-edu.ps", "first_name": "مدير", "last_name": "المدرسة", "persona": "admin"},
+	{"email": "secretary@match-edu.ps", "first_name": "سكرتارية", "last_name": "المدرسة", "persona": "secretary"},
 	{"email": "teacher@match-edu.ps", "first_name": "معلم", "last_name": "تجريبي", "persona": "teacher"},
 	{"email": "student@match-edu.ps", "first_name": "طالب", "last_name": "تجريبي", "persona": "student"},
 	{"email": "parent@match-edu.ps", "first_name": "ولي", "last_name": "أمر", "persona": "parent"},

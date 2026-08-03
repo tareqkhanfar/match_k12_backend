@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import add_days, flt, getdate, today
 
 from match_k12.api.utils import (
+	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_STUDENT,
@@ -15,13 +16,14 @@ from match_k12.api.utils import (
 	fail,
 	k12_endpoint,
 	resolve_scope,
+	ROLE_SECRETARY,
 )
 
 STATUS_AR = {"Present": "حاضر", "Absent": "غائب", "Leave": "إجازة"}
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 	"""Roster for one group on one date, with any attendance already marked."""
 	date = date or today()
@@ -69,7 +71,7 @@ def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 
 def _assert_group_access(student_group: str, persona: str):
 	"""A teacher may only touch groups they are assigned to."""
-	if persona == ROLE_ADMIN:
+	if persona in BACK_OFFICE:
 		return
 	scope = resolve_scope(persona)
 	instructor = scope.get("instructor")
@@ -84,7 +86,7 @@ def _assert_group_access(student_group: str, persona: str):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def mark_attendance(student_group: str, date: str, entries: str | list, persona: str = None):
 	"""Save the attendance grid. `entries` is [{student, status}, ...]."""
 	_assert_group_access(student_group, persona)
@@ -148,7 +150,7 @@ def mark_attendance(student_group: str, date: str, entries: str | list, persona:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def attendance_report(
 	student: str = None,
 	student_group: str = None,
@@ -179,7 +181,7 @@ def attendance_report(
 		conditions.append("sa.student_group IN %(groups)s")
 		params["groups"] = groups
 
-	if student and persona in (ROLE_ADMIN, ROLE_TEACHER):
+	if student and persona in (*BACK_OFFICE, ROLE_TEACHER):
 		conditions.append("sa.student = %(student)s")
 		params["student"] = student
 	if student_group:
@@ -236,7 +238,7 @@ def attendance_report(
 			for r in daily
 		],
 		"chronic_absentees": _chronic_absentees(where, params)
-		if persona in (ROLE_ADMIN, ROLE_TEACHER)
+		if persona in (*BACK_OFFICE, ROLE_TEACHER)
 		else [],
 	}
 
@@ -286,10 +288,10 @@ def _chronic_absentees(where: str, params: dict, threshold: float = 80.0) -> lis
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def my_groups(persona: str = None):
 	"""Groups the caller can mark attendance for."""
-	if persona == ROLE_ADMIN:
+	if persona in BACK_OFFICE:
 		groups = frappe.get_all(
 			"Student Group",
 			filters={"disabled": 0},

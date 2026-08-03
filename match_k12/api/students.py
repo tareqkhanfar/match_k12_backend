@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, flt
 
 from match_k12.api.utils import (
+	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_STUDENT,
@@ -16,11 +17,12 @@ from match_k12.api.utils import (
 	get_default_academic_year,
 	k12_endpoint,
 	resolve_scope,
+	ROLE_SECRETARY,
 )
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
 def list_students(
 	search: str = None,
 	program: str = None,
@@ -107,7 +109,7 @@ def list_students(
 
 def _allowed_student_ids(persona: str, scope: dict) -> list[str] | None:
 	"""Return None for unrestricted access, else the visible student ids."""
-	if persona == ROLE_ADMIN:
+	if persona in BACK_OFFICE:
 		return None
 	if persona == ROLE_TEACHER:
 		return _students_of_instructor(scope.get("instructor"))
@@ -257,7 +259,7 @@ def _fee_totals(student: str) -> dict:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
 def get_student(student: str, persona: str = None):
 	"""Full student profile: personal, guardians, academics, attendance, fees."""
 	scope = resolve_scope(persona)
@@ -462,7 +464,7 @@ def _groups_of_student(student: str) -> list[dict]:
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def save_student(payload: str | dict, persona: str = None):
 	"""Create or update a student record (admin only)."""
 	data = frappe.parse_json(payload) if isinstance(payload, str) else payload
@@ -512,7 +514,7 @@ def save_student(payload: str | dict, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_TEACHER)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def filter_options(persona: str = None):
 	"""Values for the directory's grade/section dropdowns."""
 	programs = frappe.get_all("Program", fields=["name", "program_name"], order_by="name")
