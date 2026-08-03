@@ -7,6 +7,7 @@ import frappe
 from frappe.utils import add_months, flt, getdate, today
 
 from match_k12.api.utils import (
+	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_STUDENT,
@@ -38,7 +39,8 @@ ARABIC_MONTHS = {
 def summary(persona: str = None):
 	"""Return the dashboard payload for whichever persona is signed in."""
 	scope = resolve_scope(persona)
-	if persona == ROLE_ADMIN:
+	# The secretary sees the same school-wide view as the admin.
+	if persona in BACK_OFFICE:
 		return _admin_dashboard()
 	if persona == ROLE_TEACHER:
 		return _teacher_dashboard(scope)
