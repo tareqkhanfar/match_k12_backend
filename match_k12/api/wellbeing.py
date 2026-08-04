@@ -406,3 +406,96 @@ def behaviour_summary(student: str, persona: str = None):
 			{"category": r.category, "count": r.count, "points": cint(r.points)} for r in by_category
 		],
 	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def list_health_records(
+	filters: str | dict = None,
+	search: str = None,
+	page: int = 1,
+	page_size: int = 20,
+	sort_by: str = None,
+	sort_order: str = None,
+	persona: str = None,
+):
+	"""School-wide health register — one row per student with a record."""
+	parsed = parse_json_arg(filters, {}) or {}
+	conditions = {}
+
+	allowed = _visible_students(persona)
+	if allowed is not None:
+		if not allowed:
+			return {"items": [], "total": 0, "page": 1, "page_size": cint(page_size) or 20}
+		conditions["student"] = ["in", allowed]
+
+	for field in ("blood_group", "student"):
+		if parsed.get(field):
+			conditions[field] = parsed[field]
+	if parsed.get("has_conditions"):
+		conditions["chronic_conditions"] = ["!=", ""]
+
+	if search:
+		matches = frappe.get_all(
+			"Student",
+			filters={"student_name": ["like", f"%{search}%"]},
+			pluck="name",
+			limit=200,
+		)
+		if not matches:
+			return {"items": [], "total": 0, "page": 1, "page_size": cint(page_size) or 20}
+		existing = conditions.get("student")
+		if existing and existing[0] == "in":
+			matches = [m for m in matches if m in existing[1]]
+		conditions["student"] = ["in", matches]
+
+	total = frappe.db.count("K12 Health Record", conditions)
+	page, page_size, offset = paginate(page, page_size)
+	rows = frappe.get_all(
+		"K12 Health Record",
+		filters=conditions,
+		fields=[
+			"name", "student", "student_name", "blood_group", "chronic_conditions",
+			"allergies", "medications", "emergency_contact_name", "emergency_contact_phone",
+			"modified",
+		],
+		order_by=build_order_by(
+			sort_by,
+			sort_order,
+			allowed={"student": "student_name", "updated": "modified"},
+			default="student_name asc",
+		),
+		start=offset,
+		page_length=page_size,
+	)
+
+	visits = {}
+	if rows:
+		for v in frappe.get_all(
+			"K12 Health Visit",
+			filters={"student": ["in", [r.student for r in rows]]},
+			fields=["student"],
+		):
+			visits[v.student] = visits.get(v.student, 0) + 1
+
+	return {
+		"items": [
+			{
+				"id": r.name,
+				"student": r.student,
+				"student_name": r.student_name,
+				"blood_group": r.blood_group,
+				"chronic_conditions": r.chronic_conditions,
+				"allergies": r.allergies,
+				"medications": r.medications,
+				"emergency_contact": r.emergency_contact_name,
+				"emergency_phone": r.emergency_contact_phone,
+				"visits": visits.get(r.student, 0),
+				"updated": str(r.modified or "")[:10],
+			}
+			for r in rows
+		],
+		"total": total,
+		"page": page,
+		"page_size": page_size,
+	}

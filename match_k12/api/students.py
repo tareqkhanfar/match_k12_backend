@@ -15,9 +15,11 @@ from match_k12.api.utils import (
 	ROLE_PARENT,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
+	build_order_by,
 	fail,
 	get_default_academic_year,
 	k12_endpoint,
+	paginate,
 	resolve_scope,
 	ROLE_SECRETARY,
 )
@@ -575,3 +577,200 @@ def _email_is_mandatory() -> bool:
 	"""Whether this site requires student_email_id on Student."""
 	field = frappe.get_meta("Student").get_field("student_email_id")
 	return bool(field and field.reqd)
+
+
+# --- Guardians -------------------------------------------------------------
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def list_guardians(
+	search: str = None,
+	page: int = 1,
+	page_size: int = 20,
+	sort_by: str = None,
+	sort_order: str = None,
+	persona: str = None,
+):
+	"""Guardians with the children linked to each."""
+	filters = {}
+	if search:
+		filters["guardian_name"] = ["like", f"%{search}%"]
+
+	total = frappe.db.count("Guardian", filters)
+	page, page_size, offset = paginate(page, page_size)
+	rows = frappe.get_all(
+		"Guardian",
+		filters=filters,
+		fields=[
+			"name", "guardian_name", "email_address", "mobile_number",
+			"alternate_number", "occupation", "designation", "user", "image",
+		],
+		order_by=build_order_by(
+			sort_by,
+			sort_order,
+			allowed={"name": "guardian_name", "created": "creation"},
+			default="guardian_name asc",
+		),
+		start=offset,
+		page_length=page_size,
+	)
+
+	# One query for every link, rather than one per guardian.
+	children: dict[str, list] = {}
+	if rows:
+		for link in frappe.get_all(
+			"Student Guardian",
+			filters={"guardian": ["in", [r.name for r in rows]], "parenttype": "Student"},
+			fields=["guardian", "parent", "relation"],
+		):
+			name = frappe.db.get_value("Student", link.parent, "student_name")
+			children.setdefault(link.guardian, []).append(
+				{"id": link.parent, "name": name or link.parent, "relation": link.relation}
+			)
+
+	return {
+		"items": [
+			{
+				"id": r.name,
+				"name": r.guardian_name,
+				"email": r.email_address,
+				"phone": r.mobile_number,
+				"alternate_phone": r.alternate_number,
+				"occupation": r.occupation,
+				"designation": r.designation,
+				"user": r.user,
+				"image": r.image,
+				"children": children.get(r.name, []),
+				"children_count": len(children.get(r.name, [])),
+			}
+			for r in rows
+		],
+		"total": total,
+		"page": page,
+		"page_size": page_size,
+	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def save_guardian(payload: str | dict, persona: str = None):
+	"""Create or update a guardian."""
+	data = frappe.parse_json(payload) if isinstance(payload, str) else payload
+	if not data:
+		return fail(message_en="No data supplied.", message_ar="لم يتم إرسال أي بيانات.")
+
+	fields = {
+		"guardian_name": data.get("name") or data.get("guardian_name"),
+		"email_address": data.get("email"),
+		"mobile_number": data.get("phone"),
+		"alternate_number": data.get("alternate_phone"),
+		"occupation": data.get("occupation"),
+		"designation": data.get("designation"),
+	}
+	fields = {k: v for k, v in fields.items() if v is not None}
+
+	guardian_id = data.get("id")
+	if guardian_id:
+		doc = frappe.get_doc("Guardian", guardian_id)
+		doc.update(fields)
+		doc.save()
+		msg_en, msg_ar = "Guardian updated.", "تم تحديث ولي الأمر."
+	else:
+		if not fields.get("guardian_name"):
+			return fail(message_en="Name is required.", message_ar="الاسم مطلوب.")
+		if fields.get("email_address") and frappe.db.exists(
+			"Guardian", {"email_address": fields["email_address"]}
+		):
+			return fail(
+				message_en="A guardian with this email already exists.",
+				message_ar="يوجد ولي أمر بنفس البريد الإلكتروني.",
+			)
+		fields["doctype"] = "Guardian"
+		doc = frappe.get_doc(fields)
+		doc.insert()
+		msg_en, msg_ar = "Guardian created.", "تم إنشاء ولي الأمر."
+
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"id": doc.name, "name": doc.guardian_name},
+		"message_en": msg_en,
+		"message_ar": msg_ar,
+	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def delete_guardian(guardian: str, persona: str = None):
+	"""Remove a guardian, provided no student still points at them."""
+	linked = frappe.db.count(
+		"Student Guardian", {"guardian": guardian, "parenttype": "Student"}
+	)
+	if linked:
+		return fail(
+			message_en=f"This guardian is still linked to {linked} student(s).",
+			message_ar=f"ولي الأمر مرتبط بـ {linked} طالب/طلاب، يجب فك الارتباط أولاً.",
+		)
+	frappe.delete_doc("Guardian", guardian)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"id": guardian},
+		"message_en": "Guardian deleted.",
+		"message_ar": "تم حذف ولي الأمر.",
+	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def link_guardian(student: str, guardian: str, relation: str = None, persona: str = None):
+	"""Attach a guardian to a student."""
+	if not frappe.db.exists("Student", student):
+		return fail(message_en="Student not found.", message_ar="لم يتم العثور على الطالب.")
+	if not frappe.db.exists("Guardian", guardian):
+		return fail(message_en="Guardian not found.", message_ar="لم يتم العثور على ولي الأمر.")
+
+	doc = frappe.get_doc("Student", student)
+	if any(g.guardian == guardian for g in doc.guardians):
+		return fail(
+			message_en="This guardian is already linked to the student.",
+			message_ar="ولي الأمر مرتبط بالطالب بالفعل.",
+		)
+
+	doc.append("guardians", {"guardian": guardian, "relation": relation})
+	with _student_user_creation_guard(doc):
+		doc.save()
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"student": student, "guardian": guardian},
+		"message_en": "Guardian linked.",
+		"message_ar": "تم ربط ولي الأمر بالطالب.",
+	}
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def unlink_guardian(student: str, guardian: str, persona: str = None):
+	"""Detach a guardian from a student."""
+	doc = frappe.get_doc("Student", student)
+	remaining = [g for g in doc.guardians if g.guardian != guardian]
+	if len(remaining) == len(doc.guardians):
+		return fail(
+			message_en="This guardian is not linked to the student.",
+			message_ar="ولي الأمر غير مرتبط بهذا الطالب.",
+		)
+
+	doc.set("guardians", [])
+	for g in remaining:
+		doc.append("guardians", {"guardian": g.guardian, "relation": g.relation})
+	with _student_user_creation_guard(doc):
+		doc.save()
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"student": student, "guardian": guardian},
+		"message_en": "Guardian unlinked.",
+		"message_ar": "تم فك ارتباط ولي الأمر.",
+	}

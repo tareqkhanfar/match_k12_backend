@@ -70,6 +70,19 @@ def logout():
 	return ok(message_en="Signed out.", message_ar="تم تسجيل الخروج.")
 
 
+def _named_students(students: list[str]) -> list[dict]:
+	"""Ids paired with names, in the order the scope supplied them."""
+	if not students:
+		return []
+	names = {
+		r.name: r.student_name
+		for r in frappe.get_all(
+			"Student", filters={"name": ["in", students]}, fields=["name", "student_name"]
+		)
+	}
+	return [{"id": s, "name": names.get(s) or s} for s in students]
+
+
 @frappe.whitelist(allow_guest=True)
 def me():
 	"""Return the current session, or success=False when not signed in."""
@@ -144,6 +157,9 @@ def _session_payload() -> dict:
 			"instructor": scope["instructor"],
 			"guardian": scope["guardian"],
 			"students": scope["students"],
+			# Named children, so a parent's pickers can show real names instead
+			# of raw record ids.
+			"children": _named_students(scope["students"]),
 		},
 		"context": {
 			"academic_year": get_default_academic_year(),

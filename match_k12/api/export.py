@@ -45,6 +45,9 @@ DATASETS = {
 	"books": ("match_k12.api.resources", "list_books", "المكتبة"),
 	"loans": ("match_k12.api.resources", "list_loans", "إعارات الكتب"),
 	"transport": ("match_k12.api.resources", "list_transport_assignments", "النقل المدرسي"),
+	"guardians": ("match_k12.api.students", "list_guardians", "أولياء الأمور"),
+	"health": ("match_k12.api.wellbeing", "list_health_records", "السجل الصحي"),
+	"routes": ("match_k12.api.resources", "list_routes", "خطوط النقل"),
 }
 
 
