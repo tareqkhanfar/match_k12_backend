@@ -48,7 +48,6 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"Student Category": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ},
 	"Academic Year": {ADMIN: FULL, SECRETARY: REPORT, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"Academic Term": {ADMIN: FULL, SECRETARY: REPORT, TEACHER: READ, STUDENT: READ, PARENT: READ},
-	"Room": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ},
 	# --- Enrolment --------------------------------------------------------
 	"Program Enrollment": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"Program Enrollment Course": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ},
@@ -61,7 +60,10 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"Assessment Result": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	"Assessment Result Detail": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	"Assessment Criteria": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: WRITE},
-	"Assessment Group": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ},
+	# Teachers schedule exams for their own classes, which creates the
+	# Assessment Group behind the exam type on first use.
+	"Room": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ, STUDENT: READ, PARENT: READ},
+	"Assessment Group": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: WRITE},
 	"Grading Scale": {ADMIN: FULL, SECRETARY: READ, TEACHER: READ},
 	"Grading Scale Interval": {ADMIN: FULL, SECRETARY: READ, TEACHER: READ},
 	# --- Finance ----------------------------------------------------------
