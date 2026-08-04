@@ -93,6 +93,8 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"K12 Grade Scheme Component": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: READ, PARENT: READ},
 	"K12 Gradebook Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	# The teacher submits; only the back office reviews and publishes.
+	"K12 Teacher Observation": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE},
+	"K12 Observation Criterion": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE},
 	"K12 Activity": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: READ, PARENT: READ},
 	"K12 Activity Enrolment": {
 		ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: WRITE, PARENT: WRITE,
