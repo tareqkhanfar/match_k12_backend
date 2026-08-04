@@ -87,9 +87,13 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"Education Settings": {ADMIN: WRITE, SECRETARY: READ},
 	"Company": {ADMIN: WRITE, SECRETARY: READ, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	# --- Gradebook --------------------------------------------------------
-	"K12 Grade Scheme": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
-	"K12 Grade Scheme Component": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
+	"K12 Grade Scheme": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: READ, PARENT: READ},
+	"K12 Grade Scheme Component": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: READ, PARENT: READ},
 	"K12 Gradebook Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
+	# The teacher submits; only the back office reviews and publishes.
+	"K12 Term Submission": {
+		ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: READ, PARENT: READ,
+	},
 	# --- Communication and assignments ------------------------------------
 	# These doctypes ship permissions in their own JSON but were missing the
 	# secretary, so every back-office write against them was rejected.

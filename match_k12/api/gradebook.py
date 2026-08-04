@@ -110,12 +110,29 @@ def list_schemes(course: str = None, program: str = None, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def save_scheme(payload: str | dict, persona: str = None):
-	"""Create or update a weighting scheme."""
+	"""Create or update a weighting scheme.
+
+	A teacher may adjust the plan for a subject they teach — the weighting is
+	a teaching decision, and marks are never validated against it anyway.
+	They cannot touch a school-wide default.
+	"""
+	from match_k12.api.gradeflow import assert_teacher_owns_course
+
 	data = parse_json_arg(payload) or {}
 	if not data.get("scheme_name"):
 		return fail(message_en="Scheme name is required.", message_ar="اسم الخطة مطلوب.")
+
+	if persona == ROLE_TEACHER:
+		if not data.get("course"):
+			return fail(
+				message_en="Choose the subject this plan applies to.",
+				message_ar="اختر المادة التي تخصها هذه الخطة.",
+			)
+		assert_teacher_owns_course(persona, data["course"])
+		# A school-wide default is the administration's to set.
+		data["is_default"] = 0
 
 	components = data.get("components") or []
 	if not components:
@@ -160,8 +177,23 @@ def save_scheme(payload: str | dict, persona: str = None):
 
 
 @frappe.whitelist()
-@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def delete_scheme(scheme: str, persona: str = None):
+	from match_k12.api.gradeflow import assert_teacher_owns_course
+
+	doc = frappe.db.get_value(
+		"K12 Grade Scheme", scheme, ["course", "is_default"], as_dict=True
+	)
+	if not doc:
+		return fail(message_en="Scheme not found.", message_ar="لم يتم العثور على الخطة.")
+	if persona == ROLE_TEACHER:
+		if cint(doc.is_default):
+			return fail(
+				message_en="A school-wide default can only be removed by the administration.",
+				message_ar="الخطة الافتراضية للمدرسة تُحذف من الإدارة فقط.",
+			)
+		assert_teacher_owns_course(persona, doc.course)
+
 	frappe.delete_doc("K12 Grade Scheme", scheme)
 	frappe.db.commit()
 	return {
@@ -217,6 +249,14 @@ def get_entry_sheet(
 
 	Returns the scheme's components so the UI can offer them as tabs.
 	"""
+	from match_k12.api.gradeflow import (
+		STATUS_AR,
+		assert_teacher_owns_course,
+		submission_status,
+	)
+
+	assert_teacher_owns_course(persona, course)
+
 	group = frappe.db.get_value(
 		"Student Group", student_group, ["name", "program", "academic_year", "academic_term"], as_dict=True
 	)
@@ -323,6 +363,10 @@ def save_marks(payload: str | dict, persona: str = None):
 	if not marks:
 		return fail(message_en="No marks supplied.", message_ar="لم يتم إرسال أي درجات.")
 
+	from match_k12.api.gradeflow import assert_entry_allowed, assert_teacher_owns_course
+
+	assert_teacher_owns_course(persona, data["course"])
+
 	group = frappe.db.get_value(
 		"Student Group",
 		data["student_group"],
@@ -331,6 +375,9 @@ def save_marks(payload: str | dict, persona: str = None):
 	)
 	academic_year = data.get("academic_year") or (group.academic_year if group else None) or get_default_academic_year()
 	academic_term = data.get("academic_term") or (group.academic_term if group else None)
+
+	# Once the marks are with the administration the teacher may not edit them.
+	assert_entry_allowed(persona, data["student_group"], data["course"], academic_term)
 
 	component_type = data.get("component_type") or "Exam"
 	is_bonus = cint(data.get("is_bonus")) or (1 if component_type == "Bonus" else 0)
@@ -519,6 +566,15 @@ def term_grades(
 		order_by="course, entry_date",
 	)
 
+	from match_k12.api.gradeflow import courses_of_instructor, term_is_published
+
+	# A teacher sees only the subjects they teach — never a student's marks in
+	# someone else's subject.
+	own_courses = None
+	if persona == ROLE_TEACHER:
+		own_courses = courses_of_instructor(resolve_scope(persona).get("instructor"))
+		entries = [e for e in entries if e.course in own_courses]
+
 	by_course: dict[str, list] = {}
 	for e in entries:
 		by_course.setdefault(e.course, []).append(e)
@@ -559,17 +615,40 @@ def term_grades(
 		"Student", student, ["student_name", "image"], as_dict=True
 	) or {}
 
-	return {
+	# The term total belongs to the administration. A teacher only ever sees
+	# their own subject, so an average across subjects is meaningless to them
+	# and would leak other teachers' marks. Students and parents see it only
+	# once the administration has published the term.
+	# Publication is recorded per term, so fall back to the active term rather
+	# than treating "unspecified" as "not published".
+	published = term_is_published(student, academic_term or get_default_academic_term())
+	show_overall = persona in BACK_OFFICE or (
+		persona in (ROLE_STUDENT, ROLE_PARENT) and published
+	)
+
+	result = {
 		"student": student,
 		"student_name": student_doc.get("student_name"),
 		"image": student_doc.get("image"),
 		"academic_year": academic_year,
 		"academic_term": academic_term,
 		"subjects": subjects,
-		"overall": overall,
-		"overall_grade": grade_for(overall),
 		"subject_count": len(subjects),
+		"published": published,
+		"shows_overall": show_overall,
 	}
+	if show_overall:
+		result["overall"] = overall
+		result["overall_grade"] = grade_for(overall)
+	else:
+		result["overall"] = None
+		result["overall_grade"] = None
+		result["overall_hidden_reason"] = (
+			"teacher_scope"
+			if persona == ROLE_TEACHER
+			else "not_published"
+		)
+	return result
 
 
 @frappe.whitelist()
@@ -598,6 +677,10 @@ def academic_record(student: str, persona: str = None):
 			persona=persona,
 		)
 		data = term.get("data") if isinstance(term, dict) and "success" in term else term
+		# Skip a period the caller may not see a total for — a teacher's view
+		# has no overall, and an unpublished term withholds one.
+		if not data["subjects"]:
+			continue
 		record.append(
 			{
 				"academic_year": p.academic_year,
@@ -605,12 +688,15 @@ def academic_record(student: str, persona: str = None):
 				"subjects": data["subjects"],
 				"overall": data["overall"],
 				"overall_grade": data["overall_grade"],
+				"published": data.get("published", False),
+				"shows_overall": data.get("shows_overall", False),
 			}
 		)
 
-	cumulative = (
-		round(sum(r["overall"] for r in record) / len(record), 1) if record else 0.0
-	)
+	# The cumulative average is only meaningful over periods whose total the
+	# caller is allowed to see.
+	visible = [r["overall"] for r in record if r["shows_overall"] and r["overall"] is not None]
+	cumulative = round(sum(visible) / len(visible), 1) if visible else None
 
 	student_doc = frappe.db.get_value(
 		"Student", student, ["student_name", "image"], as_dict=True
@@ -622,7 +708,8 @@ def academic_record(student: str, persona: str = None):
 		"image": student_doc.get("image"),
 		"periods": record,
 		"cumulative": cumulative,
-		"cumulative_grade": grade_for(cumulative),
+		"cumulative_grade": grade_for(cumulative) if cumulative is not None else None,
+		"shows_cumulative": cumulative is not None,
 	}
 
 
@@ -741,6 +828,226 @@ def import_exam_results(assessment_plan: str, weight: float = None, persona: str
 			"marks": [
 				{"student": r.student, "student_name": r.student_name, "score": flt(r.total_score)}
 				for r in results
+			],
+		},
+		persona=persona,
+	)
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def importable_assignments(
+	student_group: str, course: str = None, academic_term: str = None, persona: str = None
+):
+	"""Graded assignments that can be carried into the term marks."""
+	from match_k12.api.gradeflow import assert_teacher_owns_course
+
+	if course:
+		assert_teacher_owns_course(persona, course)
+
+	filters = {"student_group": student_group}
+	if course:
+		filters["course"] = course
+
+	rows = frappe.get_all(
+		"K12 Assignment",
+		filters=filters,
+		fields=["name", "title", "course", "maximum_score", "due_date", "status"],
+		order_by="due_date desc",
+		limit=100,
+	)
+
+	roster = frappe.db.count(
+		"Student Group Student",
+		{"parent": student_group, "parenttype": "Student Group", "active": 1},
+	)
+
+	out = []
+	for r in rows:
+		if persona == ROLE_TEACHER:
+			from match_k12.api.gradeflow import teacher_may_see_course
+
+			if not teacher_may_see_course(persona, r.course):
+				continue
+		graded = frappe.db.count(
+			"K12 Assignment Submission",
+			{"assignment": r.name, "status": ["in", ["Graded", "Returned"]]},
+		)
+		# Whether this assignment has already been carried across.
+		imported = frappe.db.exists(
+			"K12 Gradebook Entry",
+			{
+				"student_group": student_group,
+				"course": r.course,
+				"component_name": _assignment_component_name(r.title),
+			},
+		)
+		out.append(
+			{
+				"id": r.name,
+				"title": r.title,
+				"course": r.course,
+				"max": flt(r.maximum_score),
+				"due": str(r.due_date or ""),
+				"status": r.status,
+				"graded": graded,
+				"total": roster,
+				"ready": graded > 0,
+				"imported": bool(imported),
+			}
+		)
+	return out
+
+
+def _assignment_component_name(title: str) -> str:
+	"""A stable component name, so re-importing updates rather than duplicates."""
+	return f"واجب: {title}"
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def import_assignment(
+	assignment: str,
+	weight: float = None,
+	component_name: str = None,
+	persona: str = None,
+):
+	"""Carry one assignment's marks into the term gradebook.
+
+	Ungraded students are skipped rather than scored zero — a missing mark is
+	not the same as a zero, and the teacher may still be marking.
+	"""
+	from match_k12.api.gradeflow import assert_teacher_owns_course
+
+	doc = frappe.db.get_value(
+		"K12 Assignment",
+		assignment,
+		["name", "title", "course", "student_group", "program", "maximum_score"],
+		as_dict=True,
+	)
+	if not doc:
+		return fail(message_en="Assignment not found.", message_ar="لم يتم العثور على الواجب.")
+
+	assert_teacher_owns_course(persona, doc.course)
+
+	results = frappe.get_all(
+		"K12 Assignment Submission",
+		filters={"assignment": assignment, "status": ["in", ["Graded", "Returned"]]},
+		fields=["student", "score"],
+	)
+	if not results:
+		return fail(
+			message_en="No graded submissions to carry across yet.",
+			message_ar="لا توجد تسليمات مُصححة لترحيلها بعد.",
+		)
+
+	group = frappe.db.get_value(
+		"Student Group",
+		doc.student_group,
+		["academic_year", "academic_term"],
+		as_dict=True,
+	)
+
+	return save_marks(
+		payload={
+			"student_group": doc.student_group,
+			"course": doc.course,
+			"academic_year": group.academic_year if group else None,
+			"academic_term": group.academic_term if group else None,
+			"component_name": component_name or _assignment_component_name(doc.title),
+			"component_type": "Homework",
+			"max_score": flt(doc.maximum_score) or 100,
+			"weight": flt(weight),
+			"marks": [
+				{"student": r.student, "score": flt(r.score)}
+				for r in results
+				if r.score is not None
+			],
+		},
+		persona=persona,
+	)
+
+
+@frappe.whitelist()
+@k12_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def import_assignments_combined(
+	student_group: str,
+	course: str,
+	assignments: str | list,
+	component_name: str = None,
+	weight: float = None,
+	persona: str = None,
+):
+	"""Carry several assignments across as a single averaged component.
+
+	Schools usually want one "الواجبات" line in the term marks rather than one
+	row per assignment, so each student's assignments are averaged as a
+	percentage first.
+	"""
+	from match_k12.api.gradeflow import assert_teacher_owns_course
+
+	assert_teacher_owns_course(persona, course)
+
+	names = parse_json_arg(assignments, []) or []
+	if isinstance(names, str):
+		names = [names]
+	if not names:
+		return fail(
+			message_en="Choose at least one assignment.",
+			message_ar="اختر واجباً واحداً على الأقل.",
+		)
+
+	maxima = {
+		r.name: flt(r.maximum_score) or 100
+		for r in frappe.get_all(
+			"K12 Assignment",
+			filters={"name": ["in", names], "student_group": student_group, "course": course},
+			fields=["name", "maximum_score"],
+		)
+	}
+	if not maxima:
+		return fail(
+			message_en="Those assignments do not belong to this class and subject.",
+			message_ar="الواجبات المختارة لا تخص هذه الشعبة والمادة.",
+		)
+
+	ratios: dict[str, list[float]] = {}
+	for r in frappe.get_all(
+		"K12 Assignment Submission",
+		filters={
+			"assignment": ["in", list(maxima)],
+			"status": ["in", ["Graded", "Returned"]],
+		},
+		fields=["student", "assignment", "score"],
+	):
+		if r.score is None:
+			continue
+		top = maxima.get(r.assignment) or 100
+		ratios.setdefault(r.student, []).append(flt(r.score) / top * 100)
+
+	if not ratios:
+		return fail(
+			message_en="No graded submissions to carry across yet.",
+			message_ar="لا توجد تسليمات مُصححة لترحيلها بعد.",
+		)
+
+	group = frappe.db.get_value(
+		"Student Group", student_group, ["academic_year", "academic_term"], as_dict=True
+	)
+
+	return save_marks(
+		payload={
+			"student_group": student_group,
+			"course": course,
+			"academic_year": group.academic_year if group else None,
+			"academic_term": group.academic_term if group else None,
+			"component_name": component_name or "الواجبات",
+			"component_type": "Homework",
+			"max_score": 100,
+			"weight": flt(weight),
+			"marks": [
+				{"student": student, "score": round(sum(vals) / len(vals), 1)}
+				for student, vals in ratios.items()
 			],
 		},
 		persona=persona,

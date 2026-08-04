@@ -315,7 +315,7 @@ def export_report_card(student: str, academic_term: str = None, persona: str = N
 	"""A printable report card for one student."""
 	from match_k12.api.gradebook import term_grades
 
-	result = term_grades(student=student, academic_term=academic_term)
+	result = term_grades(student=student, academic_term=academic_term, persona=persona)
 	data = result.get("data") if isinstance(result, dict) and "success" in result else result
 
 	# Fall back to the older Assessment Result table for schools that still
@@ -330,6 +330,14 @@ def export_report_card(student: str, academic_term: str = None, persona: str = N
 		return fail(
 			message_en="No results recorded for this student.",
 			message_ar="لا توجد نتائج مسجّلة لهذا الطالب.",
+		)
+
+	# A teacher has no school-wide average, and an unpublished term withholds
+	# one. Printing flt(None) would put a false 0% on the card.
+	if data.get("shows_overall") is False:
+		return fail(
+			message_en="The term average is not available to you yet.",
+			message_ar="المعدل الفصلي غير متاح — بانتظار اعتماد الإدارة ونشر النتائج.",
 		)
 
 	html = _render_report_card_html(data)
