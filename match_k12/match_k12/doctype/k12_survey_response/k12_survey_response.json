@@ -1,0 +1,27 @@
+{
+ "actions": [], "allow_rename": 1, "autoname": "naming_series:",
+ "creation": "2026-08-05 00:00:00.000000", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "survey", "survey_title", "column_break_main",
+  "respondent", "respondent_role", "submitted_on",
+  "section_answers", "answers"
+ ],
+ "fields": [
+  {"default": "K12-SRP-.YYYY.-", "fieldname": "naming_series", "fieldtype": "Select", "label": "Naming Series", "options": "K12-SRP-.YYYY.-", "reqd": 1, "set_only_once": 1},
+  {"fieldname": "survey", "fieldtype": "Link", "in_list_view": 1, "label": "Survey", "options": "K12 Survey", "reqd": 1},
+  {"fetch_from": "survey.title", "fieldname": "survey_title", "fieldtype": "Data", "label": "Survey Title", "read_only": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "respondent", "fieldtype": "Link", "label": "Respondent", "options": "User"},
+  {"fieldname": "respondent_role", "fieldtype": "Data", "in_list_view": 1, "label": "Role"},
+  {"fieldname": "submitted_on", "fieldtype": "Datetime", "in_list_view": 1, "label": "Submitted", "read_only": 1},
+  {"fieldname": "section_answers", "fieldtype": "Section Break", "label": "Answers"},
+  {"fieldname": "answers", "fieldtype": "Table", "label": "Answers", "options": "K12 Survey Answer"}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match K12", "name": "K12 Survey Response",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "submitted_on", "sort_order": "DESC", "states": [], "track_changes": 1
+}
