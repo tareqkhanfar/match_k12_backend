@@ -1,0 +1,17 @@
+{
+ "actions": [], "allow_rename": 1, "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType", "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["action_type", "notify_roles", "column_break_1", "escalate_after_days", "block_pages"],
+ "fields": [
+  {"default": "Notify", "fieldname": "action_type", "fieldtype": "Select", "in_list_view": 1, "label": "Action", "options": "Notify\nWarning\nFinal Warning\nBlock Access", "reqd": 1},
+  {"default": "student,parent", "fieldname": "notify_roles", "fieldtype": "Data", "in_list_view": 1, "label": "Notify Who"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"default": "0", "fieldname": "escalate_after_days", "fieldtype": "Int", "in_list_view": 1, "label": "Escalate After (days)"},
+  {"fieldname": "block_pages", "fieldtype": "Small Text", "label": "Pages to Block"}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match K12", "name": "K12 Alert Action",
+ "owner": "Administrator", "permissions": [],
+ "sort_field": "idx", "sort_order": "ASC", "states": []
+}

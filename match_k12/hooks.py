@@ -144,6 +144,14 @@ after_migrate = "match_k12.setup.install.after_install"
 # Scheduled Tasks
 # ---------------
 
+# Alert rules run themselves overnight, so a school does not depend on
+# someone remembering to press a button.
+scheduler_events = {
+	"daily": [
+		"match_k12.api.alerts.run_rules_scheduled",
+	],
+}
+
 # scheduler_events = {
 # 	"all": [
 # 		"match_k12.tasks.all"
