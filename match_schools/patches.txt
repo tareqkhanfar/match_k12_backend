@@ -6,3 +6,4 @@ match_schools.patches.rename_k12_to_match_schools
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 match_schools.patches.restore_naming_series_counters
+match_schools.patches.repair_site_naming_counters
