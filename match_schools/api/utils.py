@@ -74,7 +74,7 @@ def get_persona(user: str | None = None) -> str | None:
 		return None
 
 	# System Manager / Administrator always act as the school admin so the
-	# system is usable before any K12 role has been handed out.
+	# system is usable before any Match Schools role has been handed out.
 	roles = set(frappe.get_roles(user))
 	if "Administrator" in roles or "System Manager" in roles:
 		return ROLE_ADMIN

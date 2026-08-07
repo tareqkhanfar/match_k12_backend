@@ -631,7 +631,7 @@ def child_overview(student: str, persona: str = None):
 			SUM(CASE WHEN record_type = 'Positive' THEN 1 ELSE 0 END) AS positive,
 			SUM(CASE WHEN record_type = 'Negative' THEN 1 ELSE 0 END) AS negative,
 			SUM(points) AS net_points
-		FROM `tabK12 Behaviour Record`
+		FROM `tabMS Behaviour Record`
 		WHERE student = %(student)s
 		""",
 		{"student": student},

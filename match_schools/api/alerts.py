@@ -619,7 +619,7 @@ def run_rules_scheduled():
 		try:
 			evaluate_rule(frappe.get_doc("MS Alert Rule", r.name))
 		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"K12 alert rule failed: {r.name}")
+			frappe.log_error(frappe.get_traceback(), f"Alert rule failed: {r.name}")
 	escalate_open_alerts()
 	frappe.db.commit()
 

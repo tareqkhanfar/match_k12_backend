@@ -301,7 +301,7 @@ def submit_response(survey: str, answers: str | list, persona: str = None):
 
 	response.insert(ignore_permissions=True)
 	frappe.db.sql(
-		"UPDATE `tabK12 Survey` SET response_count = COALESCE(response_count, 0) + 1 WHERE name = %s",
+		"UPDATE `tabMS Survey` SET response_count = COALESCE(response_count, 0) + 1 WHERE name = %s",
 		survey,
 	)
 	frappe.db.commit()

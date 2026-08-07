@@ -276,7 +276,7 @@ def delete_resource(resource: str, persona: str = None):
 def open_resource(resource: str, persona: str = None):
 	"""Record that a student opened the material, so a teacher sees reach."""
 	frappe.db.sql(
-		"UPDATE `tabK12 Resource` SET view_count = COALESCE(view_count, 0) + 1 WHERE name = %s",
+		"UPDATE `tabMS Resource` SET view_count = COALESCE(view_count, 0) + 1 WHERE name = %s",
 		resource,
 	)
 	frappe.db.commit()

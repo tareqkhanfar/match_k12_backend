@@ -231,10 +231,10 @@ def inbox(limit: int = 50, persona: str = None):
 		"""
 		SELECT m.name, m.thread, m.subject, m.body, m.sender, m.recipient,
 			m.sent_on, m.read_by_recipient, m.about_student
-		FROM `tabK12 Message` m
+		FROM `tabMS Message` m
 		INNER JOIN (
 			SELECT thread, MAX(sent_on) AS latest
-			FROM `tabK12 Message`
+			FROM `tabMS Message`
 			WHERE sender = %(user)s OR recipient = %(user)s
 			GROUP BY thread
 		) t ON t.thread = m.thread AND t.latest = m.sent_on

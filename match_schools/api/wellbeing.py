@@ -248,7 +248,7 @@ def list_behaviour(
 	)
 
 	total = frappe.db.sql(
-		f"SELECT COUNT(*) AS total FROM `tabK12 Behaviour Record` WHERE {where}",
+		f"SELECT COUNT(*) AS total FROM `tabMS Behaviour Record` WHERE {where}",
 		params,
 		as_dict=True,
 	)[0].total
@@ -258,7 +258,7 @@ def list_behaviour(
 		f"""
 		SELECT name, student, student_name, record_date, record_type, points,
 			category, student_group, description, action_taken, parent_notified
-		FROM `tabK12 Behaviour Record`
+		FROM `tabMS Behaviour Record`
 		WHERE {where}
 		ORDER BY {order_by}
 		LIMIT %(limit)s OFFSET %(offset)s
@@ -273,7 +273,7 @@ def list_behaviour(
 			SUM(CASE WHEN record_type = 'Positive' THEN 1 ELSE 0 END) AS positive,
 			SUM(CASE WHEN record_type = 'Negative' THEN 1 ELSE 0 END) AS negative,
 			SUM(points) AS net_points
-		FROM `tabK12 Behaviour Record`
+		FROM `tabMS Behaviour Record`
 		WHERE {where}
 		""",
 		{k: v for k, v in params.items() if k not in ("limit", "offset")},
@@ -378,7 +378,7 @@ def behaviour_summary(student: str, persona: str = None):
 			SUM(CASE WHEN record_type = 'Positive' THEN 1 ELSE 0 END) AS positive,
 			SUM(CASE WHEN record_type = 'Negative' THEN 1 ELSE 0 END) AS negative,
 			SUM(points) AS net_points
-		FROM `tabK12 Behaviour Record`
+		FROM `tabMS Behaviour Record`
 		WHERE student = %(student)s
 		""",
 		{"student": student},
@@ -388,7 +388,7 @@ def behaviour_summary(student: str, persona: str = None):
 	by_category = frappe.db.sql(
 		"""
 		SELECT category, COUNT(*) AS count, SUM(points) AS points
-		FROM `tabK12 Behaviour Record`
+		FROM `tabMS Behaviour Record`
 		WHERE student = %(student)s AND category IS NOT NULL AND category != ''
 		GROUP BY category
 		ORDER BY count DESC

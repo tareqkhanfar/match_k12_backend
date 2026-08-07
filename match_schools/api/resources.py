@@ -83,7 +83,7 @@ def list_books(
 	order_by = build_order_by(sort_field, sort_order, BOOK_FILTERS, "title ASC")
 
 	total = frappe.db.sql(
-		f"SELECT COUNT(*) AS total FROM `tabK12 Library Book` WHERE {where}", params, as_dict=True
+		f"SELECT COUNT(*) AS total FROM `tabMS Library Book` WHERE {where}", params, as_dict=True
 	)[0].total
 
 	params["limit"], params["offset"] = page_size, offset
@@ -91,7 +91,7 @@ def list_books(
 		f"""
 		SELECT name, title, author, isbn, category, language, publisher,
 			published_year, shelf, total_copies, available_copies, cover_image
-		FROM `tabK12 Library Book`
+		FROM `tabMS Library Book`
 		WHERE {where}
 		ORDER BY {order_by}
 		LIMIT %(limit)s OFFSET %(offset)s
@@ -209,7 +209,7 @@ def list_loans(
 	order_by = build_order_by(sort_field, sort_order, LOAN_FILTERS, "issue_date DESC")
 
 	total = frappe.db.sql(
-		f"SELECT COUNT(*) AS total FROM `tabK12 Book Loan` WHERE {where}", params, as_dict=True
+		f"SELECT COUNT(*) AS total FROM `tabMS Book Loan` WHERE {where}", params, as_dict=True
 	)[0].total
 
 	params["limit"], params["offset"] = page_size, offset
@@ -217,7 +217,7 @@ def list_loans(
 		f"""
 		SELECT name, book, book_title, student, student_name, status,
 			issue_date, due_date, return_date, notes
-		FROM `tabK12 Book Loan`
+		FROM `tabMS Book Loan`
 		WHERE {where}
 		ORDER BY {order_by}
 		LIMIT %(limit)s OFFSET %(offset)s
@@ -229,7 +229,7 @@ def list_loans(
 	counts = frappe.db.sql(
 		f"""
 		SELECT status, COUNT(*) AS count
-		FROM `tabK12 Book Loan` WHERE {where}
+		FROM `tabMS Book Loan` WHERE {where}
 		GROUP BY status
 		""",
 		{k: v for k, v in params.items() if k not in ("limit", "offset")},
@@ -337,7 +337,7 @@ def list_routes(filters: str | dict = None, persona: str = None):
 		f"""
 		SELECT name, route_name, vehicle_number, driver_name, driver_phone,
 			capacity, departure_time, return_time, active, monthly_fee, stops
-		FROM `tabK12 Transport Route`
+		FROM `tabMS Transport Route`
 		WHERE {where}
 		ORDER BY route_name
 		""",
@@ -452,7 +452,7 @@ def list_transport_assignments(
 
 	where = " AND ".join(conditions)
 	total = frappe.db.sql(
-		f"SELECT COUNT(*) AS total FROM `tabK12 Transport Assignment` WHERE {where}",
+		f"SELECT COUNT(*) AS total FROM `tabMS Transport Assignment` WHERE {where}",
 		params,
 		as_dict=True,
 	)[0].total
@@ -462,7 +462,7 @@ def list_transport_assignments(
 		f"""
 		SELECT name, student, student_name, route, stop, active,
 			start_date, end_date, notes
-		FROM `tabK12 Transport Assignment`
+		FROM `tabMS Transport Assignment`
 		WHERE {where}
 		ORDER BY student_name
 		LIMIT %(limit)s OFFSET %(offset)s

@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Match Systems and contributors
 # For license information, please see license.txt
 
-"""Grant the K12 roles doctype-level permissions.
+"""Grant the Match Schools roles doctype-level permissions.
 
 The API layer decides *what* each persona may do, but Frappe still enforces
 its own document permissions underneath. Without these rows every write is
@@ -166,7 +166,7 @@ MATRIX: dict[str, dict[str, dict]] = {
 
 
 def apply_permissions():
-	"""Create or refresh the Custom DocPerm rows for every K12 role."""
+	"""Create or refresh the Custom DocPerm rows for every Match Schools role."""
 	applied, skipped = 0, []
 
 	for doctype, roles in MATRIX.items():
@@ -213,7 +213,7 @@ def _set_perm(doctype: str, role: str, level: dict):
 
 
 def remove_permissions():
-	"""Drop every K12 permission row — used when uninstalling."""
+	"""Drop every Match Schools permission row — used when uninstalling."""
 	roles = list(FRAPPE_ROLE_BY_PERSONA.values())
 	frappe.db.delete("Custom DocPerm", {"role": ["in", roles]})
 	frappe.clear_cache()

@@ -660,7 +660,7 @@ def academic_record(student: str, persona: str = None):
 	periods = frappe.db.sql(
 		"""
 		SELECT DISTINCT academic_year, academic_term
-		FROM `tabK12 Gradebook Entry`
+		FROM `tabMS Gradebook Entry`
 		WHERE student = %(student)s
 		ORDER BY academic_year DESC, academic_term DESC
 		""",

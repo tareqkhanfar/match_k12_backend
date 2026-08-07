@@ -89,7 +89,7 @@ def _student_open_messaging() -> bool:
 
 
 def _role_counts() -> list[dict]:
-	"""How many users hold each K12 persona role."""
+	"""How many users hold each Match Schools persona role."""
 	out = []
 	labels = {
 		"admin": "مدير المدرسة",

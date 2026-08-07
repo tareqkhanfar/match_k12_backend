@@ -59,11 +59,6 @@ def rename_module():
 	)
 	frappe.db.delete("Module Def", {"module_name": MODULE_OLD})
 
-	# Any doctype still pointing at the old module name.
-	frappe.db.sql(
-		"UPDATE `tabDocType` SET module = %s WHERE module = %s", (MODULE_NEW, MODULE_OLD)
-	)
-
 
 def rename_doctypes():
 	"""K12 X -> MS X, which also renames `tabK12 X` to `tabMS X`."""
