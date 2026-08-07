@@ -1,0 +1,40 @@
+{
+ "actions": [], "allow_rename": 1, "autoname": "naming_series:",
+ "creation": "2026-08-05 00:00:00.000000", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "title", "course", "column_break_main",
+  "student_group", "resource_type", "status",
+  "section_content", "description", "external_url", "files",
+  "section_meta", "instructor", "academic_year", "academic_term",
+  "column_break_meta", "published_on", "topic", "view_count"
+ ],
+ "fields": [
+  {"default": "MS-RES-.YYYY.-", "fieldname": "naming_series", "fieldtype": "Select", "label": "Naming Series", "options": "MS-RES-.YYYY.-", "reqd": 1, "set_only_once": 1},
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Title", "reqd": 1},
+  {"fieldname": "course", "fieldtype": "Link", "in_list_view": 1, "label": "Subject", "options": "Course", "reqd": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "student_group", "fieldtype": "Link", "in_list_view": 1, "label": "Class", "options": "Student Group"},
+  {"default": "Document", "fieldname": "resource_type", "fieldtype": "Select", "in_list_view": 1, "label": "Type", "options": "Document\nVideo\nPresentation\nWorksheet\nLink\nAudio\nOther", "reqd": 1},
+  {"default": "Published", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Draft\nPublished\nArchived"},
+  {"fieldname": "section_content", "fieldtype": "Section Break", "label": "Content"},
+  {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"},
+  {"fieldname": "external_url", "fieldtype": "Data", "label": "External Link (YouTube etc.)"},
+  {"fieldname": "files", "fieldtype": "Table", "label": "Files", "options": "MS Attachment"},
+  {"fieldname": "section_meta", "fieldtype": "Section Break", "label": "Details"},
+  {"fieldname": "instructor", "fieldtype": "Link", "label": "Teacher", "options": "Instructor"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "label": "Academic Year", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "label": "Academic Term", "options": "Academic Term"},
+  {"fieldname": "column_break_meta", "fieldtype": "Column Break"},
+  {"fieldname": "published_on", "fieldtype": "Date", "label": "Published On"},
+  {"fieldname": "topic", "fieldtype": "Data", "label": "Topic / Unit"},
+  {"default": "0", "fieldname": "view_count", "fieldtype": "Int", "label": "Views", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Resource",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "published_on", "sort_order": "DESC", "states": [],
+ "title_field": "title", "track_changes": 1
+}

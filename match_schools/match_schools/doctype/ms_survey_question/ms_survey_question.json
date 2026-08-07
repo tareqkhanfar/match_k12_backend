@@ -1,0 +1,18 @@
+{
+ "actions": [], "allow_rename": 1, "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType", "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["question_text", "question_type", "required", "column_break_1", "options_list", "scale_max"],
+ "fields": [
+  {"fieldname": "question_text", "fieldtype": "Small Text", "in_list_view": 1, "label": "Question", "reqd": 1},
+  {"default": "Rating", "fieldname": "question_type", "fieldtype": "Select", "in_list_view": 1, "label": "Type", "options": "Rating\nSingle Choice\nMultiple Choice\nYesNo\nText", "reqd": 1},
+  {"default": "1", "fieldname": "required", "fieldtype": "Check", "in_list_view": 1, "label": "Required"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "options_list", "fieldtype": "Small Text", "label": "Options (one per line)"},
+  {"default": "5", "fieldname": "scale_max", "fieldtype": "Int", "label": "Scale Max"}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Survey Question",
+ "owner": "Administrator", "permissions": [],
+ "sort_field": "idx", "sort_order": "ASC", "states": []
+}

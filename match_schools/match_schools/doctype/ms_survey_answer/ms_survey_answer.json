@@ -1,0 +1,17 @@
+{
+ "actions": [], "allow_rename": 1, "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType", "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["question_idx", "question_text", "answer", "column_break_1", "rating_value"],
+ "fields": [
+  {"fieldname": "question_idx", "fieldtype": "Int", "in_list_view": 1, "label": "#"},
+  {"fieldname": "question_text", "fieldtype": "Small Text", "label": "Question"},
+  {"fieldname": "answer", "fieldtype": "Small Text", "in_list_view": 1, "label": "Answer"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "rating_value", "fieldtype": "Float", "label": "Rating"}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Survey Answer",
+ "owner": "Administrator", "permissions": [],
+ "sort_field": "idx", "sort_order": "ASC", "states": []
+}

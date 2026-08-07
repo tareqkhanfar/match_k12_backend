@@ -1,9 +1,9 @@
 [project]
-name = "match_k12"
+name = "match_schools"
 authors = [
     { name = "Match Systems", email = "tareqkhanfar29@gmail.com"}
 ]
-description = "School management customizations and APIs for K-12"
+description = "School management customizations and APIs for Match Schools"
 requires-python = ">=3.14"
 readme = "README.md"
 dynamic = ["version"]

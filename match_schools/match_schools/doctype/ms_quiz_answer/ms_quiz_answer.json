@@ -1,0 +1,20 @@
+{
+ "actions": [], "allow_rename": 1, "creation": "2026-08-04 00:00:00.000000",
+ "doctype": "DocType", "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["question_idx", "question_text", "given_answer", "column_break_1", "correct_answer", "is_correct", "marks_awarded", "marks_possible"],
+ "fields": [
+  {"fieldname": "question_idx", "fieldtype": "Int", "in_list_view": 1, "label": "#"},
+  {"fieldname": "question_text", "fieldtype": "Small Text", "label": "Question"},
+  {"fieldname": "given_answer", "fieldtype": "Data", "in_list_view": 1, "label": "Answer"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "correct_answer", "fieldtype": "Data", "label": "Correct"},
+  {"default": "0", "fieldname": "is_correct", "fieldtype": "Check", "in_list_view": 1, "label": "Correct"},
+  {"fieldname": "marks_awarded", "fieldtype": "Float", "in_list_view": 1, "label": "Awarded"},
+  {"fieldname": "marks_possible", "fieldtype": "Float", "label": "Out of"}
+ ],
+ "index_web_pages_for_search": 1, "links": [],
+ "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Quiz Answer",
+ "owner": "Administrator", "permissions": [],
+ "sort_field": "idx", "sort_order": "ASC", "states": []
+}

@@ -1,0 +1,233 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-08-03 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "student",
+  "student_name",
+  "col_1",
+  "blood_group",
+  "height_cm",
+  "weight_kg",
+  "sec_medical",
+  "chronic_conditions",
+  "allergies",
+  "col_2",
+  "medications",
+  "special_needs",
+  "sec_immunisation",
+  "immunisations",
+  "last_checkup",
+  "sec_emergency",
+  "emergency_contact_name",
+  "emergency_contact_phone",
+  "col_3",
+  "physician_name",
+  "physician_phone",
+  "sec_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "MS-HLT-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "MS-HLT-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fetch_from": "student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "blood_group",
+   "fieldtype": "Select",
+   "label": "Blood Group",
+   "options": "\nA+\nA-\nB+\nB-\nAB+\nAB-\nO+\nO-"
+  },
+  {
+   "fieldname": "height_cm",
+   "fieldtype": "Float",
+   "label": "Height (cm)"
+  },
+  {
+   "fieldname": "weight_kg",
+   "fieldtype": "Float",
+   "label": "Weight (kg)"
+  },
+  {
+   "fieldname": "sec_medical",
+   "fieldtype": "Section Break",
+   "label": "الحالة الصحية / Medical"
+  },
+  {
+   "fieldname": "chronic_conditions",
+   "fieldtype": "Small Text",
+   "label": "Chronic Conditions"
+  },
+  {
+   "fieldname": "allergies",
+   "fieldtype": "Small Text",
+   "label": "Allergies"
+  },
+  {
+   "fieldname": "col_2",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "medications",
+   "fieldtype": "Small Text",
+   "label": "Regular Medications"
+  },
+  {
+   "fieldname": "special_needs",
+   "fieldtype": "Small Text",
+   "label": "Special Needs"
+  },
+  {
+   "fieldname": "sec_immunisation",
+   "fieldtype": "Section Break",
+   "label": "التطعيمات / Immunisation"
+  },
+  {
+   "fieldname": "immunisations",
+   "fieldtype": "Small Text",
+   "label": "Immunisations"
+  },
+  {
+   "fieldname": "last_checkup",
+   "fieldtype": "Date",
+   "label": "Last Checkup"
+  },
+  {
+   "fieldname": "sec_emergency",
+   "fieldtype": "Section Break",
+   "label": "جهة الطوارئ / Emergency Contact"
+  },
+  {
+   "fieldname": "emergency_contact_name",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Name"
+  },
+  {
+   "fieldname": "emergency_contact_phone",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "col_3",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "physician_name",
+   "fieldtype": "Data",
+   "label": "Physician"
+  },
+  {
+   "fieldname": "physician_phone",
+   "fieldtype": "Data",
+   "label": "Physician Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "sec_notes",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Health Record",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MS School Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MS Secretary",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "MS Teacher"
+  },
+  {
+   "read": 1,
+   "role": "MS Student"
+  },
+  {
+   "read": 1,
+   "role": "MS Parent"
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}

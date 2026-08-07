@@ -1,0 +1,158 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-08-03 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "scheme_name",
+  "course",
+  "col_1",
+  "program",
+  "academic_year",
+  "academic_term",
+  "is_default",
+  "sec_components",
+  "components",
+  "total_weight"
+ ],
+ "fields": [
+  {
+   "default": "MS-SCH-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "MS-SCH-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "scheme_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "اسم الخطة / Scheme Name",
+   "reqd": 1
+  },
+  {
+   "description": "Leave empty to use this scheme for every subject.",
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "المادة / Course",
+   "options": "Course"
+  },
+  {
+   "fieldname": "col_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "program",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "الصف / Program",
+   "options": "Program"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل الدراسي",
+   "options": "Academic Term"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "افتراضي / Default"
+  },
+  {
+   "fieldname": "sec_components",
+   "fieldtype": "Section Break",
+   "label": "مكوّنات التقييم / Components"
+  },
+  {
+   "fieldname": "components",
+   "fieldtype": "Table",
+   "label": "المكوّنات",
+   "options": "MS Grade Scheme Component",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_weight",
+   "fieldtype": "Float",
+   "label": "مجموع الأوزان %",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Grade Scheme",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MS School Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MS Secretary",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "MS Teacher"
+  },
+  {
+   "read": 1,
+   "role": "MS Student"
+  },
+  {
+   "read": 1,
+   "role": "MS Parent"
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "scheme_name",
+ "track_changes": 1
+}

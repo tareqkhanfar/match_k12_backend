@@ -8,7 +8,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
-        files: "match_k12.*"
+        files: "match_schools.*"
         exclude: ".*json$|.*txt$|.*csv|.*md|.*svg"
       - id: check-merge-conflict
       - id: check-ast
@@ -38,11 +38,11 @@ repos:
         # Ignore any files that might contain jinja / bundles
         exclude: |
             (?x)^(
-                match_k12/public/dist/.*|
+                match_schools/public/dist/.*|
                 .*node_modules.*|
                 .*boilerplate.*|
-                match_k12/templates/includes/.*|
-                match_k12/public/js/lib/.*
+                match_schools/templates/includes/.*|
+                match_schools/public/js/lib/.*
             )$
 
 
@@ -55,12 +55,12 @@ repos:
         # Ignore any files that might contain jinja / bundles
         exclude: |
             (?x)^(
-                match_k12/public/dist/.*|
+                match_schools/public/dist/.*|
                 cypress/.*|
                 .*node_modules.*|
                 .*boilerplate.*|
-                match_k12/templates/includes/.*|
-                match_k12/public/js/lib/.*
+                match_schools/templates/includes/.*|
+                match_schools/public/js/lib/.*
             )$
 
 ci:
