@@ -47,6 +47,32 @@ ALLOWED_MOVES = {
 	"Admitted": set(),
 }
 
+# Doctype field -> the key the form sends. Every writable field on Student
+# Applicant appears here, so the registration form can carry the whole record
+# rather than a subset that has to be completed later in the desk.
+FIELD_MAP = {
+	"first_name": "firstName",
+	"middle_name": "middleName",
+	"last_name": "lastName",
+	"program": "program",
+	"academic_term": "academicTerm",
+	"student_admission": "studentAdmission",
+	"student_category": "studentCategory",
+	"student_email_id": "email",
+	"student_mobile_number": "mobile",
+	"date_of_birth": "birthDate",
+	"gender": "gender",
+	"blood_group": "bloodGroup",
+	"nationality": "nationality",
+	"image": "image",
+	"address_line_1": "addressLine1",
+	"address_line_2": "addressLine2",
+	"city": "city",
+	"state": "state",
+	"pincode": "pincode",
+	"country": "country",
+}
+
 LIST_FIELDS = [
 	"name",
 	"first_name",
@@ -182,9 +208,21 @@ def get_applicant(applicant: str, persona: str = None):
 		for g in (doc.get("guardians") or [])
 	]
 	data["siblings"] = [
-		{"name": s.full_name, "birthDate": str(s.date_of_birth or ""), "studying": s.studies_in_same_institute}
+		{
+			"name": s.full_name,
+			"birthDate": str(s.date_of_birth or ""),
+			"gender": s.get("gender"),
+			"sameSchool": bool(s.studying_in_same_institute),
+		}
 		for s in (doc.get("siblings") or [])
 	]
+
+	# Every remaining writable field, so the edit form opens fully populated.
+	for field, key in FIELD_MAP.items():
+		if key not in data:
+			value = doc.get(field)
+			data[key] = str(value) if value is not None else None
+
 	data["address"] = {
 		"line1": doc.get("address_line_1"),
 		"line2": doc.get("address_line_2"),
@@ -208,6 +246,7 @@ def get_applicant(applicant: str, persona: str = None):
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def form_options(persona: str = None):
 	"""Everything the applicant form needs to populate its selects."""
+	blood_groups = frappe.get_meta("Student Applicant").get_field("blood_group")
 	return {
 		"programs": frappe.get_all("Program", pluck="name", order_by="name"),
 		"academicYears": frappe.get_all("Academic Year", pluck="name", order_by="year_start_date desc"),
@@ -216,6 +255,12 @@ def form_options(persona: str = None):
 		),
 		"genders": frappe.get_all("Gender", pluck="name", order_by="name"),
 		"studentCategories": frappe.get_all("Student Category", pluck="name", order_by="name"),
+		"studentAdmissions": frappe.get_all("Student Admission", pluck="name", order_by="name"),
+		"countries": frappe.get_all("Country", pluck="name", order_by="name"),
+		"bloodGroups": [b for b in (blood_groups.options or "").split("\n") if b],
+		"guardians": frappe.get_all(
+			"Guardian", fields=["name", "guardian_name"], order_by="guardian_name", limit=500
+		),
 		"defaultAcademicYear": get_default_academic_year(),
 		"statuses": [
 			{"value": k, "label": v, "tone": STATUS_TONE[k]} for k, v in STATUS_AR.items()
@@ -260,23 +305,13 @@ def save_applicant(payload: str | dict, persona: str = None):
 			"لا يمكن تعديل طلب تم تسجيله",
 		)
 
-	doc.first_name = data.get("firstName")
-	doc.middle_name = data.get("middleName")
-	doc.last_name = data.get("lastName")
+	# Every field the doctype carries, keyed by the name the form sends.
+	for field, key in FIELD_MAP.items():
+		if key in data:
+			setattr(doc, field, data.get(key) or None)
+
 	doc.ms_id_number = id_number
-	doc.program = data.get("program")
 	doc.academic_year = data.get("academicYear") or get_default_academic_year()
-	doc.academic_term = data.get("academicTerm")
-	doc.student_email_id = data.get("email")
-	doc.student_mobile_number = data.get("mobile")
-	doc.date_of_birth = data.get("birthDate") or None
-	doc.gender = data.get("gender")
-	doc.nationality = data.get("nationality")
-	doc.student_category = data.get("studentCategory")
-	doc.address_line_1 = data.get("addressLine1")
-	doc.city = data.get("city")
-	if data.get("image"):
-		doc.image = data.get("image")
 	if not doc.application_date:
 		doc.application_date = today()
 	if not doc.application_status:
@@ -288,6 +323,21 @@ def save_applicant(payload: str | dict, persona: str = None):
 		if not g.get("guardian"):
 			continue
 		doc.append("guardians", {"guardian": g["guardian"], "relation": g.get("relation")})
+
+	siblings = parse_json_arg(data.get("siblings"), []) or []
+	doc.set("siblings", [])
+	for s in siblings:
+		if not s.get("name"):
+			continue
+		doc.append(
+			"siblings",
+			{
+				"full_name": s.get("name"),
+				"date_of_birth": s.get("birthDate") or None,
+				"gender": s.get("gender") or None,
+				"studying_in_same_institute": 1 if s.get("sameSchool") else 0,
+			},
+		)
 
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
@@ -372,7 +422,26 @@ def admit(applicant: str, persona: str = None):
 	student.student_email_id = doc.student_email_id
 	student.student_mobile_number = doc.student_mobile_number
 	student.ms_id_number = doc.get("ms_id_number")
+	student.blood_group = doc.get("blood_group")
+	student.student_category = doc.get("student_category")
+	student.address_line_1 = doc.get("address_line_1")
+	student.address_line_2 = doc.get("address_line_2")
+	student.city = doc.get("city")
+	student.state = doc.get("state")
+	student.pincode = doc.get("pincode")
+	if doc.get("image"):
+		student.image = doc.get("image")
 	student.joining_date = today()
+	for s in doc.get("siblings") or []:
+		student.append(
+			"siblings",
+			{
+				"full_name": s.full_name,
+				"date_of_birth": s.date_of_birth,
+				"gender": s.get("gender"),
+				"studying_in_same_institute": s.studying_in_same_institute,
+			},
+		)
 	for g in doc.get("guardians") or []:
 		student.append("guardians", {"guardian": g.guardian, "relation": g.relation})
 	student.insert(ignore_permissions=True)
