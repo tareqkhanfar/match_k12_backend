@@ -65,6 +65,11 @@ MATRIX: dict[str, dict[str, dict]] = {
 	# --- Daily ------------------------------------------------------------
 	"Student Attendance": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	"Course Schedule": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: REPORT, STUDENT: READ, PARENT: READ},
+	# The weekly pattern the school designs, and the one-day departures from it.
+	# A teacher may read both — their own timetable and any cover they are
+	# given — but only the office edits them.
+	"MS Timetable Slot": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
+	"MS Lesson Change": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	# --- Assessment -------------------------------------------------------
 	"Assessment Plan": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	"Assessment Plan Criteria": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},

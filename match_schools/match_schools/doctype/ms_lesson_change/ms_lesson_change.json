@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-08 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "course_schedule",
+  "schedule_date",
+  "change_type",
+  "column_break_1",
+  "student_group",
+  "course",
+  "period_order",
+  "section_break_1",
+  "original_instructor",
+  "instructor",
+  "column_break_2",
+  "original_room",
+  "room",
+  "section_break_2",
+  "reason",
+  "notes",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "MS-LCH-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "MS-LCH-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "course_schedule",
+   "fieldtype": "Link",
+   "options": "Course Schedule",
+   "label": "Lesson",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "schedule_date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "change_type",
+   "fieldtype": "Select",
+   "label": "Change",
+   "options": "Substitute\nRoom Change\nSwap\nCancelled",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_group",
+   "fieldtype": "Link",
+   "options": "Student Group",
+   "label": "Student Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "options": "Course",
+   "label": "Course",
+   "read_only": 1
+  },
+  {
+   "fieldname": "period_order",
+   "fieldtype": "Int",
+   "label": "Period",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "Who and where"
+  },
+  {
+   "fieldname": "original_instructor",
+   "fieldtype": "Link",
+   "options": "Instructor",
+   "label": "Original Instructor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "instructor",
+   "fieldtype": "Link",
+   "options": "Instructor",
+   "label": "Covering Instructor",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "original_room",
+   "fieldtype": "Link",
+   "options": "Room",
+   "label": "Original Room",
+   "read_only": 1
+  },
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "options": "Room",
+   "label": "New Room"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "label": "Reason",
+   "options": "\nSick Leave\nPersonal Leave\nOfficial Duty\nTraining\nExam\nOther"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "options": "MS Lesson Change",
+   "label": "Amended From",
+   "no_copy": 1,
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Lesson Change",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "schedule_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "is_submittable": 1
+}
