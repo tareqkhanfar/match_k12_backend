@@ -37,6 +37,13 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"Student Guardian": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, PARENT: READ},
 	"Instructor": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"Student Log": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: WRITE},
+	# --- Admissions -------------------------------------------------------
+	# The secretary takes applications; only the admin approves, rejects or
+	# admits, which the workflow enforces separately from these row rights.
+	"Student Applicant": {ADMIN: FULL, SECRETARY: WRITE},
+	"Student Admission": {ADMIN: FULL, SECRETARY: READ},
+	"Student Admission Program": {ADMIN: FULL, SECRETARY: READ},
+	"Student Sibling": {ADMIN: FULL, SECRETARY: WRITE},
 	# --- Structure --------------------------------------------------------
 	"Program": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"Program Course": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: READ, STUDENT: READ, PARENT: READ},

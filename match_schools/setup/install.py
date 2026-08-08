@@ -7,10 +7,26 @@ from match_schools.api.utils import FRAPPE_ROLE_BY_PERSONA
 
 
 def after_install():
-	create_k12_roles()
+	create_persona_roles()
 	patch_fees_income_account_fetch()
+	install_custom_fields()
+	install_admission_workflow()
 	apply_doctype_permissions()
 	frappe.db.commit()
+
+
+def install_custom_fields():
+	"""Fields this app adds to the Education doctypes (رقم الهوية, username)."""
+	from match_schools.setup.custom_fields import create_fields
+
+	create_fields()
+
+
+def install_admission_workflow():
+	"""States and transitions for Student Applicant."""
+	from match_schools.setup.admission_workflow import create_workflow
+
+	create_workflow()
 
 
 def apply_doctype_permissions():
@@ -59,7 +75,7 @@ def patch_fees_income_account_fetch():
 	)
 
 
-def create_k12_roles():
+def create_persona_roles():
 	"""Create the four Match Schools personas as Frappe roles (idempotent)."""
 	for role_name in FRAPPE_ROLE_BY_PERSONA.values():
 		if frappe.db.exists("Role", role_name):

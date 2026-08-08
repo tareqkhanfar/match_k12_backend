@@ -691,10 +691,25 @@ def save_guardian(payload: str | dict, persona: str = None):
 		doc.insert()
 		msg_en, msg_ar = "Guardian created.", "تم إنشاء ولي الأمر."
 
+	if data.get("id_number"):
+		frappe.db.set_value("Guardian", doc.name, "ms_id_number", data["id_number"])
+
+	# A guardian needs a login to follow their child. It is created here, once,
+	# and the password comes back so the registrar can hand it over — it is
+	# never readable again.
+	credentials = None
+	if not doc.get("user"):
+		from match_schools.api.credentials import create_account
+
+		credentials = create_account(
+			ROLE_PARENT, doc.name, doc.guardian_name, mobile=doc.get("mobile_number")
+		)
+		frappe.db.set_value("Guardian", doc.name, "user", credentials["user"])
+
 	frappe.db.commit()
 	return {
 		"success": True,
-		"data": {"id": doc.name, "name": doc.guardian_name},
+		"data": {"id": doc.name, "name": doc.guardian_name, "credentials": credentials},
 		"message_en": msg_en,
 		"message_ar": msg_ar,
 	}
