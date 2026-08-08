@@ -128,7 +128,7 @@ def _scope_students(rule) -> list[str]:
 def _measure_fee_overdue_amount(students: list[str], rule) -> dict[str, float]:
 	out: dict[str, float] = {}
 	for f in frappe.get_all(
-		"Fees",
+		"Sales Invoice",
 		filters={
 			"student": ["in", students],
 			"outstanding_amount": [">", 0],
@@ -146,7 +146,7 @@ def _measure_fee_overdue_days(students: list[str], rule) -> dict[str, float]:
 	"""How long the oldest unpaid invoice has been overdue."""
 	out: dict[str, float] = {}
 	for f in frappe.get_all(
-		"Fees",
+		"Sales Invoice",
 		filters={
 			"student": ["in", students],
 			"outstanding_amount": [">", 0],

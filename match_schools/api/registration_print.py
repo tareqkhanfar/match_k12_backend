@@ -33,7 +33,7 @@ from match_schools.api.utils import (
 PRINTABLE = {
 	"Student Applicant",
 	"Student",
-	"Fees",
+	"Sales Invoice",
 	"Guardian",
 	"Instructor",
 	"Program Enrollment",
@@ -192,7 +192,7 @@ def _assert_may_print(doctype: str, name: str, persona: str):
 
 	if doctype == "Student" and name in allowed:
 		return
-	if doctype in ("Fees", "Program Enrollment", "Student Attendance", "Assessment Result"):
+	if doctype in ("Sales Invoice", "Program Enrollment", "Student Attendance", "Assessment Result"):
 		if frappe.db.get_value(doctype, name, "student") in allowed:
 			return
 

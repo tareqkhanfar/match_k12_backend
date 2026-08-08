@@ -327,7 +327,7 @@ def _student_items(student: str, since: str, prefix_name: bool = False) -> list[
 
 	# Fees past their due date.
 	for fee in frappe.get_all(
-		"Fees",
+		"Sales Invoice",
 		filters={"student": student, "outstanding_amount": [">", 0], "docstatus": 1},
 		fields=["name", "outstanding_amount", "due_date"],
 		order_by="due_date",
@@ -412,8 +412,9 @@ def _back_office_items(since: str) -> list[dict]:
 	overdue = frappe.db.sql(
 		"""
 		SELECT COUNT(*) AS count, COALESCE(SUM(outstanding_amount), 0) AS total
-		FROM `tabFees`
-		WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date < %(today)s
+		FROM `tabSales Invoice`
+		WHERE docstatus = 1 AND IFNULL(student, '') != ''
+		  AND outstanding_amount > 0 AND due_date < %(today)s
 		""",
 		{"today": today()},
 		as_dict=True,

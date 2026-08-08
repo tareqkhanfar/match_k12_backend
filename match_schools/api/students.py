@@ -240,7 +240,7 @@ def _fee_totals(student: str) -> dict:
 	row = frappe.db.sql(
 		"""
 		SELECT SUM(grand_total) AS total, SUM(outstanding_amount) AS outstanding
-		FROM `tabFees`
+		FROM `tabSales Invoice`
 		WHERE student = %(student)s AND docstatus = 1
 		""",
 		{"student": student},
@@ -422,11 +422,14 @@ def _recent_attendance(student: str, limit: int = 15) -> list[dict]:
 
 def _fee_invoices(student: str) -> list[dict]:
 	rows = frappe.get_all(
-		"Fees",
+		"Sales Invoice",
 		filters={"student": student, "docstatus": 1},
 		fields=[
 			"name", "posting_date", "due_date", "grand_total",
-			"outstanding_amount", "academic_term", "academic_year", "program",
+			"outstanding_amount",
+			"ms_academic_term as academic_term",
+			"ms_academic_year as academic_year",
+			"ms_program as program",
 		],
 		order_by="posting_date desc",
 	)

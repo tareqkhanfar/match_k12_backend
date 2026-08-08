@@ -56,7 +56,6 @@ BULK_RULES: dict[str, dict] = {
 		"set": {"status": list(BACK_OFFICE)},
 	},
 	"MS Transport Route": {"delete": list(BACK_OFFICE), "set": {}},
-	"Fees": {"delete": [], "set": {}},
 }
 
 

@@ -227,8 +227,9 @@ def _financial(months: int = 6) -> dict:
 		SELECT YEAR(posting_date) AS yr, MONTH(posting_date) AS mo,
 			SUM(grand_total) AS expected,
 			SUM(grand_total - outstanding_amount) AS collected
-		FROM `tabFees`
+		FROM `tabSales Invoice`
 		WHERE posting_date >= %(start)s AND docstatus = 1
+		  AND IFNULL(student, '') != ''
 		GROUP BY YEAR(posting_date), MONTH(posting_date)
 		ORDER BY yr, mo
 		""",
@@ -238,13 +239,13 @@ def _financial(months: int = 6) -> dict:
 
 	by_program = frappe.db.sql(
 		"""
-		SELECT program,
+		SELECT ms_program AS program,
 			SUM(grand_total) AS total,
 			SUM(outstanding_amount) AS outstanding,
 			COUNT(*) AS invoices
-		FROM `tabFees`
-		WHERE docstatus = 1
-		GROUP BY program
+		FROM `tabSales Invoice`
+		WHERE docstatus = 1 AND IFNULL(student, '') != ''
+		GROUP BY ms_program
 		ORDER BY total DESC
 		""",
 		as_dict=True,
@@ -253,7 +254,7 @@ def _financial(months: int = 6) -> dict:
 	totals = frappe.db.sql(
 		"""
 		SELECT SUM(grand_total) AS total, SUM(outstanding_amount) AS outstanding
-		FROM `tabFees` WHERE docstatus = 1
+		FROM `tabSales Invoice` WHERE docstatus = 1 AND IFNULL(student, '') != ''
 		""",
 		as_dict=True,
 	)

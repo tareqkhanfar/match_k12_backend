@@ -202,8 +202,9 @@ def _fee_collection_trend(months: int = 6) -> list[dict]:
 			MONTH(posting_date) AS mo,
 			SUM(grand_total) AS expected,
 			SUM(grand_total - outstanding_amount) AS collected
-		FROM `tabFees`
+		FROM `tabSales Invoice`
 		WHERE posting_date >= %(start)s AND docstatus = 1
+		  AND IFNULL(student, '') != ''
 		GROUP BY YEAR(posting_date), MONTH(posting_date)
 		ORDER BY yr, mo
 		""",
@@ -489,7 +490,7 @@ def _student_outstanding_fees(student: str) -> float:
 	row = frappe.db.sql(
 		"""
 		SELECT SUM(outstanding_amount) AS outstanding
-		FROM `tabFees`
+		FROM `tabSales Invoice`
 		WHERE student = %(student)s AND docstatus = 1
 		""",
 		{"student": student},
