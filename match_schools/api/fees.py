@@ -17,7 +17,7 @@ from match_schools.api.utils import (
 	ROLE_SECRETARY,
 )
 
-STATUS_AR = {"paid": "مدفوع", "partial": "جزئي", "late": "متأخر"}
+STATUS_AR = {"paid": "مدفوع", "partial": "جزئي", "late": "متأخر", "draft": "مسودة"}
 
 
 def _status_of(total: float, outstanding: float) -> str:
@@ -39,22 +39,99 @@ def list_fees(
 	page_size: int = 25,
 	persona: str = None,
 ):
-	"""Fee invoices the caller may see."""
+	"""Fee invoices the caller may see, from both billing paths.
+
+	v16 bills school fees as Sales Invoices, but invoices raised under the
+	older `Fees` doctype are still owed and still have to be collected. Reading
+	only one of the two would hide real money from the family and from the
+	office, so this merges them and marks each row with its source.
+	"""
 	scope = resolve_scope(persona)
 	page = max(cint(page) or 1, 1)
 	page_size = min(max(cint(page_size) or 25, 1), 100)
 
-	filters = {"docstatus": 1}
+	allowed = None
 	if persona in (ROLE_STUDENT, ROLE_PARENT):
 		allowed = scope.get("students") or []
 		if not allowed:
-			return {"items": [], "total": 0, "summary": _empty_summary()}
+			return {
+				"items": [],
+				"total": 0,
+				"page": page,
+				"page_size": page_size,
+				"summary": _empty_summary(),
+			}
 		if student and student not in allowed:
 			frappe.throw(_("You are not allowed to view these fees."), frappe.PermissionError)
+
+	rows = _legacy_fee_rows(student, program, allowed) + _sales_invoice_rows(
+		student, program, allowed
+	)
+
+	# Newest first across both sources.
+	rows.sort(key=lambda r: (r["date"] or "", r["id"]), reverse=True)
+
+	if status and status != "all":
+		rows = [r for r in rows if r["status"] == status]
+
+	total_count = len(rows)
+	start = (page - 1) * page_size
+	items = rows[start : start + page_size]
+
+	return {
+		"items": items,
+		"total": total_count,
+		"page": page,
+		"page_size": page_size,
+		"summary": _summary_of(rows),
+	}
+
+
+def _row_common(
+	*,
+	source: str,
+	name: str,
+	student: str,
+	student_name: str,
+	program: str,
+	posting_date,
+	due_date,
+	total,
+	outstanding,
+	term=None,
+	year=None,
+	currency=None,
+	docstatus: int = 1,
+) -> dict:
+	paid = flt(total) - flt(outstanding)
+	item_status = "draft" if cint(docstatus) == 0 else _status_of(total, outstanding)
+	return {
+		"id": name,
+		"source": source,  # "invoice" (v16) or "fees" (legacy)
+		"student": student,
+		"student_name": student_name,
+		"grade": program,
+		"date": str(posting_date or ""),
+		"due_date": str(due_date or ""),
+		"total": flt(total),
+		"paid": paid,
+		"outstanding": flt(outstanding),
+		"status": item_status,
+		"status_label": STATUS_AR.get(item_status, item_status),
+		"term": term,
+		"year": year,
+		"currency": currency,
+		"docstatus": cint(docstatus),
+	}
+
+
+def _legacy_fee_rows(student, program, allowed) -> list[dict]:
+	"""Submitted `Fees` documents — the pre-v16 path, still collectable."""
+	filters = {"docstatus": 1}
+	if allowed is not None:
 		filters["student"] = student if student else ["in", allowed]
 	elif student:
 		filters["student"] = student
-
 	if program:
 		filters["program"] = program
 
@@ -67,43 +144,106 @@ def list_fees(
 			"academic_year", "currency",
 		],
 		order_by="posting_date desc",
-		limit_start=(page - 1) * page_size,
-		limit_page_length=page_size,
+		limit_page_length=0,
 	)
-	total_count = frappe.db.count("Fees", filters)
-
-	items = []
-	for r in rows:
-		paid = flt(r.grand_total) - flt(r.outstanding_amount)
-		item_status = _status_of(r.grand_total, r.outstanding_amount)
-		items.append(
-			{
-				"id": r.name,
-				"student": r.student,
-				"student_name": r.student_name,
-				"grade": r.program,
-				"date": str(r.posting_date or ""),
-				"due_date": str(r.due_date or ""),
-				"total": flt(r.grand_total),
-				"paid": paid,
-				"outstanding": flt(r.outstanding_amount),
-				"status": item_status,
-				"status_label": STATUS_AR[item_status],
-				"term": r.academic_term,
-				"year": r.academic_year,
-				"currency": r.currency,
-			}
+	return [
+		_row_common(
+			source="fees",
+			name=r.name,
+			student=r.student,
+			student_name=r.student_name,
+			program=r.program,
+			posting_date=r.posting_date,
+			due_date=r.due_date,
+			total=r.grand_total,
+			outstanding=r.outstanding_amount,
+			term=r.academic_term,
+			year=r.academic_year,
+			currency=r.currency,
 		)
+		for r in rows
+	]
 
-	if status and status != "all":
-		items = [i for i in items if i["status"] == status]
 
+def _sales_invoice_rows(student, program, allowed) -> list[dict]:
+	"""Sales Invoices raised for a student — the v16 path.
+
+	Drafts are included for the office, because an unposted invoice is work in
+	progress they need to see, but hidden from families: it is not yet a debt.
+	"""
+	filters: dict = {"student": ["!=", ""]}
+
+	if allowed is not None:
+		filters["student"] = student if student else ["in", allowed]
+		filters["docstatus"] = 1
+	else:
+		if student:
+			filters["student"] = student
+		filters["docstatus"] = ["<", 2]
+
+	if program:
+		filters["ms_program"] = program
+
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters=filters,
+		fields=[
+			"name", "student", "customer", "posting_date", "due_date",
+			"grand_total", "outstanding_amount", "docstatus", "currency",
+			"ms_program", "ms_academic_year", "ms_academic_term",
+		],
+		order_by="posting_date desc",
+		limit_page_length=0,
+	)
+
+	names = {r.student for r in rows if r.student}
+	student_names = (
+		dict(
+			frappe.db.get_all(
+				"Student",
+				filters={"name": ["in", list(names)]},
+				fields=["name", "student_name"],
+				as_list=True,
+			)
+		)
+		if names
+		else {}
+	)
+
+	return [
+		_row_common(
+			source="invoice",
+			name=r.name,
+			student=r.student,
+			student_name=student_names.get(r.student) or r.customer,
+			program=r.ms_program,
+			posting_date=r.posting_date,
+			due_date=r.due_date,
+			total=r.grand_total,
+			outstanding=r.outstanding_amount,
+			term=r.ms_academic_term,
+			year=r.ms_academic_year,
+			currency=r.currency,
+			docstatus=r.docstatus,
+		)
+		for r in rows
+	]
+
+
+def _summary_of(rows: list[dict]) -> dict:
+	"""Totals over the rows themselves, so both sources are counted once.
+
+	Drafts are excluded: nothing is owed until an invoice is posted.
+	"""
+	posted = [r for r in rows if r["docstatus"] == 1]
+	total = sum(flt(r["total"]) for r in posted)
+	outstanding = sum(flt(r["outstanding"]) for r in posted)
+	collected = total - outstanding
 	return {
-		"items": items,
-		"total": total_count,
-		"page": page,
-		"page_size": page_size,
-		"summary": _summary(filters),
+		"total": flt(total),
+		"collected": flt(collected),
+		"outstanding": flt(outstanding),
+		"collection_rate": flt(collected / total * 100) if total else 0.0,
 	}
 
 
@@ -111,45 +251,6 @@ def _empty_summary() -> dict:
 	return {"total": 0.0, "collected": 0.0, "outstanding": 0.0, "collection_rate": 0.0}
 
 
-def _summary(filters: dict) -> dict:
-	"""Totals across everything matching the same filters."""
-	conditions = ["docstatus = 1"]
-	params: dict = {}
-
-	student = filters.get("student")
-	if isinstance(student, list) and student and student[0] == "in":
-		conditions.append("student IN %(students)s")
-		params["students"] = student[1]
-	elif isinstance(student, str):
-		conditions.append("student = %(student)s")
-		params["student"] = student
-
-	if filters.get("program"):
-		conditions.append("program = %(program)s")
-		params["program"] = filters["program"]
-
-	row = frappe.db.sql(
-		"""
-		SELECT SUM(grand_total) AS total, SUM(outstanding_amount) AS outstanding
-		FROM `tabFees`
-		WHERE {conditions}
-		""".format(conditions=" AND ".join(conditions)),
-		params,
-		as_dict=True,
-	)
-	total = flt(row[0].total) if row else 0.0
-	outstanding = flt(row[0].outstanding) if row else 0.0
-	collected = total - outstanding
-	return {
-		"total": total,
-		"collected": collected,
-		"outstanding": outstanding,
-		"collection_rate": round(collected / total * 100, 1) if total else 0.0,
-	}
-
-
-@frappe.whitelist()
-@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def collection_report(months: int = 6, persona: str = None):
 	"""Expected vs collected per month, for the finance chart."""
 	months = min(max(cint(months) or 6, 1), 24)
@@ -205,8 +306,16 @@ def _status_breakdown() -> list[dict]:
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_STUDENT, ROLE_PARENT)
 def fee_detail(fees: str, persona: str = None):
-	"""One invoice with its component breakdown."""
+	"""One invoice with its line breakdown, from either billing path.
+
+	The id alone says which: a Sales Invoice or a legacy `Fees` document. The
+	shape returned is the same either way so the screen does not care.
+	"""
 	scope = resolve_scope(persona)
+
+	if frappe.db.exists("Sales Invoice", fees):
+		return _invoice_detail(fees, persona, scope)
+
 	doc = frappe.db.get_value(
 		"Fees",
 		fees,
@@ -234,6 +343,7 @@ def fee_detail(fees: str, persona: str = None):
 	status = _status_of(doc.grand_total, doc.outstanding_amount)
 	return {
 		"id": doc.name,
+		"source": "fees",
 		"student": doc.student,
 		"student_name": doc.student_name,
 		"grade": doc.program,
@@ -254,6 +364,57 @@ def fee_detail(fees: str, persona: str = None):
 				"amount": flt(c.amount),
 			}
 			for c in components
+		],
+	}
+
+
+def _invoice_detail(invoice: str, persona: str, scope: dict) -> dict:
+	"""A Sales Invoice presented in the same shape as a legacy fee."""
+	doc = frappe.get_doc("Sales Invoice", invoice)
+
+	if not doc.get("student"):
+		return fail(
+			message_en="This invoice does not belong to a student.",
+			message_ar="هذه الفاتورة غير مرتبطة بطالب.",
+		)
+
+	if persona in (ROLE_STUDENT, ROLE_PARENT):
+		if doc.student not in (scope.get("students") or []):
+			frappe.throw(_("You are not allowed to view this invoice."), frappe.PermissionError)
+		if doc.docstatus != 1:
+			# A draft is not yet a debt; families should not see one.
+			return fail(
+				message_en="Invoice not found.", message_ar="لم يتم العثور على الفاتورة."
+			)
+
+	paid = flt(doc.grand_total) - flt(doc.outstanding_amount)
+	status = "draft" if doc.docstatus == 0 else _status_of(doc.grand_total, doc.outstanding_amount)
+	return {
+		"id": doc.name,
+		"source": "invoice",
+		"student": doc.student,
+		"student_name": frappe.db.get_value("Student", doc.student, "student_name")
+		or doc.customer,
+		"grade": doc.get("ms_program"),
+		"date": str(doc.posting_date or ""),
+		"due_date": str(doc.due_date or ""),
+		"total": flt(doc.grand_total),
+		"paid": paid,
+		"outstanding": flt(doc.outstanding_amount),
+		"status": status,
+		"status_label": STATUS_AR.get(status, status),
+		"term": doc.get("ms_academic_term"),
+		"year": doc.get("ms_academic_year"),
+		"currency": doc.currency,
+		"docstatus": doc.docstatus,
+		"programEnrollment": doc.get("ms_program_enrollment"),
+		"components": [
+			{
+				"category": i.item_code,
+				"description": i.description,
+				"amount": flt(i.amount),
+			}
+			for i in doc.items
 		],
 	}
 
@@ -440,6 +601,14 @@ def record_payment(
 	Writing outstanding_amount directly would leave the ledger inconsistent,
 	so this books a real Payment Entry against the receivable account.
 	"""
+	# A Sales Invoice is a normal sales document, so ERPNext's own
+	# get_payment_entry handles it — the Journal Entry workaround below exists
+	# only because a Payment Entry cannot reference a `Fees` document.
+	if frappe.db.exists("Sales Invoice", fees):
+		return _pay_sales_invoice(
+			fees, amount, mode_of_payment, reference_no, reference_date, posting_date, remarks
+		)
+
 	doc = frappe.get_doc("Fees", fees)
 	if doc.docstatus != 1:
 		return fail(
@@ -582,6 +751,40 @@ def list_payments(fees: str, persona: str = None):
 	Receipts are Journal Entries (a Payment Entry cannot reference a Fee), so
 	the history is read from the journal rows that point at this invoice.
 	"""
+	# A Sales Invoice is paid by Payment Entry, which references it directly.
+	if frappe.db.exists("Sales Invoice", fees):
+		refs = frappe.get_all(
+			"Payment Entry Reference",
+			filters={"reference_doctype": "Sales Invoice", "reference_name": fees, "docstatus": 1},
+			fields=["parent", "allocated_amount"],
+		)
+		if not refs:
+			return []
+		entries = {
+			e.name: e
+			for e in frappe.get_all(
+				"Payment Entry",
+				filters={"name": ["in", [r.parent for r in refs]], "docstatus": 1},
+				fields=["name", "posting_date", "mode_of_payment", "reference_no", "remarks"],
+			)
+		}
+		out = []
+		for r in refs:
+			entry = entries.get(r.parent)
+			if not entry:
+				continue
+			out.append(
+				{
+					"id": entry.name,
+					"amount": flt(r.allocated_amount),
+					"date": str(entry.posting_date or ""),
+					"mode": entry.mode_of_payment,
+					"reference": entry.reference_no,
+					"remarks": entry.remarks,
+				}
+			)
+		return sorted(out, key=lambda x: x["date"], reverse=True)
+
 	rows = frappe.get_all(
 		"Journal Entry Account",
 		filters={
@@ -622,3 +825,72 @@ def list_payments(fees: str, persona: str = None):
 		)
 	out.sort(key=lambda p: p["date"], reverse=True)
 	return out
+
+
+def _pay_sales_invoice(
+	invoice: str,
+	amount: float,
+	mode_of_payment: str = None,
+	reference_no: str = None,
+	reference_date: str = None,
+	posting_date: str = None,
+	remarks: str = None,
+) -> dict:
+	"""Take a payment against a Sales Invoice as a real Payment Entry.
+
+	Uses ERPNext's own `get_payment_entry`, so the receivable is cleared, the
+	invoice's outstanding is recalculated by the framework, and the payment
+	shows up in the standard AR reports — none of which happens if the figure
+	is written by hand.
+	"""
+	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if doc.docstatus != 1:
+		return fail(
+			message_en="Only a submitted invoice can take a payment.",
+			message_ar="لا يمكن تسجيل دفعة إلا على فاتورة معتمدة.",
+		)
+
+	amount = flt(amount)
+	if amount <= 0:
+		return fail(
+			message_en="The amount must be greater than zero.",
+			message_ar="يجب أن يكون المبلغ أكبر من صفر.",
+		)
+	if amount > flt(doc.outstanding_amount) + 0.005:
+		return fail(
+			message_en=f"The amount exceeds the outstanding {flt(doc.outstanding_amount):g}.",
+			message_ar=f"المبلغ أكبر من المتبقي {flt(doc.outstanding_amount):g}.",
+		)
+
+	entry = get_payment_entry("Sales Invoice", invoice, party_amount=amount)
+	entry.posting_date = posting_date or today()
+	entry.reference_no = reference_no or invoice
+	entry.reference_date = reference_date or entry.posting_date
+	if mode_of_payment:
+		entry.mode_of_payment = mode_of_payment
+		account = _default_cash_account(doc.company, mode_of_payment)
+		if account:
+			entry.paid_to = account
+	if remarks:
+		entry.remarks = remarks
+
+	# get_payment_entry allocates the full outstanding by default.
+	entry.paid_amount = amount
+	entry.received_amount = amount
+	for ref in entry.references:
+		ref.allocated_amount = amount
+
+	entry.insert(ignore_permissions=True)
+	entry.submit()
+	frappe.db.commit()
+
+	doc.reload()
+	return {
+		"id": invoice,
+		"payment": entry.name,
+		"paid": flt(doc.grand_total) - flt(doc.outstanding_amount),
+		"outstanding": flt(doc.outstanding_amount),
+		"status": _status_of(doc.grand_total, doc.outstanding_amount),
+	}
