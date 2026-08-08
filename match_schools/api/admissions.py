@@ -10,6 +10,8 @@ logins for all of them, and hands the credentials back once so the registrar
 can print them. Nothing here stores a readable password.
 """
 
+from contextlib import contextmanager
+
 import frappe
 from frappe import _
 from frappe.utils import cint, today
@@ -212,7 +214,7 @@ def get_applicant(applicant: str, persona: str = None):
 			"name": s.full_name,
 			"birthDate": str(s.date_of_birth or ""),
 			"gender": s.get("gender"),
-			"sameSchool": bool(s.studying_in_same_institute),
+			"sameSchool": s.studying_in_same_institute == "YES",
 		}
 		for s in (doc.get("siblings") or [])
 	]
@@ -335,7 +337,8 @@ def save_applicant(payload: str | dict, persona: str = None):
 				"full_name": s.get("name"),
 				"date_of_birth": s.get("birthDate") or None,
 				"gender": s.get("gender") or None,
-				"studying_in_same_institute": 1 if s.get("sameSchool") else 0,
+				# A Select of NO/YES rather than a checkbox.
+				"studying_in_same_institute": "YES" if s.get("sameSchool") else "NO",
 			},
 		)
 
@@ -411,6 +414,7 @@ def admit(applicant: str, persona: str = None):
 		filter(None, [doc.first_name, doc.middle_name, doc.last_name])
 	)
 
+
 	student = frappe.new_doc("Student")
 	student.first_name = doc.first_name
 	student.middle_name = doc.middle_name
@@ -419,7 +423,10 @@ def admit(applicant: str, persona: str = None):
 	student.date_of_birth = doc.date_of_birth
 	student.gender = doc.gender
 	student.nationality = doc.nationality
-	student.student_email_id = doc.student_email_id
+	# Student requires an email. A family that gave none still needs an account,
+	# so a placeholder goes in now and is replaced with the generated login
+	# below — the admission is not blocked on the family having an address.
+	student.student_email_id = doc.student_email_id or _placeholder_email(doc.name)
 	student.student_mobile_number = doc.student_mobile_number
 	student.ms_id_number = doc.get("ms_id_number")
 	student.blood_group = doc.get("blood_group")
@@ -439,12 +446,18 @@ def admit(applicant: str, persona: str = None):
 				"full_name": s.full_name,
 				"date_of_birth": s.date_of_birth,
 				"gender": s.get("gender"),
-				"studying_in_same_institute": s.studying_in_same_institute,
+				"studying_in_same_institute": s.studying_in_same_institute or "NO",
 			},
 		)
 	for g in doc.get("guardians") or []:
 		student.append("guardians", {"guardian": g.guardian, "relation": g.relation})
-	student.insert(ignore_permissions=True)
+
+	# Education creates a Website User of its own from `student_email_id`, which
+	# crashes when the applicant gave no email and would otherwise compete with
+	# the login issued below. This app owns account creation, so switch that off
+	# for the insert only.
+	with _education_user_creation_disabled():
+		student.insert(ignore_permissions=True)
 
 	# The student's own login.
 	account = create_account(
@@ -455,6 +468,11 @@ def admit(applicant: str, persona: str = None):
 		mobile=doc.student_mobile_number,
 	)
 	frappe.db.set_value("Student", student.name, "user", account["user"], update_modified=False)
+	if not doc.student_email_id:
+		# Replace the placeholder with the login that was just issued.
+		frappe.db.set_value(
+			"Student", student.name, "student_email_id", account["user"], update_modified=False
+		)
 	frappe.db.set_value(
 		"Student Applicant", applicant, "ms_username", account["username"], update_modified=False
 	)
@@ -474,6 +492,30 @@ def admit(applicant: str, persona: str = None):
 		"credentials": account,
 		"guardians": [g for g in guardian_accounts if g],
 	}
+
+
+def _placeholder_email(applicant: str) -> str:
+	"""A unique stand-in address, swapped for the real login after insert."""
+	from match_schools.api.credentials import login_domain
+
+	return "pending-{}@{}".format(str(applicant).lower().replace("/", "-"), login_domain())
+
+
+@contextmanager
+def _education_user_creation_disabled():
+	"""Stop Education from auto-creating a Website User during an insert.
+
+	Restores the previous setting afterwards, including on failure, so a school
+	that deliberately turned it on keeps it.
+	"""
+	previous = frappe.db.get_single_value("Education Settings", "user_creation_skip")
+	if not previous:
+		frappe.db.set_single_value("Education Settings", "user_creation_skip", 1)
+	try:
+		yield
+	finally:
+		if not previous:
+			frappe.db.set_single_value("Education Settings", "user_creation_skip", 0)
 
 
 def _ensure_guardian_account(guardian: str, year: str | None) -> dict | None:
