@@ -119,7 +119,30 @@ def ms_endpoint(*allowed_personas: str):
 		def wrapper(*args, **kwargs):
 			persona = require_persona(*allowed_personas)
 			kwargs.pop("persona", None)
-			data = fn(*args, persona=persona, **kwargs)
+			try:
+				data = fn(*args, persona=persona, **kwargs)
+			except frappe.ValidationError as e:
+				# A rule the document itself enforces — "date of birth cannot be
+				# in the future", a mandatory field, a link that does not exist.
+				# These are for the user to act on, so they belong in the
+				# envelope; letting them escape reaches the UI as a bare 417 and
+				# the screen can only say "could not save".
+				frappe.db.rollback()
+				message = _clean_message(e)
+				frappe.clear_messages()
+				return fail(message, message)
+			except frappe.PermissionError:
+				raise
+			except Exception:
+				# Anything else is a bug rather than user error: log it with a
+				# traceback and keep the details out of the response.
+				frappe.db.rollback()
+				frappe.log_error(frappe.get_traceback(), f"{fn.__module__}.{fn.__name__} failed")
+				return fail(
+					"Something went wrong. The error has been logged.",
+					"حدث خطأ غير متوقع. تم تسجيل الخطأ لمراجعته.",
+				)
+
 			# Endpoints may return a finished envelope themselves.
 			if isinstance(data, dict) and "success" in data:
 				return data
@@ -128,6 +151,28 @@ def ms_endpoint(*allowed_personas: str):
 		return wrapper
 
 	return decorator
+
+
+def _clean_message(exc: Exception) -> str:
+	"""The readable text of a validation error.
+
+	Frappe puts the useful wording in the message log rather than in the
+	exception, and wraps it in markup meant for the desk UI.
+	"""
+	import re
+
+	text = ""
+	for entry in reversed(frappe.get_message_log() or []):
+		candidate = entry.get("message") if isinstance(entry, dict) else str(entry)
+		if candidate:
+			text = candidate
+			break
+	if not text:
+		text = str(exc)
+
+	text = re.sub(r"<[^>]+>", " ", text)          # desk markup
+	text = re.sub(r"\s+", " ", text).strip()
+	return text or "تعذّر إتمام العملية"
 
 
 # --- List query helpers ----------------------------------------------------
