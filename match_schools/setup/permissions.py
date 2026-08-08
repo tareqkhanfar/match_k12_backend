@@ -82,6 +82,12 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"Fee Component": {ADMIN: FULL, SECRETARY: FULL, STUDENT: READ, PARENT: READ},
 	"Fee Structure": {ADMIN: FULL, SECRETARY: FULL, STUDENT: READ, PARENT: READ},
 	"Fee Category": {ADMIN: FULL, SECRETARY: WRITE},
+	# v16 bills school fees as Sales Invoices against the student's Customer.
+	# A family may read its own; the API scopes the query to them.
+	"Sales Invoice": {ADMIN: FULL, SECRETARY: FULL, STUDENT: READ, PARENT: READ},
+	"Sales Invoice Item": {ADMIN: FULL, SECRETARY: FULL, STUDENT: READ, PARENT: READ},
+	"Sales Taxes and Charges": {ADMIN: FULL, SECRETARY: FULL},
+	"Item": {ADMIN: WRITE, SECRETARY: READ},
 	# Recording a payment books a Payment Entry against the receivable account,
 	# so whoever takes money needs the accounting documents too.
 	"Journal Entry": {ADMIN: FULL, SECRETARY: FULL},
