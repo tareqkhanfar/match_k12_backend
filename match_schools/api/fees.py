@@ -54,11 +54,17 @@ def list_fees(
 	student: str = None,
 	program: str = None,
 	status: str = None,
+	academic_year: str = None,
+	academic_term: str = None,
+	date_from: str = None,
+	date_to: str = None,
+	due_from: str = None,
+	due_to: str = None,
 	page: int = 1,
 	page_size: int = 25,
 	persona: str = None,
 ):
-	"""Fee invoices the caller may see."""
+	"""Fee invoices the caller may see, narrowed by the screen's filters."""
 	scope = resolve_scope(persona)
 	page = max(cint(page) or 1, 1)
 	page_size = min(max(cint(page_size) or 25, 1), 100)
@@ -77,9 +83,19 @@ def list_fees(
 	# until the invoice is posted.
 	office = persona in (ROLE_ADMIN, ROLE_SECRETARY)
 
-	items = rec.rows(
-		student=one, students=many, program=program, include_drafts=office
-	)
+	query = {
+		"student": one,
+		"students": many,
+		"program": program,
+		"academic_year": academic_year,
+		"academic_term": academic_term,
+		"date_from": date_from,
+		"date_to": date_to,
+		"due_from": due_from,
+		"due_to": due_to,
+	}
+
+	items = rec.rows(include_drafts=office, **query)
 	if status and status != "all":
 		items = [i for i in items if i["status"] == status]
 
@@ -91,7 +107,30 @@ def list_fees(
 		"total": total_count,
 		"page": page,
 		"page_size": page_size,
-		"summary": rec.totals(student=one, students=many, program=program),
+		# The summary follows the same filters, so the cards always describe
+		# the rows on screen.
+		"summary": rec.totals(**query),
+		"filter_options": _filter_options() if office else None,
+	}
+
+
+def _filter_options() -> dict:
+	"""The values worth filtering by, taken from the invoices that exist."""
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT ms_program, ms_academic_year, ms_academic_term
+		  FROM `tabSales Invoice`
+		 WHERE docstatus < 2 AND IFNULL(student, '') != ''
+		""",
+		as_dict=True,
+	)
+	return {
+		"programs": sorted({r.ms_program for r in rows if r.ms_program}),
+		"academicYears": sorted({r.ms_academic_year for r in rows if r.ms_academic_year}),
+		"academicTerms": sorted({r.ms_academic_term for r in rows if r.ms_academic_term}),
+		"statuses": [
+			{"value": k, "label": v} for k, v in rec.STATUS_AR.items()
+		],
 	}
 
 

@@ -57,6 +57,10 @@ def base_filters(
 	program=None,
 	academic_year=None,
 	academic_term=None,
+	date_from=None,
+	date_to=None,
+	due_from=None,
+	due_to=None,
 	include_drafts=False,
 ) -> dict:
 	"""Filters selecting school invoices only.
@@ -79,6 +83,22 @@ def base_filters(
 		filters["ms_academic_year"] = academic_year
 	if academic_term:
 		filters["ms_academic_term"] = academic_term
+
+	# Date ranges are inclusive on both ends, which is what a user means by
+	# "from 1 March to 31 March".
+	if date_from and date_to:
+		filters["posting_date"] = ["between", [date_from, date_to]]
+	elif date_from:
+		filters["posting_date"] = [">=", date_from]
+	elif date_to:
+		filters["posting_date"] = ["<=", date_to]
+
+	if due_from and due_to:
+		filters["due_date"] = ["between", [due_from, due_to]]
+	elif due_from:
+		filters["due_date"] = [">=", due_from]
+	elif due_to:
+		filters["due_date"] = ["<=", due_to]
 
 	return filters
 
@@ -185,6 +205,20 @@ def totals(**kwargs) -> dict:
 		if filters.get(key):
 			conditions.append(f"{column} = %({key})s")
 			params[key] = filters[key]
+
+	# Date filters must apply here too, or the KPI cards would contradict the
+	# rows shown underneath them.
+	for key, column in (("posting_date", "si.posting_date"), ("due_date", "si.due_date")):
+		clause = filters.get(key)
+		if not clause:
+			continue
+		op, value = clause[0], clause[1]
+		if op == "between":
+			conditions.append(f"{column} BETWEEN %({key}_from)s AND %({key}_to)s")
+			params[f"{key}_from"], params[f"{key}_to"] = value[0], value[1]
+		else:
+			conditions.append(f"{column} {op} %({key}_v)s")
+			params[f"{key}_v"] = value
 
 	row = frappe.db.sql(
 		"""
