@@ -40,6 +40,15 @@ STATUS_TONE = {
 	"Admitted": "success",
 }
 
+# The Student Guardian relation is a Select on the doctype; these are the
+# Arabic labels for the values it allows. A value not in the Select is rejected
+# on save, so the form must offer exactly these.
+RELATION_AR = {
+	"Father": "الأب",
+	"Mother": "الأم",
+	"Others": "أخرى",
+}
+
 # Which status a transition may move to, and from where. Mirrors the Workflow
 # so the API refuses an invalid jump even if called directly.
 ALLOWED_MOVES = {
@@ -206,6 +215,7 @@ def get_applicant(applicant: str, persona: str = None):
 			"guardian": g.guardian,
 			"name": g.guardian_name,
 			"relation": g.relation,
+			"relationLabel": RELATION_AR.get(g.relation, g.relation),
 		}
 		for g in (doc.get("guardians") or [])
 	]
@@ -249,7 +259,16 @@ def get_applicant(applicant: str, persona: str = None):
 def form_options(persona: str = None):
 	"""Everything the applicant form needs to populate its selects."""
 	blood_groups = frappe.get_meta("Student Applicant").get_field("blood_group")
+	relations = frappe.get_meta("Student Guardian").get_field("relation")
 	return {
+		# Read off the doctype rather than hard-coded, so editing the Select in
+		# the desk changes the dropdown here too — and so a value the form
+		# offers is always one the document will accept on save.
+		"relations": [
+			{"value": r, "label": RELATION_AR.get(r, r)}
+			for r in (relations.options or "").split("\n")
+			if r
+		],
 		"programs": frappe.get_all("Program", pluck="name", order_by="name"),
 		"academicYears": frappe.get_all("Academic Year", pluck="name", order_by="year_start_date desc"),
 		"academicTerms": frappe.get_all(
