@@ -149,6 +149,10 @@ def _session_payload() -> dict:
 	) or {}
 
 	profile = {"display_name": user_doc.get("full_name"), "image": user_doc.get("user_image")}
+	# The app shows a blocking prompt while this is set.
+	must_change = bool(
+		frappe.db.get_value("User", frappe.session.user, "ms_must_change_password")
+	)
 
 	# Enrich with the education record this persona is tied to, so the
 	# frontend can greet the user properly and scope its own views.
@@ -184,6 +188,7 @@ def _session_payload() -> dict:
 		"name": profile["display_name"],
 		"image": profile["image"],
 		"language": user_doc.get("language") or "ar",
+		"mustChangePassword": must_change,
 		"scope": {
 			"student": scope["student"],
 			"instructor": scope["instructor"],

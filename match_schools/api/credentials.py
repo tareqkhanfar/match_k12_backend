@@ -25,6 +25,7 @@ import string
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 from frappe.utils.password import update_password
 
 from match_schools.api.utils import (
@@ -155,6 +156,13 @@ def create_account(
 	user.add_roles(FRAPPE_ROLE_BY_PERSONA[persona])
 	update_password(user.name, password)
 
+	# The password was printed on a slip, so require a change at first login
+	# unless the school has turned that off.
+	if _force_change_enabled():
+		frappe.db.set_value(
+			"User", user.name, "ms_must_change_password", 1, update_modified=False
+		)
+
 	return {
 		"user": user.name,
 		"username": username,
@@ -162,6 +170,18 @@ def create_account(
 		"persona": persona,
 		"name": full_name,
 	}
+
+
+def _force_change_enabled() -> bool:
+	"""Whether new accounts must change their password at first login.
+
+	On by default: a credential that was printed and handed over should stop
+	working as soon as the family has used it once.
+	"""
+	value = frappe.db.get_single_value("Education Settings", "ms_force_password_change")
+	if value is None:
+		return True
+	return bool(cint(value))
 
 
 def credentials_for(user_id: str) -> dict | None:
@@ -188,6 +208,8 @@ def reset_password(user: str, persona: str = None):
 
 	password = generate_password()
 	update_password(user, password)
+	if _force_change_enabled():
+		frappe.db.set_value("User", user, "ms_must_change_password", 1, update_modified=False)
 
 	row = frappe.db.get_value("User", user, ["username", "full_name"], as_dict=True)
 	return {

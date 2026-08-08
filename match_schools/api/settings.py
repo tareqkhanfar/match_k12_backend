@@ -337,6 +337,10 @@ def change_password(current_password: str, new_password: str, persona: str = Non
 		)
 
 	update_password(frappe.session.user, new_password)
+	# The printed credential is now spent; stop demanding a change.
+	frappe.db.set_value(
+		"User", frappe.session.user, "ms_must_change_password", 0, update_modified=False
+	)
 	frappe.db.commit()
 	return {
 		"success": True,

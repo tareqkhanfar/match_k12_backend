@@ -491,6 +491,8 @@ def save_student(payload: str | dict, persona: str = None):
 		"city": data.get("city"),
 		"nationality": data.get("nationality"),
 		"joining_date": data.get("joining_date"),
+		"image": data.get("image"),
+		"ms_id_number": data.get("id_number"),
 	}
 	fields = {k: v for k, v in fields.items() if v is not None}
 
@@ -792,3 +794,66 @@ def unlink_guardian(student: str, guardian: str, persona: str = None):
 		"message_en": "Guardian unlinked.",
 		"message_ar": "تم فك ارتباط ولي الأمر.",
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def upload_student_photo(student: str, persona: str = None):
+	"""Attach a photo to a student and set it as their image.
+
+	Stored as a public file: a private one is served behind a session check and
+	would not render in an `<img>` on the student's profile card.
+	"""
+	if not frappe.db.exists("Student", student):
+		return fail(message_en="Student not found.", message_ar="لم يتم العثور على الطالب.")
+
+	uploaded = (frappe.request.files or {}).get("file")
+	if not uploaded:
+		return fail(message_en="No file received.", message_ar="لم يتم استلام أي صورة.")
+
+	filename = uploaded.filename or "photo"
+	extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+	if extension not in ("jpg", "jpeg", "png", "webp", "gif"):
+		return fail(
+			message_en=f"Image type .{extension} is not allowed.",
+			message_ar="نوع الصورة غير مدعوم — استخدم JPG أو PNG أو WEBP.",
+		)
+
+	content = uploaded.stream.read()
+	# A profile photo has no business being large; the limit keeps the site
+	# from filling up with phone-camera originals.
+	if len(content) > 5 * 1024 * 1024:
+		return fail(
+			message_en="Image is larger than 5 MB.",
+			message_ar="حجم الصورة يتجاوز ٥ ميجابايت.",
+		)
+
+	file_doc = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": "{}-{}".format(student, filename),
+			"content": content,
+			"is_private": 0,
+			"attached_to_doctype": "Student",
+			"attached_to_name": student,
+			"attached_to_field": "image",
+		}
+	)
+	file_doc.save(ignore_permissions=True)
+
+	frappe.db.set_value("Student", student, "image", file_doc.file_url)
+	frappe.db.commit()
+
+	return {"student": student, "image": file_doc.file_url}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def remove_student_photo(student: str, persona: str = None):
+	"""Clear a student's photo."""
+	if not frappe.db.exists("Student", student):
+		return fail(message_en="Student not found.", message_ar="لم يتم العثور على الطالب.")
+
+	frappe.db.set_value("Student", student, "image", None)
+	frappe.db.commit()
+	return {"student": student, "image": None}

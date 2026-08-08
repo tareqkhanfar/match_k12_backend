@@ -40,6 +40,33 @@ CUSTOM_FIELDS = {
 	"Guardian": [
 		dict(ID_NUMBER, reqd=0, insert_after="guardian_name"),
 	],
+	"Education Settings": [
+		{
+			"fieldname": "ms_force_password_change",
+			"label": "إلزام تغيير كلمة المرور عند أول دخول",
+			"fieldtype": "Check",
+			"insert_after": "user_creation_skip",
+			"default": "1",
+			"description": (
+				"عند التفعيل، يُطلب من كل حساب جديد تغيير كلمة المرور المطبوعة "
+				"في أول تسجيل دخول."
+			),
+			"translatable": 0,
+		},
+	],
+	# Accounts issued by the school start with a generated password printed on
+	# a slip. Forcing a change on first use means that printed password stops
+	# being a working credential the moment the family has logged in once.
+	"User": [
+		{
+			"fieldname": "ms_must_change_password",
+			"label": "Must change password at next login",
+			"fieldtype": "Check",
+			"insert_after": "user_type",
+			"no_copy": 1,
+			"translatable": 0,
+		},
+	],
 	# v16 bills school fees as Sales Invoices, but Education only adds `student`
 	# and `fee_schedule` — there is no link to the enrolment the fee belongs to.
 	# The old `Fees` doctype made that link mandatory, and losing it would mean

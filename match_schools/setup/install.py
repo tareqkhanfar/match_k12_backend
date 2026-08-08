@@ -21,6 +21,25 @@ def install_custom_fields():
 
 	create_fields()
 
+	_seed_force_password_change()
+
+
+def _seed_force_password_change():
+	"""Turn the first-login password change on, once.
+
+	A Custom Field's `default` only applies to documents created afterwards,
+	and Education Settings is a Single that already exists — so without this
+	the setting reads 0 and the feature is silently off.
+
+	Seeded exactly once, tracked by its own flag, so a school that switches it
+	off does not have it switched back on by the next migrate.
+	"""
+	if frappe.db.get_default("ms_force_password_change_seeded"):
+		return
+
+	frappe.db.set_single_value("Education Settings", "ms_force_password_change", 1)
+	frappe.db.set_default("ms_force_password_change_seeded", "1")
+
 
 def install_admission_workflow():
 	"""States and transitions for Student Applicant."""
