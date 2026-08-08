@@ -482,6 +482,11 @@ def admit(applicant: str, persona: str = None):
 	for row in doc.get("guardians") or []:
 		guardian_accounts.append(_ensure_guardian_account(row.guardian, doc.academic_year))
 
+	# Enrol the student on the programme they applied for. Without this the
+	# student exists but belongs to nothing: attendance, the gradebook and the
+	# fee schedule all read enrolment, so admitting alone leaves them invisible.
+	enrollment = _create_program_enrollment(student, doc)
+
 	doc.db_set("application_status", "Admitted", update_modified=False)
 	frappe.db.commit()
 
@@ -491,7 +496,56 @@ def admit(applicant: str, persona: str = None):
 		"status": "Admitted",
 		"credentials": account,
 		"guardians": [g for g in guardian_accounts if g],
+		"programEnrollment": enrollment,
 	}
+
+
+def _create_program_enrollment(student, applicant) -> str | None:
+	"""Enrol the new student on the programme they applied for.
+
+	Program Enrollment is what the rest of the system reads: Course Enrollments
+	are generated from it, Student Group membership hangs off it, and a Fees
+	document is invalid without one. Creating the Student alone is not enough.
+
+	Submitting runs Education's `on_submit`, which generates the Course
+	Enrollments. It also calls `make_fee_records`, but that iterates the
+	enrolment's own `fees` rows — left empty here on purpose, so admitting a
+	child never silently raises an invoice. Billing stays a decision made on
+	the finance screen.
+	"""
+	if not applicant.program or not applicant.academic_year:
+		return None
+
+	existing = frappe.db.exists(
+		"Program Enrollment",
+		{
+			"student": student.name,
+			"program": applicant.program,
+			"academic_year": applicant.academic_year,
+		},
+	)
+	if existing:
+		return existing
+
+	enrollment = frappe.new_doc("Program Enrollment")
+	enrollment.student = student.name
+	enrollment.student_name = student.student_name
+	enrollment.program = applicant.program
+	enrollment.academic_year = applicant.academic_year
+	enrollment.academic_term = applicant.academic_term
+	enrollment.student_category = applicant.get("student_category")
+	enrollment.enrollment_date = today()
+
+	# The programme's required courses, so the timetable and gradebook have
+	# something to attach to from day one.
+	for course in frappe.get_all(
+		"Program Course", filters={"parent": applicant.program, "required": 1}, fields=["course"]
+	):
+		enrollment.append("courses", {"course": course.course})
+
+	enrollment.insert(ignore_permissions=True)
+	enrollment.submit()
+	return enrollment.name
 
 
 def _placeholder_email(applicant: str) -> str:

@@ -58,6 +58,10 @@ MATRIX: dict[str, dict[str, dict]] = {
 	# --- Enrolment --------------------------------------------------------
 	"Program Enrollment": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"Program Enrollment Course": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ},
+	"Program Enrollment Fee": {ADMIN: FULL, SECRETARY: FULL},
+	# Submitting a Program Enrollment generates these, so the persona doing the
+	# enrolling needs to be able to write them.
+	"Course Enrollment": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	# --- Daily ------------------------------------------------------------
 	"Student Attendance": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	"Course Schedule": {ADMIN: FULL, SECRETARY: WRITE, TEACHER: REPORT, STUDENT: READ, PARENT: READ},

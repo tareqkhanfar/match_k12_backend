@@ -24,9 +24,41 @@ from match_schools.api.utils import (
 )
 
 
+def _resolve_login(identifier: str) -> str:
+	"""Accept a username, an email, or a mobile number.
+
+	Accounts issued by this app are named `st1260339` and the family is handed
+	exactly that on the printed slip — so the username has to work at the login
+	box. Frappe only resolves one when `allow_login_using_user_name` is on in
+	System Settings, which is a site-wide setting a school could turn off, so
+	the lookup is done here instead of depending on it.
+	"""
+	identifier = (identifier or "").strip()
+	if not identifier or "@" in identifier:
+		return identifier
+
+	user = frappe.db.get_value("User", {"username": identifier, "enabled": 1}, "name")
+	if user:
+		return user
+
+	# A mobile number is the other thing a parent is likely to type.
+	if identifier.isdigit():
+		user = frappe.db.get_value("User", {"mobile_no": identifier, "enabled": 1}, "name")
+		if user:
+			return user
+
+	# Unresolved: hand it back so authenticate() raises the usual error rather
+	# than this function inventing a different one.
+	return identifier
+
+
 @frappe.whitelist(allow_guest=True)
 def login(email: str, password: str):
-	"""Authenticate and start a Frappe session."""
+	"""Authenticate and start a Frappe session.
+
+	`email` may be an email address, the generated username, or a mobile
+	number — see `_resolve_login`.
+	"""
 	if not email or not password:
 		return fail(
 			message_en="Email and password are required.",
@@ -35,7 +67,7 @@ def login(email: str, password: str):
 
 	try:
 		login_manager = LoginManager()
-		login_manager.authenticate(user=email, pwd=password)
+		login_manager.authenticate(user=_resolve_login(email), pwd=password)
 		login_manager.post_login()
 	except frappe.AuthenticationError:
 		frappe.local.response["http_status_code"] = 401
