@@ -151,16 +151,25 @@ def invoice_student(
 	student: str,
 	fee_structure: str = None,
 	components: str | list = None,
+	program_enrollment: str = None,
 	posting_date: str = None,
 	due_date: str = None,
 	company: str = None,
-	submit: int = 1,
+	remarks: str = None,
+	invoice: str = None,
+	submit: int = 0,
 	persona: str = None,
 ):
-	"""Raise one Sales Invoice for one student.
+	"""Create or update one Sales Invoice for one student.
 
-	Either from a Fee Structure — the normal case, since a school prices per
-	grade — or from components passed directly for a one-off charge.
+	Saved as a draft by default so the lines can be corrected — amounts
+	changed, rows added or removed — before anything reaches the ledger.
+	Pass `submit=1` to post it.
+
+	Either priced from a Fee Structure, which is the normal case since a
+	school prices per grade, or from components given directly. Once created
+	the components are the invoice's own: editing the structure later does not
+	change an invoice already raised.
 	"""
 	if not frappe.db.exists("Student", student):
 		return fail("Student not found", "لم يتم العثور على الطالب")
@@ -170,6 +179,13 @@ def invoice_student(
 		return fail(
 			"This student has no linked customer",
 			"لا يوجد عميل مرتبط بهذا الطالب — تعذّر إصدار الفاتورة",
+		)
+
+	enrollment = program_enrollment or _resolve_enrollment(student)
+	if not enrollment:
+		return fail(
+			"This student has no submitted program enrollment",
+			"لا يوجد تسجيل دراسي معتمد لهذا الطالب — سجّله في برنامج أولاً",
 		)
 
 	rows = parse_json_arg(components) or []
@@ -194,13 +210,28 @@ def invoice_student(
 			"اختر هيكل رسوم أو أضف بنداً واحداً على الأقل",
 		)
 
-	invoice = frappe.new_doc("Sales Invoice")
-	invoice.customer = customer
-	invoice.student = student  # the custom field Education adds
-	invoice.posting_date = posting_date or today()
-	invoice.due_date = due_date or add_days(today(), 30)
+	if invoice:
+		if not frappe.db.exists("Sales Invoice", invoice):
+			return fail("Invoice not found", "لم يتم العثور على الفاتورة")
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		if doc.docstatus != 0:
+			return fail(
+				"A submitted invoice cannot be edited; cancel and amend it instead",
+				"لا يمكن تعديل فاتورة معتمدة — ألغِها وأصدر تعديلاً",
+			)
+		doc.set("items", [])
+	else:
+		doc = frappe.new_doc("Sales Invoice")
+
+	doc.customer = customer
+	doc.student = student  # the custom field Education adds
+	doc.ms_program_enrollment = enrollment
+	doc.posting_date = posting_date or today()
+	doc.due_date = due_date or add_days(today(), 30)
+	if remarks:
+		doc.remarks = remarks
 	if company:
-		invoice.company = company
+		doc.company = company
 
 	missing_items = []
 	for row in rows:
@@ -210,11 +241,11 @@ def invoice_student(
 		if not item or not frappe.db.exists("Item", item):
 			missing_items.append(row.get("category") or row.get("item"))
 			continue
-		invoice.append(
+		doc.append(
 			"items",
 			{
 				"item_code": item,
-				"qty": 1,
+				"qty": flt(row.get("qty")) or 1,
 				"rate": flt(row.get("amount")),
 				"description": row.get("description") or row.get("category") or item,
 			},
@@ -228,23 +259,56 @@ def invoice_student(
 			"هذه الفئات لا يوجد لها صنف مرتبط: {0}".format("، ".join(missing_items)),
 		)
 
-	if not invoice.items:
+	if not doc.items:
 		return fail("Nothing to invoice", "لا توجد بنود للفوترة")
 
-	invoice.insert(ignore_permissions=True)
+	doc.save(ignore_permissions=True)
 	if cint(submit):
-		invoice.submit()
+		doc.submit()
 	frappe.db.commit()
 
+	return _invoice_payload(doc)
+
+
+def _invoice_payload(doc) -> dict:
 	return {
-		"id": invoice.name,
-		"student": student,
-		"customer": customer,
-		"total": flt(invoice.grand_total),
-		"outstanding": flt(invoice.outstanding_amount),
-		"docstatus": invoice.docstatus,
-		"status": _status_of(invoice.grand_total, invoice.outstanding_amount, invoice.docstatus),
+		"id": doc.name,
+		"student": doc.student,
+		"customer": doc.customer,
+		"programEnrollment": doc.get("ms_program_enrollment"),
+		"program": doc.get("ms_program"),
+		"academicYear": doc.get("ms_academic_year"),
+		"academicTerm": doc.get("ms_academic_term"),
+		"postingDate": str(doc.posting_date or ""),
+		"dueDate": str(doc.due_date or ""),
+		"total": flt(doc.grand_total),
+		"outstanding": flt(doc.outstanding_amount),
+		"docstatus": doc.docstatus,
+		"isDraft": doc.docstatus == 0,
+		"status": _status_of(doc.grand_total, doc.outstanding_amount, doc.docstatus),
+		"items": [
+			{
+				"idx": i.idx,
+				"item": i.item_code,
+				"description": i.description,
+				"qty": flt(i.qty),
+				"rate": flt(i.rate),
+				"amount": flt(i.amount),
+			}
+			for i in doc.items
+		],
 	}
+
+
+def _resolve_enrollment(student: str) -> str | None:
+	"""The student's current enrolment, when there is exactly one obvious choice."""
+	rows = frappe.get_all(
+		"Program Enrollment",
+		filters={"student": student, "docstatus": 1},
+		pluck="name",
+		order_by="creation desc",
+	)
+	return rows[0] if rows else None
 
 
 @frappe.whitelist()
@@ -332,3 +396,87 @@ def list_invoices(
 		"page": page,
 		"page_size": page_size,
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def get_invoice(invoice: str, persona: str = None):
+	"""One invoice with its lines, for the edit screen."""
+	if not frappe.db.exists("Sales Invoice", invoice):
+		return fail("Invoice not found", "لم يتم العثور على الفاتورة")
+	return _invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def submit_invoice(invoice: str, persona: str = None):
+	"""Post a draft to the ledger."""
+	if not frappe.db.exists("Sales Invoice", invoice):
+		return fail("Invoice not found", "لم يتم العثور على الفاتورة")
+
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if doc.docstatus == 1:
+		return fail("Already submitted", "الفاتورة معتمدة مسبقاً")
+	if doc.docstatus == 2:
+		return fail("This invoice is cancelled", "هذه الفاتورة ملغاة")
+
+	doc.submit()
+	frappe.db.commit()
+	return _invoice_payload(doc)
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def cancel_invoice(invoice: str, persona: str = None):
+	"""Reverse a posted invoice.
+
+	Cancelling writes reversing GL entries rather than deleting anything, so
+	the audit trail stays intact — which is why a correction is cancel then
+	amend, not an edit in place.
+	"""
+	if not frappe.db.exists("Sales Invoice", invoice):
+		return fail("Invoice not found", "لم يتم العثور على الفاتورة")
+
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if doc.docstatus == 2:
+		return fail("Already cancelled", "الفاتورة ملغاة مسبقاً")
+
+	paid = flt(doc.grand_total) - flt(doc.outstanding_amount)
+	if doc.docstatus == 1 and paid > 0.005:
+		# Cancelling would strand the payment; the money has to be dealt with
+		# first, and saying so is more useful than a foreign-key error.
+		return fail(
+			"This invoice has payments against it; cancel those first",
+			"توجد دفعات مسجلة على هذه الفاتورة — ألغِ الدفعات أولاً",
+		)
+
+	if doc.docstatus == 0:
+		frappe.delete_doc("Sales Invoice", invoice, ignore_permissions=True)
+		frappe.db.commit()
+		return {"id": invoice, "deleted": True}
+
+	doc.cancel()
+	frappe.db.commit()
+	return _invoice_payload(doc)
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def student_enrollments(student: str, persona: str = None):
+	"""The enrolments an invoice for this student may be attached to."""
+	rows = frappe.get_all(
+		"Program Enrollment",
+		filters={"student": student, "docstatus": 1},
+		fields=["name", "program", "academic_year", "academic_term", "enrollment_date"],
+		order_by="creation desc",
+	)
+	return [
+		{
+			"id": r.name,
+			"program": r.program,
+			"academicYear": r.academic_year,
+			"academicTerm": r.academic_term,
+			"enrolledOn": str(r.enrollment_date or ""),
+		}
+		for r in rows
+	]

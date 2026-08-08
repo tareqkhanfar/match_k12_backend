@@ -40,6 +40,58 @@ CUSTOM_FIELDS = {
 	"Guardian": [
 		dict(ID_NUMBER, reqd=0, insert_after="guardian_name"),
 	],
+	# v16 bills school fees as Sales Invoices, but Education only adds `student`
+	# and `fee_schedule` — there is no link to the enrolment the fee belongs to.
+	# The old `Fees` doctype made that link mandatory, and losing it would mean
+	# an invoice that cannot be tied to a programme, year or term. So it is
+	# added here, and enforced in `ms_billing.validate_student_invoice`.
+	"Sales Invoice": [
+		{
+			"fieldname": "ms_program_enrollment",
+			"label": "التسجيل الدراسي",
+			"fieldtype": "Link",
+			"options": "Program Enrollment",
+			"insert_after": "student",
+			"translatable": 0,
+			# Mandatory only when the invoice names a student, so ordinary
+			# (non-school) sales invoices are untouched.
+			"mandatory_depends_on": "eval:!!doc.student",
+			"depends_on": "eval:!!doc.student",
+		},
+		{
+			"fieldname": "ms_academic_year",
+			"label": "العام الدراسي",
+			"fieldtype": "Link",
+			"options": "Academic Year",
+			"insert_after": "ms_program_enrollment",
+			"read_only": 1,
+			"fetch_from": "ms_program_enrollment.academic_year",
+			"translatable": 0,
+			"depends_on": "eval:!!doc.student",
+		},
+		{
+			"fieldname": "ms_academic_term",
+			"label": "الفصل الدراسي",
+			"fieldtype": "Link",
+			"options": "Academic Term",
+			"insert_after": "ms_academic_year",
+			"read_only": 1,
+			"fetch_from": "ms_program_enrollment.academic_term",
+			"translatable": 0,
+			"depends_on": "eval:!!doc.student",
+		},
+		{
+			"fieldname": "ms_program",
+			"label": "البرنامج",
+			"fieldtype": "Link",
+			"options": "Program",
+			"insert_after": "ms_academic_term",
+			"read_only": 1,
+			"fetch_from": "ms_program_enrollment.program",
+			"translatable": 0,
+			"depends_on": "eval:!!doc.student",
+		},
+	],
 }
 
 

@@ -133,13 +133,15 @@ after_migrate = "match_schools.setup.install.after_install"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+# A school invoice must name the enrolment it belongs to, and must bill the
+# student's own customer. Enforced as a document hook rather than inside an
+# endpoint so it holds for the ERPNext desk and imports too — an accounting
+# rule that only applies on one path is not a rule.
+doc_events = {
+	"Sales Invoice": {
+		"validate": "match_schools.ms_billing.validate_student_invoice",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
