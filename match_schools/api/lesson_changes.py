@@ -329,7 +329,16 @@ def undo_change(change: str, persona: str = None):
 		if doc.change_type == "Cancelled":
 			frappe.db.set_value("Course Schedule", lesson, "docstatus", 1, update_modified=False)
 		if doc.original_instructor:
-			frappe.db.set_value("Course Schedule", lesson, "instructor", doc.original_instructor)
+			frappe.db.set_value(
+				"Course Schedule",
+				lesson,
+				{
+					"instructor": doc.original_instructor,
+					"instructor_name": frappe.db.get_value(
+						"Instructor", doc.original_instructor, "instructor_name"
+					),
+				},
+			)
 		if doc.original_room:
 			frappe.db.set_value("Course Schedule", lesson, "room", doc.original_room)
 

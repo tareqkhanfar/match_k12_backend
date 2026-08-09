@@ -69,8 +69,18 @@ class MSLessonChange(Document):
 			return
 
 		if self.instructor:
+			# `instructor_name` is a denormalised copy Course Schedule fills on
+			# save. Writing only `instructor` leaves the old name displayed,
+			# so the timetable would still show whoever was replaced.
 			frappe.db.set_value(
-				"Course Schedule", self.course_schedule, "instructor", self.instructor
+				"Course Schedule",
+				self.course_schedule,
+				{
+					"instructor": self.instructor,
+					"instructor_name": frappe.db.get_value(
+						"Instructor", self.instructor, "instructor_name"
+					),
+				},
 			)
 		if self.room:
 			frappe.db.set_value("Course Schedule", self.course_schedule, "room", self.room)
