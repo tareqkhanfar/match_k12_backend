@@ -49,8 +49,11 @@ TYPE_ICON = {
 }
 
 
-def _visible_filters(persona: str, scope: dict) -> dict | None:
-	"""Which resources this persona may see. None means nothing."""
+def _visible_filters(persona: str, scope: dict, student: str = None) -> dict | None:
+	"""Which resources this persona may see. None means nothing.
+
+	`student` narrows a family to one child's subjects.
+	"""
 	if persona in BACK_OFFICE:
 		return {}
 
@@ -62,6 +65,10 @@ def _visible_filters(persona: str, scope: dict) -> dict | None:
 
 	# Student or parent: the subjects their classes are taught.
 	students = scope.get("students") or []
+	if student:
+		if student not in students:
+			frappe.throw(_("You are not allowed to view this student."), frappe.PermissionError)
+		students = [student]
 	if not students:
 		return None
 
@@ -110,11 +117,12 @@ def list_resources(
 	course: str = None,
 	resource_type: str = None,
 	search: str = None,
+	student: str = None,
 	persona: str = None,
 ):
 	"""Material grouped by subject."""
 	scope = resolve_scope(persona)
-	filters = _visible_filters(persona, scope)
+	filters = _visible_filters(persona, scope, student)
 	if filters is None:
 		return {"subjects": [], "total": 0, "types": _type_list()}
 

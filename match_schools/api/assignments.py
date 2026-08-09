@@ -33,9 +33,15 @@ def list_assignments(
 	student_group: str = None,
 	course: str = None,
 	status: str = None,
+	student: str = None,
 	persona: str = None,
 ):
-	"""Assignments visible to the caller, with submission progress."""
+	"""Assignments visible to the caller, with submission progress.
+
+	`student` narrows a family's view to one child. A guardian with several
+	children otherwise sees every child's work in one list, which is not what
+	they picked in the header.
+	"""
 	scope = resolve_scope(persona)
 	filters = {}
 
@@ -45,7 +51,14 @@ def list_assignments(
 			return []
 		filters["instructor"] = instructor
 	elif persona in (ROLE_STUDENT, ROLE_PARENT):
-		groups = _groups_for_students(scope.get("students") or [])
+		allowed = scope.get("students") or []
+		if student:
+			if student not in allowed:
+				frappe.throw(
+					_("You are not allowed to view this student."), frappe.PermissionError
+				)
+			allowed = [student]
+		groups = _groups_for_students(allowed)
 		if not groups:
 			return []
 		filters["student_group"] = ["in", groups]

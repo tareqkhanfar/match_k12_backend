@@ -59,8 +59,12 @@ def _room_names() -> dict[str, str]:
 	}
 
 
-def _visible_groups(persona: str, scope: dict) -> list[str] | None:
-	"""Which classes this persona may see exams for. None means all."""
+def _visible_groups(persona: str, scope: dict, student: str = None) -> list[str] | None:
+	"""Which classes this persona may see exams for. None means all.
+
+	`student` narrows a family to one child's classes, which is what the
+	guardian picked in the header.
+	"""
 	if persona in BACK_OFFICE:
 		return None
 
@@ -90,6 +94,10 @@ def _visible_groups(persona: str, scope: dict) -> list[str] | None:
 
 	# Student or parent: the classes their children are enrolled in.
 	students = scope.get("students") or []
+	if student:
+		if student not in students:
+			frappe.throw(_("You are not allowed to view this student."), frappe.PermissionError)
+		students = [student]
 	if not students:
 		return []
 	return sorted(
@@ -109,6 +117,7 @@ def _visible_groups(persona: str, scope: dict) -> list[str] | None:
 def schedule(
 	academic_term: str = None,
 	student_group: str = None,
+	student: str = None,
 	course: str = None,
 	exam_type: str = None,
 	from_date: str = None,
@@ -117,7 +126,7 @@ def schedule(
 ):
 	"""The exam timetable, scoped to the caller."""
 	scope = resolve_scope(persona)
-	groups = _visible_groups(persona, scope)
+	groups = _visible_groups(persona, scope, student)
 	if groups is not None and not groups:
 		return {"exams": [], "upcoming": 0, "past": 0, "types": _type_list()}
 

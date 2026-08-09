@@ -86,11 +86,15 @@ def list_quizzes(
 	student_group: str = None,
 	course: str = None,
 	status: str = None,
+	student: str = None,
 	page: int = 1,
 	page_size: int = 20,
 	persona: str = None,
 ):
-	"""Quizzes visible to the caller."""
+	"""Quizzes visible to the caller.
+
+	`student` narrows a family's view to the child chosen in the header.
+	"""
 	scope = resolve_scope(persona)
 	filters = {}
 
@@ -102,6 +106,12 @@ def list_quizzes(
 			return {"items": [], "total": 0, "page": 1, "page_size": cint(page_size) or 20}
 		filters["course"] = ["in", sorted(courses)]
 	elif persona in (ROLE_STUDENT, ROLE_PARENT):
+		if student:
+			if student not in (scope.get("students") or []):
+				frappe.throw(
+					_("You are not allowed to view this student."), frappe.PermissionError
+				)
+			scope = {**scope, "students": [student]}
 		groups = _groups_of(scope)
 		if not groups:
 			return {"items": [], "total": 0, "page": 1, "page_size": cint(page_size) or 20}
