@@ -29,13 +29,26 @@ WEEK_DAYS_AR = ["الاثنين", "الثلاثاء", "الأربعاء", "ال�
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
-def list_classes(program: str = None, academic_year: str = None, persona: str = None):
+def list_classes(
+	program: str = None,
+	academic_year: str = None,
+	academic_term: str = None,
+	batch: str = None,
+	search: str = None,
+	persona: str = None,
+):
 	filters = {"disabled": 0}
 	academic_year = academic_year or get_default_academic_year()
 	if academic_year:
 		filters["academic_year"] = academic_year
 	if program:
 		filters["program"] = program
+	if academic_term:
+		filters["academic_term"] = academic_term
+	if batch:
+		filters["batch"] = batch
+	if search:
+		filters["student_group_name"] = ["like", f"%{search}%"]
 
 	if persona == ROLE_TEACHER:
 		scope = resolve_scope(persona)
@@ -114,36 +127,75 @@ def class_students(student_group: str, persona: str = None):
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
-def list_subjects(persona: str = None):
+def list_subjects(
+	search: str = None,
+	department: str = None,
+	program: str = None,
+	persona: str = None,
+):
+	"""Subjects with the grades that teach them and who teaches each.
+
+	Filters are applied before the enrichment below, so narrowing the list also
+	narrows the work done to build it.
+	"""
+	filters: dict = {}
+	if search:
+		filters["course_name"] = ["like", f"%{search}%"]
+	if department:
+		filters["department"] = department
+
+	# Belonging to a programme is a property of Program Course, so it is
+	# resolved to a set of course names first.
+	if program:
+		in_program = frappe.get_all(
+			"Program Course",
+			filters={"parent": program, "parenttype": "Program"},
+			pluck="course",
+		)
+		if not in_program:
+			return []
+		filters["name"] = ["in", in_program]
+
 	courses = frappe.get_all(
 		"Course",
+		filters=filters,
 		fields=["name", "course_name", "department"],
 		order_by="course_name",
 	)
-	# Which programs (grades) each course belongs to, and who teaches it.
+	if not courses:
+		return []
+
+	names = [c["name"] for c in courses]
+
+	# Three queries for the whole list rather than three per course.
+	grades: dict[str, list[str]] = {}
+	for r in frappe.get_all(
+		"Program Course",
+		filters={"course": ["in", names], "parenttype": "Program"},
+		fields=["course", "parent"],
+	):
+		grades.setdefault(r.course, []).append(r.parent)
+
+	group_of: dict[str, str] = {}
+	for r in frappe.get_all(
+		"Student Group",
+		filters={"course": ["in", names], "disabled": 0},
+		fields=["name", "course"],
+	):
+		group_of.setdefault(r.course, r.name)
+
+	teacher_of: dict[str, str] = {}
+	if group_of:
+		for r in frappe.get_all(
+			"Student Group Instructor",
+			filters={"parent": ["in", list(group_of.values())], "parenttype": "Student Group"},
+			fields=["parent", "instructor_name"],
+		):
+			teacher_of.setdefault(r.parent, r.instructor_name)
+
 	for c in courses:
-		programs = frappe.get_all(
-			"Program Course",
-			filters={"course": c["name"], "parenttype": "Program"},
-			fields=["parent"],
-		)
-		c["grades"] = [p.parent for p in programs]
-		groups = frappe.get_all(
-			"Student Group",
-			filters={"course": c["name"], "disabled": 0},
-			fields=["name"],
-			limit=1,
-		)
-		teacher = None
-		if groups:
-			instructor = frappe.get_all(
-				"Student Group Instructor",
-				filters={"parent": groups[0].name, "parenttype": "Student Group"},
-				fields=["instructor_name"],
-				limit=1,
-			)
-			teacher = instructor[0].instructor_name if instructor else None
-		c["teacher"] = teacher
+		c["grades"] = grades.get(c["name"], [])
+		c["teacher"] = teacher_of.get(group_of.get(c["name"], ""), None)
 		c["id"] = c["name"]
 		c["name_ar"] = c["course_name"]
 		# v16's Course has no code field; the record name doubles as the code.
@@ -905,4 +957,33 @@ def teacher_filter_options(persona: str = None):
 			order_by="name",
 			limit_page_length=0,
 		),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def class_filter_options(persona: str = None):
+	"""Values worth filtering classes by, taken from the groups that exist."""
+	rows = frappe.get_all(
+		"Student Group",
+		filters={"disabled": 0},
+		fields=["program", "academic_year", "academic_term", "batch"],
+		limit_page_length=0,
+	)
+	return {
+		"programs": sorted({r.program for r in rows if r.program}),
+		"academicYears": sorted({r.academic_year for r in rows if r.academic_year}),
+		"academicTerms": sorted({r.academic_term for r in rows if r.academic_term}),
+		"batches": sorted({r.batch for r in rows if r.batch}),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def subject_filter_options(persona: str = None):
+	"""Values worth filtering subjects by."""
+	departments = frappe.get_all("Course", pluck="department", limit_page_length=0)
+	return {
+		"departments": sorted({d for d in departments if d}),
+		"programs": frappe.get_all("Program", pluck="name", order_by="name"),
 	}

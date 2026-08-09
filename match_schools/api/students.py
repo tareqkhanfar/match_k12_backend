@@ -591,6 +591,8 @@ def _email_is_mandatory() -> bool:
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def list_guardians(
 	search: str = None,
+	occupation: str = None,
+	has_login: str = None,
 	page: int = 1,
 	page_size: int = 20,
 	sort_by: str = None,
@@ -601,6 +603,13 @@ def list_guardians(
 	filters = {}
 	if search:
 		filters["guardian_name"] = ["like", f"%{search}%"]
+	if occupation:
+		filters["occupation"] = occupation
+	# Whether an account has been issued — the office chases the ones without.
+	if has_login == "yes":
+		filters["user"] = ["!=", ""]
+	elif has_login == "no":
+		filters["user"] = ["in", ["", None]]
 
 	total = frappe.db.count("Guardian", filters)
 	page, page_size, offset = paginate(page, page_size)
@@ -857,3 +866,17 @@ def remove_student_photo(student: str, persona: str = None):
 	frappe.db.set_value("Student", student, "image", None)
 	frappe.db.commit()
 	return {"student": student, "image": None}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def guardian_filter_options(persona: str = None):
+	"""Values worth filtering guardians by."""
+	rows = frappe.get_all("Guardian", fields=["occupation"], limit_page_length=0)
+	return {
+		"occupations": sorted({r.occupation for r in rows if r.occupation}),
+		"loginStates": [
+			{"value": "yes", "label": "لديه حساب"},
+			{"value": "no", "label": "بدون حساب"},
+		],
+	}
