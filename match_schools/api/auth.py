@@ -75,6 +75,33 @@ def login(email: str, password: str):
 			message_en="Invalid email or password.",
 			message_ar="البريد الإلكتروني أو كلمة المرور غير صحيحة.",
 		)
+	except frappe.SecurityException:
+		# Too many wrong passwords: Frappe locks the account for
+		# `allow_login_after_fail` seconds. This is a separate exception from
+		# AuthenticationError, so without this branch it escaped as a bare 500
+		# and the family saw "something went wrong" instead of being told to
+		# wait — and support was asked to "fix the broken login".
+		frappe.clear_messages()
+		frappe.local.response["http_status_code"] = 429
+		seconds = cint(
+			frappe.db.get_single_value("System Settings", "allow_login_after_fail")
+		) or 60
+		return fail(
+			message_en=(
+				f"Too many failed sign-in attempts. Try again in {seconds} seconds."
+			),
+			message_ar=(
+				f"تم تجاوز عدد محاولات الدخول المسموح بها. الرجاء المحاولة بعد {seconds} ثانية."
+			),
+		)
+	except frappe.ValidationError:
+		# A disabled account raises this rather than AuthenticationError.
+		frappe.clear_messages()
+		frappe.local.response["http_status_code"] = 403
+		return fail(
+			message_en="This account is disabled. Please contact the school.",
+			message_ar="هذا الحساب معطّل. الرجاء التواصل مع إدارة المدرسة.",
+		)
 
 	persona = get_persona()
 	if persona is None:
