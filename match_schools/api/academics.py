@@ -156,23 +156,55 @@ def list_subjects(persona: str = None):
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
-def list_teachers(search: str = None, persona: str = None):
+def list_teachers(
+	search: str = None,
+	department: str = None,
+	status: str = None,
+	gender: str = None,
+	student_group: str = None,
+	persona: str = None,
+):
 	filters = {}
 	if search:
 		filters["instructor_name"] = ["like", f"%{search}%"]
+	if department:
+		filters["department"] = department
+	if status:
+		filters["status"] = status
+	if gender:
+		filters["gender"] = gender
+
+	# Teaching a particular class is a property of the group, not the
+	# instructor, so it is resolved to a set of names first.
+	if student_group:
+		teaching = frappe.get_all(
+			"Student Group Instructor",
+			filters={"parent": student_group, "parenttype": "Student Group"},
+			pluck="instructor",
+		)
+		if not teaching:
+			return []
+		filters["name"] = ["in", teaching]
+
 	rows = frappe.get_all(
 		"Instructor",
 		filters=filters,
 		fields=["name", "instructor_name", "gender", "image", "status", "department", "employee"],
 		order_by="instructor_name",
 	)
-	for r in rows:
-		groups = frappe.get_all(
+
+	# One query for every instructor's groups rather than one per instructor.
+	by_instructor: dict[str, list[str]] = {}
+	if rows:
+		for g in frappe.get_all(
 			"Student Group Instructor",
-			filters={"instructor": r["name"], "parenttype": "Student Group"},
-			fields=["parent"],
-		)
-		group_names = [g.parent for g in groups]
+			filters={"instructor": ["in", [r["name"] for r in rows]], "parenttype": "Student Group"},
+			fields=["instructor", "parent"],
+		):
+			by_instructor.setdefault(g.instructor, []).append(g.parent)
+
+	for r in rows:
+		group_names = by_instructor.get(r["name"], [])
 		r["id"] = r["name"]
 		r["name_ar"] = r["instructor_name"]
 		r["classes"] = group_names
@@ -851,3 +883,26 @@ def exam_roster(assessment_plan: str, persona: str = None):
 def list_departments(persona: str = None):
 	"""Departments an instructor can belong to."""
 	return frappe.get_all("Department", fields=["name"], order_by="name", limit=200)
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def teacher_filter_options(persona: str = None):
+	"""The values worth filtering teachers by.
+
+	Taken from the instructors that exist rather than a fixed list, so the
+	dropdowns never offer a department nobody belongs to.
+	"""
+	rows = frappe.get_all("Instructor", fields=["department", "status", "gender"])
+	return {
+		"departments": sorted({r.department for r in rows if r.department}),
+		"statuses": sorted({r.status for r in rows if r.status}),
+		"genders": sorted({r.gender for r in rows if r.gender}),
+		"groups": frappe.get_all(
+			"Student Group",
+			filters={"disabled": 0},
+			fields=["name", "student_group_name"],
+			order_by="name",
+			limit_page_length=0,
+		),
+	}
