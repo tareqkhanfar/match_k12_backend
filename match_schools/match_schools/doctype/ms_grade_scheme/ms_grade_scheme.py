@@ -13,24 +13,64 @@ class MSGradeScheme(Document):
 		self.validate_single_default()
 
 	def validate_weights(self):
-		"""Non-bonus components must add up to exactly 100%."""
+		"""Weights must add up to 100% — per quarter when the plan uses them.
+
+		A plan is now a tree: a category carries the weight, and the individual
+		assessments inside it carry none (the category's weight is what reaches
+		the final mark). Only categories are summed, and a term split into two
+		quarters is checked as two separate hundreds rather than one two
+		hundred.
+		"""
 		if not self.components:
 			frappe.throw(_("Add at least one component."))
 
-		graded = [c for c in self.components if c.component_type != "Bonus"]
-		total = sum(flt(c.weight) for c in graded)
-		self.total_weight = total
-
-		if not graded:
+		# Assessments nested inside a category contribute no weight of their own.
+		categories = [
+			c
+			for c in self.components
+			if c.component_type != "Bonus" and not c.get("ms_parent_component")
+		]
+		if not categories:
 			frappe.throw(_("A scheme needs at least one non-bonus component."))
 
-		# Allow a rounding cent either way.
-		if abs(total - 100) > 0.01:
-			frappe.throw(
-				_("Component weights must total 100%. They currently total {0}%.").format(
-					round(total, 2)
+		self.total_weight = sum(flt(c.weight) for c in categories)
+
+		by_quarter: dict[str, float] = {}
+		for c in categories:
+			by_quarter.setdefault(c.get("ms_quarter") or "", 0.0)
+			by_quarter[c.get("ms_quarter") or ""] += flt(c.weight)
+
+		# A quarter's categories are written in that quarter's own marks — 40
+		# for a 40-mark quarter — so the expected total comes from the term's
+		# quarter definition. A plan with no quarters (the flat plans that
+		# predate them) is still checked against 100.
+		expected_by_quarter = self._quarter_totals()
+
+		for quarter, total in by_quarter.items():
+			expected = expected_by_quarter.get(quarter, 100 if not quarter else None)
+			if expected is None:
+				# The quarter no longer exists on the term; the API reports this
+				# more clearly, so the doctype does not block the save here.
+				continue
+			# Allow a rounding cent either way.
+			if abs(total - expected) > 0.01:
+				label = quarter or _("the plan")
+				frappe.throw(
+					_("Weights for {0} must total {1}. They currently total {2}.").format(
+						label, round(expected, 2), round(total, 2)
+					)
 				)
-			)
+
+	def _quarter_totals(self) -> dict:
+		"""How many marks each quarter of this plan's term is worth."""
+		if not self.academic_term:
+			return {}
+		rows = frappe.get_all(
+			"MS Term Quarter",
+			filters={"parent": self.academic_term, "parenttype": "Academic Term"},
+			fields=["quarter_name", "total_marks"],
+		)
+		return {r.quarter_name: flt(r.total_marks) for r in rows}
 
 		for c in self.components:
 			if flt(c.max_score) <= 0:

@@ -236,11 +236,13 @@ def totals(**kwargs) -> dict:
 	outstanding = flt(row.outstanding)
 	collected = total - outstanding
 	return {
-		"total": total,
-		"collected": collected,
-		"outstanding": outstanding,
+		# Rounded to two decimals: these are currency figures and a percentage,
+		# and an unrounded float renders as 65.21739130434783 on the screen.
+		"total": round(total, 2),
+		"collected": round(collected, 2),
+		"outstanding": round(outstanding, 2),
 		"count": cint(row.count),
-		"collection_rate": flt(collected / total * 100) if total else 0.0,
+		"collection_rate": round(collected / total * 100, 2) if total else 0.0,
 	}
 
 

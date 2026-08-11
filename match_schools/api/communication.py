@@ -222,8 +222,13 @@ def _as_html(text: str) -> str:
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
-def inbox(limit: int = 50, persona: str = None):
-	"""Latest message per conversation involving the current user."""
+def inbox(limit: int = 50, student: str = None, persona: str = None):
+	"""Latest message per conversation involving the current user.
+
+	A guardian with several children gets one inbox per child rather than a
+	merged list: passing `student` narrows it to conversations about that
+	child, which is how a parent actually thinks about school correspondence.
+	"""
 	user = frappe.session.user
 	limit = min(max(cint(limit) or 50, 1), 200)
 
@@ -245,6 +250,12 @@ def inbox(limit: int = 50, persona: str = None):
 		{"user": user, "limit": limit},
 		as_dict=True,
 	)
+
+	# Narrow to one child. Threads with no student attached — a school-wide
+	# announcement, say — stay visible under every child rather than
+	# disappearing when a filter is applied.
+	if student:
+		rows = [r for r in rows if not r.about_student or r.about_student == student]
 
 	out = []
 	for r in rows:
@@ -501,3 +512,58 @@ def _instructor_user(instructor: str) -> str | None:
 			"User", {"full_name": instructor_name, "enabled": 1}, "name"
 		)
 	return None
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_PARENT, ROLE_STUDENT)
+def unread_by_child(persona: str = None):
+	"""Unread message counts per child, for the family inbox switcher.
+
+	Returned as its own endpoint rather than folded into `inbox`, which
+	returns a plain list that several screens already consume — changing that
+	shape would break them for no benefit.
+	"""
+	from match_schools.api.utils import resolve_scope
+
+	scope = resolve_scope(persona)
+	children = scope.get("students") or []
+	if not children:
+		return {"children": [], "total": 0}
+
+	user = frappe.session.user
+	rows = frappe.db.sql(
+		"""
+		SELECT about_student, COUNT(*) AS unread
+		  FROM `tabMS Message`
+		 WHERE recipient = %(user)s
+		   AND read_by_recipient = 0
+		   AND IFNULL(about_student, '') != ''
+		 GROUP BY about_student
+		""",
+		{"user": user},
+		as_dict=True,
+	)
+	by_student = {r.about_student: cint(r.unread) for r in rows}
+
+	# Messages with no child attached — school-wide notices — are counted once
+	# and shown separately rather than being credited to an arbitrary child.
+	general = frappe.db.count(
+		"MS Message",
+		{"recipient": user, "read_by_recipient": 0, "about_student": ["in", ["", None]]},
+	)
+
+	names = {
+		r.name: r.student_name
+		for r in frappe.get_all(
+			"Student", filters={"name": ["in", children]}, fields=["name", "student_name"]
+		)
+	}
+
+	return {
+		"children": [
+			{"id": s, "name": names.get(s) or s, "unread": by_student.get(s, 0)}
+			for s in children
+		],
+		"general": cint(general),
+		"total": sum(by_student.get(s, 0) for s in children) + cint(general),
+	}

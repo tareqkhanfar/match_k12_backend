@@ -151,6 +151,9 @@ doc_events = {
 scheduler_events = {
 	"daily": [
 		"match_schools.api.alerts.run_rules_scheduled",
+		# Marks and results whose release date has arrived become visible to
+		# families without anyone having to remember to publish them.
+		"match_schools.api.grade_appeals.publish_due_marks",
 	],
 }
 

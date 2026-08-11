@@ -372,6 +372,23 @@ def submit_term(
 		) or get_default_academic_year()
 		doc.instructor = scope.get("instructor")
 
+	# What changed since the administration reopened this course, captured at
+	# the moment of resubmission. Without it the reviewer would have to take on
+	# trust that the teacher edited only the mark under appeal — the whole point
+	# of reopening one subject is that the rest stays untouched.
+	changed_summary = None
+	if doc.get("ms_reopened_on"):
+		from match_schools.api.grade_appeals import change_log
+
+		log = change_log(
+			student_group=student_group,
+			course=course,
+			academic_term=academic_term,
+			persona=persona,
+		)
+		data = log.get("data") if isinstance(log, dict) and "data" in log else log
+		changed_summary = data or {}
+
 	doc.status = "Submitted"
 	doc.students_count = len(roster)
 	doc.submitted_by = frappe.session.user
@@ -380,11 +397,24 @@ def submit_term(
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 
+	result = {"id": doc.name, "status": doc.status, "students": len(roster)}
+	if changed_summary:
+		result["changed"] = changed_summary.get("total", 0)
+		result["changedStudents"] = changed_summary.get("changedStudents", [])
+
 	return {
 		"success": True,
-		"data": {"id": doc.name, "status": doc.status, "students": len(roster)},
+		"data": result,
 		"message_en": "Marks submitted to the administration.",
-		"message_ar": "تم ترحيل العلامات إلى الإدارة.",
+		"message_ar": (
+			"تم ترحيل العلامات إلى الإدارة."
+			+ (
+				f" تم تعديل {changed_summary.get('total', 0)} علامة لـ "
+				f"{len(changed_summary.get('changedStudents', []))} طالب."
+				if changed_summary and changed_summary.get("total")
+				else ""
+			)
+		),
 	}
 
 
@@ -466,6 +496,40 @@ def publish_term(
 	}
 
 
+def _changes_since_reopen(
+	student_group: str, course: str, academic_term: str | None, reopened_on
+) -> int:
+	"""How many marks moved since this course was reopened.
+
+	Counted here rather than in the change log so the overview can show a badge
+	without loading every version row for every subject on the page.
+	"""
+	if not reopened_on:
+		return 0
+	entries = frappe.get_all(
+		"MS Gradebook Entry",
+		filters={
+			"student_group": student_group,
+			"course": course,
+			**({"academic_term": academic_term} if academic_term else {}),
+		},
+		pluck="name",
+	)
+	if not entries:
+		return 0
+	rows = frappe.db.sql(
+		"""
+		SELECT COUNT(*) FROM `tabVersion`
+		 WHERE ref_doctype = 'MS Gradebook Entry'
+		   AND docname IN %(names)s
+		   AND creation > %(since)s
+		   AND data LIKE '%%"score"%%'
+		""",
+		{"names": tuple(entries), "since": reopened_on},
+	)
+	return cint(rows[0][0]) if rows else 0
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def term_overview(academic_term: str = None, persona: str = None):
@@ -483,7 +547,10 @@ def term_overview(academic_term: str = None, persona: str = None):
 		subs = frappe.get_all(
 			"MS Term Submission",
 			filters={"student_group": g.name, "academic_term": academic_term},
-			fields=["name", "course", "status", "submitted_on", "instructor"],
+			fields=[
+				"name", "course", "status", "submitted_on", "instructor",
+				"ms_reopened_on", "ms_reopened_by", "ms_reopen_reason",
+			],
 		)
 		expected = len(
 			{
@@ -521,6 +588,15 @@ def term_overview(academic_term: str = None, persona: str = None):
 						"status_label": STATUS_AR.get(s.status, s.status),
 						"instructor": s.instructor,
 						"submitted_on": str(s.submitted_on or ""),
+						# A subject that was reopened for an appeal carries its
+						# reason and how many marks moved since, so the reviewer
+						# can check the teacher touched only what was disputed.
+						"reopened_on": str(s.ms_reopened_on or ""),
+						"reopened_by": s.ms_reopened_by,
+						"reopen_reason": s.ms_reopen_reason,
+						"changed_count": _changes_since_reopen(
+							g.name, s.course, academic_term, s.ms_reopened_on
+						),
 					}
 					for s in subs
 				],

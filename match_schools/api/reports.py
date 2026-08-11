@@ -285,6 +285,6 @@ def _financial(months: int = 6) -> dict:
 			"total": total,
 			"collected": total - outstanding,
 			"outstanding": outstanding,
-			"collection_rate": round((total - outstanding) / total * 100, 1) if total else 0.0,
+			"collection_rate": round((total - outstanding) / total * 100, 2) if total else 0.0,
 		},
 	}

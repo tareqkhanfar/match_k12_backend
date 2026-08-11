@@ -329,7 +329,25 @@ def resolve_scope(persona: str) -> dict:
 	return scope
 
 
+# Where a user's chosen period is stored. Defined here rather than imported
+# from api.academic_context to avoid a circular import: that module imports
+# this one.
+_PREF_YEAR = "ms_academic_year"
+_PREF_TERM = "ms_academic_term"
+
+
 def get_default_academic_year() -> str | None:
+	"""The academic year every screen should read.
+
+	The user's own choice from the header wins. Almost the whole API already
+	calls this helper, so honouring the preference here is what makes the
+	header switcher apply system-wide rather than only to the few screens that
+	knew to ask for it.
+	"""
+	chosen = frappe.defaults.get_user_default(_PREF_YEAR) or None
+	if chosen and frappe.db.exists("Academic Year", chosen):
+		return chosen
+
 	year = frappe.db.get_single_value("Education Settings", "current_academic_year")
 	if year:
 		return year
@@ -338,4 +356,31 @@ def get_default_academic_year() -> str | None:
 
 
 def get_default_academic_term() -> str | None:
+	"""The academic term every screen should read — the user's choice first.
+
+	A term belonging to a different year than the selected one is ignored: the
+	combination would silently filter everything to nothing.
+	"""
+	year = frappe.defaults.get_user_default(_PREF_YEAR) or None
+	chosen = frappe.defaults.get_user_default(_PREF_TERM) or None
+
+	if chosen and frappe.db.exists("Academic Term", chosen):
+		if not year or frappe.db.get_value("Academic Term", chosen, "academic_year") == year:
+			return chosen
+
+	# A year is selected but its term is not — either none was chosen, or the
+	# stored one belongs to a different year. Falling back to the school-wide
+	# term here would pair the selected year with a term from another year and
+	# quietly filter every screen to nothing, so the selected year's own term
+	# is used instead.
+	if year:
+		rows = frappe.get_all(
+			"Academic Term",
+			filters={"academic_year": year},
+			pluck="name",
+			order_by="term_start_date",
+			limit=1,
+		)
+		return rows[0] if rows else None
+
 	return frappe.db.get_single_value("Education Settings", "current_academic_term")

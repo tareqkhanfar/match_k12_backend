@@ -20,6 +20,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, today
 
+from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -361,6 +362,14 @@ def save_exam(payload: str | dict, persona: str = None):
 		)
 
 	_assert_may_schedule(persona, data["student_group"], data["course"])
+
+	# An exam cannot be sat on a day the school is closed.
+	holiday = ctx.holiday_reason(data["schedule_date"])
+	if holiday:
+		return fail(
+			message_en=f"The school is closed on that date ({holiday}).",
+			message_ar=f"لا يمكن جدولة امتحان في يوم عطلة — {holiday}.",
+		)
 
 	from_time = data.get("from_time")
 	to_time = data.get("to_time")

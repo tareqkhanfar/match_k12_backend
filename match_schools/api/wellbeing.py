@@ -60,6 +60,17 @@ def _assert_can_see(persona: str, student: str):
 # --- Health record ---------------------------------------------------------
 
 
+def split_categories(value: str | None) -> list[str]:
+	"""One record's categories, as a list.
+
+	Stored comma-separated so a single incident can be both "late" and "no
+	homework". Older records hold a single value, which is a one-item list.
+	"""
+	if not value:
+		return []
+	return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def get_health_record(student: str, persona: str = None):
@@ -385,17 +396,25 @@ def behaviour_summary(student: str, persona: str = None):
 		as_dict=True,
 	)[0]
 
-	by_category = frappe.db.sql(
+	# A record may carry several categories ("Late Arrival,Homework"), so the
+	# split happens here rather than in SQL — grouping on the raw column would
+	# invent a category called "Late Arrival,Homework".
+	raw_categories = frappe.db.sql(
 		"""
-		SELECT category, COUNT(*) AS count, SUM(points) AS points
+		SELECT category, points
 		FROM `tabMS Behaviour Record`
 		WHERE student = %(student)s AND category IS NOT NULL AND category != ''
-		GROUP BY category
-		ORDER BY count DESC
 		""",
 		{"student": student},
 		as_dict=True,
 	)
+	tally: dict[str, dict] = {}
+	for r in raw_categories:
+		for name in split_categories(r.category):
+			bucket = tally.setdefault(name, {"category": name, "count": 0, "points": 0})
+			bucket["count"] += 1
+			bucket["points"] += cint(r.points)
+	by_category = sorted(tally.values(), key=lambda x: -x["count"])
 
 	return {
 		"student": student,

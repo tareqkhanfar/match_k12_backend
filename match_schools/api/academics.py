@@ -645,8 +645,36 @@ def save_subject(payload: str | dict, persona: str = None):
 	if isinstance(programs, list):
 		_sync_course_programs(doc.name, programs)
 
+	# A new teacher gets a login the same way a student or guardian does — the
+	# registrar hands over the slip on the spot rather than chasing IT later.
+	# An Instructor reaches its User through Employee, so the link is made
+	# there when one exists; otherwise the account still works because the
+	# persona resolves by full name as a fallback.
+	credentials = None
+	if not instructor_id and data.get("create_login") is not False:
+		from match_schools.api.credentials import create_account
+
+		existing_user = None
+		if doc.employee:
+			existing_user = frappe.db.get_value("Employee", doc.employee, "user_id")
+
+		if not existing_user:
+			credentials = create_account(
+				ROLE_TEACHER, doc.name, doc.instructor_name, mobile=data.get("mobile")
+			)
+			if doc.employee:
+				frappe.db.set_value(
+					"Employee", doc.employee, "user_id", credentials["user"],
+					update_modified=False,
+				)
+
 	frappe.db.commit()
-	return {"success": True, "data": {"id": doc.name}, "message_en": msg_en, "message_ar": msg_ar}
+	return {
+		"success": True,
+		"data": {"id": doc.name, "name": doc.instructor_name, "credentials": credentials},
+		"message_en": msg_en,
+		"message_ar": msg_ar,
+	}
 
 
 def _sync_course_programs(course: str, programs: list[str]):

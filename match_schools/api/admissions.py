@@ -401,6 +401,55 @@ def transition(applicant: str, to_status: str, reason: str = None, persona: str 
 	return {"id": doc.name, "status": to_status, "statusLabel": STATUS_AR.get(to_status)}
 
 
+def _carry_attachments(from_doctype: str, from_name: str, to_doctype: str, to_name: str) -> int:
+	"""Copy attachments from one record to another.
+
+	The File rows are duplicated rather than moved, so the application keeps
+	its own evidence of what was submitted while the student gains a usable
+	copy. Only the database row is duplicated — both point at the same file on
+	disk, so this costs no extra storage.
+	"""
+	rows = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": from_doctype, "attached_to_name": from_name},
+		fields=["file_name", "file_url", "is_private", "file_size", "attached_to_field"],
+		limit_page_length=0,
+	)
+	copied = 0
+	for r in rows:
+		if r.attached_to_field == "image":
+			# The photo is set on the student record directly by admit().
+			continue
+		if frappe.db.exists(
+			"File",
+			{
+				"attached_to_doctype": to_doctype,
+				"attached_to_name": to_name,
+				"file_url": r.file_url,
+			},
+		):
+			continue
+		try:
+			frappe.get_doc(
+				{
+					"doctype": "File",
+					"file_name": r.file_name,
+					"file_url": r.file_url,
+					"is_private": r.is_private,
+					"file_size": r.file_size,
+					"attached_to_doctype": to_doctype,
+					"attached_to_name": to_name,
+				}
+			).insert(ignore_permissions=True)
+			copied += 1
+		except Exception:
+			# One unreadable file must not stop an admission.
+			frappe.log_error(
+				frappe.get_traceback(), f"carrying {r.file_name} to {to_doctype} failed"
+			)
+	return copied
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def admit(applicant: str, persona: str = None):
@@ -477,6 +526,11 @@ def admit(applicant: str, persona: str = None):
 	# for the insert only.
 	with _education_user_creation_disabled():
 		student.insert(ignore_permissions=True)
+
+	# Paperwork submitted with the application belongs to the student now:
+	# the birth certificate and ID copy were collected once and must not have
+	# to be uploaded again, nor be stranded on a record the family cannot see.
+	_carry_attachments("Student Applicant", applicant, "Student", student.name)
 
 	# The student's own login.
 	account = create_account(

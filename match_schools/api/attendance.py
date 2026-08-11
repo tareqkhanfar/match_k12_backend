@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, flt, getdate, today
 
+from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -19,7 +20,19 @@ from match_schools.api.utils import (
 	ROLE_SECRETARY,
 )
 
-STATUS_AR = {"Present": "حاضر", "Absent": "غائب", "Leave": "إجازة"}
+# "Excused" is an absence the school has accepted a reason for. It is a
+# separate status rather than a flag on Absent because it is excluded from
+# every count: a certificate must not show the pupil as absent that day.
+# "Leave" is kept only so records written before this distinction still read.
+STATUS_AR = {
+	"Present": "حاضر",
+	"Absent": "غائب",
+	"Excused": "غائب بعذر",
+	"Leave": "غائب بعذر",
+}
+
+# Statuses that do not count against a student anywhere.
+EXCUSED = ("Excused", "Leave")
 
 
 @frappe.whitelist()
@@ -69,6 +82,17 @@ def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 	}
 
 
+def _term_of(date) -> str | None:
+	"""The academic term containing this date, if the school defines one."""
+	rows = frappe.get_all(
+		"Academic Term",
+		filters={"term_start_date": ["<=", date], "term_end_date": [">=", date]},
+		pluck="name",
+		limit=1,
+	)
+	return rows[0] if rows else None
+
+
 def _assert_group_access(student_group: str, persona: str):
 	"""A teacher may only touch groups they are assigned to."""
 	if persona in BACK_OFFICE:
@@ -95,6 +119,68 @@ def mark_attendance(student_group: str, date: str, entries: str | list, persona:
 		return fail(message_en="No entries supplied.", message_ar="لم يتم إرسال أي سجلات.")
 
 	date = getdate(date or today())
+
+	# --- Guards ---------------------------------------------------------
+	# Attendance is a legal record, so every one of these refuses the whole
+	# batch rather than saving part of it.
+
+	if date > getdate(today()):
+		return fail(
+			message_en="Attendance cannot be recorded for a future date.",
+			message_ar="لا يمكن تسجيل الحضور لتاريخ مستقبلي.",
+		)
+
+	reason = ctx.holiday_reason(date)
+	if reason:
+		return fail(
+			message_en=f"The school is closed on this date ({reason}).",
+			message_ar=f"المدرسة مغلقة في هذا التاريخ — {reason}.",
+		)
+
+	# A closed term is read-only unless the school allows staff to reopen it.
+	if not ctx.can_write(persona, None, _term_of(date)):
+		return fail(
+			message_en="This academic term is closed.",
+			message_ar="الفصل الدراسي مغلق ولا يمكن التعديل عليه.",
+		)
+
+	# Unknown statuses used to be skipped silently, so a typo in one row saved
+	# the rest and reported success. Now the batch is rejected and named.
+	roster = set(
+		frappe.get_all(
+			"Student Group Student",
+			filters={"parent": student_group, "parenttype": "Student Group"},
+			pluck="student",
+		)
+	)
+	bad_status, not_in_group, seen = [], [], set()
+	for row in rows:
+		student = row.get("student")
+		status = row.get("status")
+		if not student:
+			continue
+		if status not in STATUS_AR:
+			bad_status.append(student)
+		if roster and student not in roster:
+			not_in_group.append(student)
+		if student in seen:
+			return fail(
+				message_en="The same student appears twice in this sheet.",
+				message_ar="تكرر الطالب نفسه أكثر من مرة في هذا الكشف.",
+			)
+		seen.add(student)
+
+	if bad_status:
+		return fail(
+			message_en=f"Invalid status for {len(bad_status)} student(s).",
+			message_ar=f"حالة غير صالحة لـ {len(bad_status)} طالب.",
+		)
+	if not_in_group:
+		return fail(
+			message_en=f"{len(not_in_group)} student(s) are not in this section.",
+			message_ar=f"{len(not_in_group)} طالب غير مسجّل في هذه الشعبة.",
+		)
+
 	saved, updated = 0, 0
 
 	for row in rows:
@@ -202,14 +288,22 @@ def attendance_report(
 		as_dict=True,
 	)
 	counts = {r.status: r.count for r in totals}
-	total = sum(counts.values())
 	present = counts.get("Present", 0)
+	excused = sum(counts.get(k, 0) for k in EXCUSED)
+	absent = counts.get("Absent", 0)
+	# An excused day is left out of the denominator entirely: the school has
+	# accepted the reason, so it must not lower the attendance rate, and a
+	# certificate must not describe the pupil as absent.
+	total = present + absent
+	recorded = total + excused
 
 	daily = frappe.db.sql(
 		f"""
 		SELECT sa.date,
 			COUNT(*) AS total,
-			SUM(CASE WHEN sa.status = 'Present' THEN 1 ELSE 0 END) AS present
+			SUM(CASE WHEN sa.status = 'Present' THEN 1 ELSE 0 END) AS present,
+			SUM(CASE WHEN sa.status = 'Absent' THEN 1 ELSE 0 END) AS absent,
+			SUM(CASE WHEN sa.status IN ('Excused','Leave') THEN 1 ELSE 0 END) AS excused
 		FROM `tabStudent Attendance` sa
 		WHERE {where}
 		GROUP BY sa.date
@@ -222,18 +316,28 @@ def attendance_report(
 	return {
 		"summary": {
 			"present": present,
-			"absent": counts.get("Absent", 0),
-			"leave": counts.get("Leave", 0),
+			"absent": absent,
+			"excused": excused,
+			# Kept under the old key so nothing reading "leave" breaks.
+			"leave": excused,
 			"total": total,
+			"recorded": recorded,
 			"rate": round(flt(present) / flt(total) * 100, 1) if total else 0.0,
 		},
 		"rows": [
 			{
 				"date": str(r.date),
-				"total": r.total,
-				"present": r.present,
-				"absent": r.total - r.present,
-				"rate": round(flt(r.present) / flt(r.total) * 100, 1) if r.total else 0.0,
+				"total": (r.present or 0) + (r.absent or 0),
+				"present": r.present or 0,
+				# Previously total - present, which counted an excused day as an
+				# absence on every daily row.
+				"absent": r.absent or 0,
+				"excused": r.excused or 0,
+				"rate": (
+					round(flt(r.present) / flt((r.present or 0) + (r.absent or 0)) * 100, 1)
+					if ((r.present or 0) + (r.absent or 0))
+					else 0.0
+				),
 			}
 			for r in daily
 		],

@@ -31,6 +31,7 @@ from frappe.utils.password import update_password
 from match_schools.api.utils import (
 	FRAPPE_ROLE_BY_PERSONA,
 	ROLE_ADMIN,
+	fail,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
@@ -217,4 +218,180 @@ def reset_password(user: str, persona: str = None):
 		"username": row.username or user.split("@")[0],
 		"password": password,
 		"name": row.full_name,
+	}
+
+
+# The record types that carry a login, and how to reach the User from each.
+CREDENTIAL_SOURCES = {
+	"Student": (ROLE_STUDENT, "الطالب"),
+	"Instructor": (ROLE_TEACHER, "المعلم"),
+	"Guardian": (ROLE_PARENT, "ولي الأمر"),
+}
+
+
+def _user_of(doctype: str, name: str) -> str | None:
+	"""The User linked to a person's record.
+
+	Student and Guardian hold the link directly. An Instructor reaches it
+	through Employee, and falls back to matching on the full name for schools
+	that run without the HR module.
+	"""
+	if doctype in ("Student", "Guardian"):
+		return frappe.db.get_value(doctype, name, "user")
+
+	if doctype == "Instructor":
+		employee = frappe.db.get_value("Instructor", name, "employee")
+		if employee:
+			user = frappe.db.get_value("Employee", employee, "user_id")
+			if user:
+				return user
+		full_name = frappe.db.get_value("Instructor", name, "instructor_name")
+		if full_name:
+			return frappe.db.get_value("User", {"full_name": full_name, "enabled": 1}, "name")
+	return None
+
+
+def _link_user(doctype: str, name: str, user: str):
+	"""Record the new User on the person's own record."""
+	if doctype in ("Student", "Guardian"):
+		frappe.db.set_value(doctype, name, "user", user, update_modified=False)
+	elif doctype == "Instructor":
+		employee = frappe.db.get_value("Instructor", name, "employee")
+		if employee:
+			frappe.db.set_value("Employee", employee, "user_id", user, update_modified=False)
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def account_for(doctype: str = None, name: str = None, persona: str = None):
+	"""The login a person's record carries, if any.
+
+	The password is never returned — it exists in readable form only at the
+	moment it is issued. A school that has lost it resets rather than looks
+	it up, which is the behaviour a family expects of their own school.
+	"""
+	if doctype not in CREDENTIAL_SOURCES or not name:
+		return fail(
+			message_en="Unsupported record type.",
+			message_ar="نوع السجل غير مدعوم.",
+		)
+	if not frappe.db.exists(doctype, name):
+		return fail(
+			message_en="That record no longer exists.",
+			message_ar="هذا السجل لم يعد موجوداً.",
+		)
+
+	role, label = CREDENTIAL_SOURCES[doctype]
+	user = _user_of(doctype, name)
+	if not user:
+		return {
+			"doctype": doctype,
+			"name": name,
+			"label": label,
+			"hasAccount": False,
+			"account": None,
+		}
+
+	row = frappe.db.get_value(
+		"User", user, ["name", "username", "full_name", "enabled", "last_login"], as_dict=True
+	)
+	return {
+		"doctype": doctype,
+		"name": name,
+		"label": label,
+		"hasAccount": True,
+		"account": {
+			"user": row.name,
+			"username": row.username or row.name.split("@")[0],
+			"name": row.full_name,
+			"enabled": bool(row.enabled),
+			"lastLogin": str(row.last_login or ""),
+			"mustChange": bool(
+				frappe.db.get_value("User", user, "ms_must_change_password")
+			),
+		},
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def issue_account(doctype: str = None, name: str = None, persona: str = None):
+	"""Create a login for a person who does not have one yet.
+
+	Separate from resetting: creating an account for someone who already has
+	one would orphan the first, leaving two logins for one person and no way
+	to tell which is live.
+	"""
+	if doctype not in CREDENTIAL_SOURCES or not name:
+		return fail(
+			message_en="Unsupported record type.",
+			message_ar="نوع السجل غير مدعوم.",
+		)
+	if not frappe.db.exists(doctype, name):
+		return fail(
+			message_en="That record no longer exists.",
+			message_ar="هذا السجل لم يعد موجوداً.",
+		)
+	if _user_of(doctype, name):
+		return fail(
+			message_en="This person already has an account.",
+			message_ar="لدى هذا الشخص حساب بالفعل — استخدم إعادة تعيين كلمة المرور.",
+		)
+
+	role, label = CREDENTIAL_SOURCES[doctype]
+	name_field = {
+		"Student": "student_name",
+		"Instructor": "instructor_name",
+		"Guardian": "guardian_name",
+	}[doctype]
+	full_name = frappe.db.get_value(doctype, name, name_field) or name
+
+	credentials = create_account(role, name, full_name)
+	_link_user(doctype, name, credentials["user"])
+	frappe.db.commit()
+
+	return {
+		"credentials": credentials,
+		"message_ar": f"تم إنشاء حساب {label}: {credentials['username']}",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def reset_account_password(doctype: str = None, name: str = None, persona: str = None):
+	"""Issue a fresh password for a person, shown once.
+
+	Takes the person's record rather than a User id so a screen never has to
+	know how a teacher's login is linked through Employee.
+	"""
+	if doctype not in CREDENTIAL_SOURCES or not name:
+		return fail(
+			message_en="Unsupported record type.",
+			message_ar="نوع السجل غير مدعوم.",
+		)
+
+	user = _user_of(doctype, name)
+	if not user:
+		return fail(
+			message_en="This person has no account yet.",
+			message_ar="لا يوجد حساب لهذا الشخص — أنشئ الحساب أولاً.",
+		)
+
+	password = generate_password()
+	update_password(user, password)
+	# A password handed over on paper must be replaced by one only the person
+	# knows, so the first login forces a change unless the school opted out.
+	if _force_change_enabled():
+		frappe.db.set_value("User", user, "ms_must_change_password", 1, update_modified=False)
+	frappe.db.commit()
+
+	row = frappe.db.get_value("User", user, ["username", "full_name"], as_dict=True)
+	return {
+		"credentials": {
+			"user": user,
+			"username": row.username or user.split("@")[0],
+			"password": password,
+			"name": row.full_name,
+		},
+		"message_ar": "تم إنشاء كلمة مرور جديدة — انسخها الآن، لن تظهر مرة أخرى.",
 	}

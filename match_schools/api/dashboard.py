@@ -679,12 +679,16 @@ def _attendance_breakdown(student: str) -> dict:
 		as_dict=True,
 	)
 	counts = {r.status: r.count for r in rows}
-	total = sum(counts.values())
 	present = counts.get("Present", 0)
+	absent = counts.get("Absent", 0)
+	# Excused days are outside the rate entirely — see api/attendance.py.
+	excused = counts.get("Excused", 0) + counts.get("Leave", 0)
+	total = present + absent
 	return {
 		"present": present,
-		"absent": counts.get("Absent", 0),
-		"leave": counts.get("Leave", 0),
+		"absent": absent,
+		"excused": excused,
+		"leave": excused,
 		"total": total,
 		"rate": round(flt(present) / flt(total) * 100, 1) if total else 0.0,
 	}

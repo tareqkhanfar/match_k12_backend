@@ -11,7 +11,7 @@ marks.
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, today
+from frappe.utils import cint, flt, getdate, nowdate, today
 
 from match_schools.api.utils import (
 	BACK_OFFICE,
@@ -217,6 +217,25 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 		name = frappe.db.get_value("MS Grade Scheme", clean, "name")
 		if name:
 			doc = frappe.get_doc("MS Grade Scheme", name)
+			# A plan is a tree: categories carry the weight, and the individual
+			# assessments sit beneath them. Marks are entered against the
+			# assessments — a category with children is a total, not something
+			# a teacher scores directly. A category with no children is still
+			# marked directly, which is how the flat plans that predate the
+			# tree keep working.
+			children_of: dict[str, list] = {}
+			for c in doc.components:
+				parent = c.get("ms_parent_component")
+				if parent:
+					children_of.setdefault(parent, []).append(c)
+
+			markable = []
+			for c in doc.components:
+				if c.get("ms_parent_component"):
+					markable.append(c)
+				elif not children_of.get(c.component_name):
+					markable.append(c)
+
 			return {
 				"id": doc.name,
 				"scheme_name": doc.scheme_name,
@@ -224,10 +243,14 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 					{
 						"component_name": c.component_name,
 						"component_type": c.component_type,
+						# An assessment inherits the weight of its category; the
+						# category's own weight is what reaches the final mark.
 						"weight": flt(c.weight),
 						"max_score": flt(c.max_score),
+						"quarter": c.get("ms_quarter"),
+						"category": c.get("ms_parent_component"),
 					}
-					for c in doc.components
+					for c in markable
 				],
 			}
 	return None
@@ -290,6 +313,7 @@ def get_entry_sheet(
 		fields=[
 			"name", "student", "component_name", "component_type",
 			"score", "max_score", "weight", "is_bonus", "remarks",
+			"ms_is_published",
 		],
 	)
 	by_student: dict[str, list] = {}
@@ -336,6 +360,14 @@ def get_entry_sheet(
 		"rows": rows,
 		"entered": sum(1 for r in rows if r["entry_id"]),
 		"total": len(rows),
+		# Publication is per component. "Partly" happens when a component was
+		# published and then extra marks were entered afterwards.
+		"publishedCount": sum(
+			1 for e in existing if cint(e.get("ms_is_published"))
+		),
+		"draftCount": sum(
+			1 for e in existing if not cint(e.get("ms_is_published"))
+		),
 	}
 
 
@@ -384,7 +416,51 @@ def save_marks(payload: str | dict, persona: str = None):
 	max_score = flt(data.get("max_score")) or 100
 	weight = flt(data.get("weight"))
 
+	# --- Validate the whole batch before writing anything -----------------
+	# Marks are a legal record. Saving the valid half of a sheet and reporting
+	# the rest as "skipped" leaves the gradebook in a state nobody asked for,
+	# so a single bad value refuses the entire save.
+	problems: list[str] = []
+	for row in marks:
+		student = row.get("student")
+		if not student:
+			continue
+		who = row.get("student_name") or student
+		raw = row.get("score")
+
+		if raw in (None, ""):
+			problems.append(f"{who}: لم تُدخل علامة")
+			continue
+		try:
+			value = flt(raw)
+		except Exception:
+			problems.append(f"{who}: قيمة غير صالحة")
+			continue
+		if value < 0:
+			problems.append(f"{who}: العلامة سالبة")
+			continue
+		if not is_bonus and value > max_score:
+			problems.append(f"{who}: {value} تتجاوز الحد الأقصى {max_score}")
+			continue
+		if (value * 2) % 1 != 0:
+			problems.append(f"{who}: {value} ليست من مضاعفات ٠.٥")
+
+	if problems:
+		shown = problems[:5]
+		more = len(problems) - len(shown)
+		return fail(
+			message_en=f"{len(problems)} invalid mark(s). Nothing was saved.",
+			message_ar=(
+				"لم يتم حفظ أي علامة. صحّح الأخطاء التالية:\n"
+				+ "\n".join(f"• {p}" for p in shown)
+				+ (f"\n• و{more} خطأ آخر" if more > 0 else "")
+			),
+			data={"problems": problems},
+		)
+
 	saved, updated, skipped = 0, 0, []
+	rejected: list[dict] = []
+
 
 	for row in marks:
 		student = row.get("student")
@@ -410,6 +486,19 @@ def save_marks(payload: str | dict, persona: str = None):
 		score = flt(raw)
 		if not is_bonus and score > max_score:
 			skipped.append(row.get("student_name") or student)
+			continue
+		if score < 0:
+			rejected.append(
+				{"student": row.get("student_name") or student, "reason": "negative"}
+			)
+			continue
+		# Marks are recorded to the nearest half during the term. The value is
+		# never rounded to fit — a 7.3 is a data-entry error to be corrected,
+		# not something to silently turn into 7.5.
+		if (score * 2) % 1 != 0:
+			rejected.append(
+				{"student": row.get("student_name") or student, "reason": "step"}
+			)
 			continue
 
 		existing = frappe.db.get_value(
@@ -446,7 +535,12 @@ def save_marks(payload: str | dict, persona: str = None):
 			doc.save()
 			updated += 1
 		else:
-			doc = frappe.get_doc({"doctype": "MS Gradebook Entry", **values})
+			# New marks start as a draft. A teacher marking a set of papers
+			# should not have every intermediate value visible to the class;
+			# publishing is a separate, deliberate action.
+			doc = frappe.get_doc(
+				{"doctype": "MS Gradebook Entry", **values, "ms_is_published": 0}
+			)
 			doc.insert()
 			saved += 1
 
@@ -455,10 +549,23 @@ def save_marks(payload: str | dict, persona: str = None):
 	message_ar = f"تم حفظ {saved + updated} درجة."
 	if skipped:
 		message_ar += f" تم تجاوز {len(skipped)} درجة تفوق الحد الأقصى."
+	step_errors = [r["student"] for r in rejected if r["reason"] == "step"]
+	negative = [r["student"] for r in rejected if r["reason"] == "negative"]
+	if step_errors:
+		message_ar += (
+			f" {len(step_errors)} درجة غير مقبولة — يجب أن تكون من مضاعفات ٠.٥."
+		)
+	if negative:
+		message_ar += f" {len(negative)} درجة سالبة غير مقبولة."
 
 	return {
 		"success": True,
-		"data": {"created": saved, "updated": updated, "skipped": skipped},
+		"data": {
+			"created": saved,
+			"updated": updated,
+			"skipped": skipped,
+			"rejected": rejected,
+		},
 		"message_en": f"Saved {saved + updated} marks.",
 		"message_ar": message_ar,
 	}
@@ -536,6 +643,223 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 	}
 
 
+def _planned_subject_grade(student: str, course: str, academic_term: str | None) -> dict | None:
+	"""One subject's final, worked through its assessment plan.
+
+	Returns None when the subject has no plan for this term, so a school that
+	has not built one yet still sees the flat weighted average it saw before.
+	"""
+	from match_schools.api.assessment_plan import compute_marks
+
+	groups = frappe.get_all(
+		"Student Group Student",
+		filters={"student": student, "parenttype": "Student Group"},
+		pluck="parent",
+		limit=10,
+	)
+	if not groups:
+		return None
+
+	for group in groups:
+		try:
+			res = compute_marks(
+				student_group=group,
+				course=course,
+				academic_term=academic_term,
+				student=student,
+				persona=ROLE_ADMIN,
+			)
+		except frappe.PermissionError:
+			# Never silently: a permission error here means the caller cannot
+			# read the plan behind their own mark, and falling through to the
+			# flat average would quietly show a different number than the
+			# teacher's — the portal read 78.9 for a subject worth 84.5.
+			frappe.log_error(
+				title="Subject final fell back to flat average",
+				message=(
+					f"student={student} course={course} term={academic_term} "
+					f"user={frappe.session.user}: plan not readable."
+				),
+			)
+			continue
+		except Exception:
+			# A malformed plan must not take a family's whole record down.
+			continue
+
+		payload = res.get("data") if isinstance(res, dict) and "data" in res else res
+		if not payload or not payload.get("students"):
+			continue
+
+		row = payload["students"][0]
+		if not row.get("quarters"):
+			continue
+
+		# Quarters exist but nothing was assessed in them: the plan is an empty
+		# shell for this subject. Returning 0 here would print "راسب" for a
+		# subject nobody has examined yet, so fall back to the flat average.
+		if not any(q.get("categories") for q in row["quarters"]):
+			continue
+
+		final = flt(row.get("percent"))
+		return {
+			"final": round(final, 1),
+			"percentage": round(final, 1),
+			"bonus": 0.0,
+			"covered": 100.0,
+			"marks": flt(row.get("marks")),
+			"totalMarks": flt(row.get("totalMarks")),
+			# Kept so a screen can show the quarters behind the final.
+			"quarters": row.get("quarters"),
+			**grade_for(final),
+		}
+	return None
+
+
+def _class_averages_for(
+	student: str, courses: list[str], academic_term: str | None
+) -> dict[tuple, float]:
+	"""Average percentage per assessment, across the student's own classes.
+
+	Compared within the sections this student belongs to rather than the whole
+	school: "above average" only means something against the children sitting
+	the same paper. Returns {(course, component): percentage}.
+	"""
+	if not courses:
+		return {}
+
+	groups = frappe.get_all(
+		"Student Group Student",
+		filters={"student": student, "parenttype": "Student Group"},
+		pluck="parent",
+		limit=20,
+	)
+	if not groups:
+		return {}
+
+	filters = {
+		"course": ["in", courses],
+		"student_group": ["in", groups],
+	}
+	if academic_term:
+		filters["academic_term"] = academic_term
+
+	rows = frappe.get_all(
+		"MS Gradebook Entry",
+		filters=filters,
+		fields=["course", "component_name", "score", "max_score"],
+		limit_page_length=0,
+	)
+
+	buckets: dict[tuple, list] = {}
+	for r in rows:
+		maximum = flt(r.max_score)
+		if not maximum:
+			continue
+		buckets.setdefault((r.course, r.component_name), []).append(
+			flt(r.score) / maximum * 100
+		)
+
+	# A single mark is not an average — showing one would tell a family their
+	# child is exactly average when they are the only one scored.
+	return {
+		key: round(sum(values) / len(values), 1)
+		for key, values in buckets.items()
+		if len(values) >= 2
+	}
+
+
+def _subject_averages_for(
+	student: str, courses: list[str], academic_term: str | None
+) -> dict[str, dict]:
+	"""Each subject's average twice over: this section, and the whole grade.
+
+	A family asks two different questions about a mark — "how did the class
+	do?" and "how did the year group do?" — and a section that happens to be
+	strong or weak answers only the first. Both are computed from the same
+	published marks the student's own final is built from.
+
+	Returns {course: {"section": pct, "grade": pct, "section_name": str}}.
+	"""
+	if not courses:
+		return {}
+
+	groups = frappe.get_all(
+		"Student Group Student",
+		filters={"student": student, "parenttype": "Student Group"},
+		pluck="parent",
+		limit=20,
+	)
+	if not groups:
+		return {}
+
+	# The batch ties sections together: "الصف الأول - أ" and "- ب" share one.
+	# Without it "the grade" would silently mean "this section" again.
+	batches = {
+		g.batch: g.name
+		for g in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", groups]},
+			fields=["name", "batch"],
+		)
+		if g.batch
+	}
+
+	peer_groups = list(groups)
+	if batches:
+		peer_groups = frappe.get_all(
+			"Student Group",
+			filters={"batch": ["in", list(batches)]},
+			pluck="name",
+			limit=200,
+		) or list(groups)
+
+	filters = {"course": ["in", courses], "student_group": ["in", peer_groups]}
+	if academic_term:
+		filters["academic_term"] = academic_term
+
+	rows = frappe.get_all(
+		"MS Gradebook Entry",
+		filters=filters,
+		fields=["course", "student", "student_group", "score", "max_score"],
+		limit_page_length=0,
+	)
+
+	# Average per student first, then across students. Averaging raw entries
+	# would weight a subject by how many assessments it happens to have.
+	per_student: dict[tuple, list] = {}
+	for r in rows:
+		maximum = flt(r.max_score)
+		if not maximum:
+			continue
+		in_section = r.student_group in groups
+		per_student.setdefault((r.course, r.student, in_section), []).append(
+			flt(r.score) / maximum * 100
+		)
+
+	section_bucket: dict[str, list] = {}
+	grade_bucket: dict[str, list] = {}
+	for (course, _stu, in_section), marks in per_student.items():
+		average = sum(marks) / len(marks)
+		grade_bucket.setdefault(course, []).append(average)
+		if in_section:
+			section_bucket.setdefault(course, []).append(average)
+
+	section_name = ", ".join(sorted(groups)) if groups else ""
+
+	out: dict[str, dict] = {}
+	for course in courses:
+		section = section_bucket.get(course) or []
+		whole = grade_bucket.get(course) or []
+		entry: dict = {"section_name": section_name}
+		if len(section) >= 2:
+			entry["section"] = round(sum(section) / len(section), 1)
+		if len(whole) >= 2:
+			entry["grade"] = round(sum(whole) / len(whole), 1)
+		if len(entry) > 1:
+			out[course] = entry
+	return out
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def term_grades(
@@ -561,7 +885,7 @@ def term_grades(
 		fields=[
 			"name", "course", "component_name", "component_type", "score",
 			"max_score", "weight", "is_bonus", "percentage", "remarks",
-			"academic_term", "entry_date",
+			"academic_term", "entry_date", "ms_is_published", "ms_release_on",
 		],
 		order_by="course, entry_date",
 	)
@@ -575,13 +899,45 @@ def term_grades(
 		own_courses = courses_of_instructor(resolve_scope(persona).get("instructor"))
 		entries = [e for e in entries if e.course in own_courses]
 
+	# A draft mark is the teacher's working copy. Families see a component only
+	# once it has been published, so a half-marked quiz never appears as if it
+	# were the final result.
+	if persona in (ROLE_STUDENT, ROLE_PARENT):
+		# Two conditions, not one: the mark must be published *and* — when the
+		# school set a release date — that date must have arrived. Relying on
+		# the nightly job alone would show a mark early if it ran late, or if
+		# someone published by hand while a date was still pending.
+		today_date = getdate(nowdate())
+
+		def visible(e) -> bool:
+			if not cint(e.get("ms_is_published")):
+				return False
+			release = e.get("ms_release_on")
+			return not release or getdate(release) <= today_date
+
+		entries = [e for e in entries if visible(e)]
+
 	by_course: dict[str, list] = {}
 	for e in entries:
 		by_course.setdefault(e.course, []).append(e)
 
+	# The class average for each assessment, so a family can see whether a mark
+	# is above or below what the class managed. One query for the whole record
+	# rather than one per component.
+	component_averages = _class_averages_for(student, list(by_course), academic_term)
+	# The same comparison one level up: how the section and the whole grade did
+	# in each subject, next to what this student earned in it.
+	subject_averages = _subject_averages_for(student, list(by_course), academic_term)
+
 	subjects = []
 	for course, rows in by_course.items():
-		computed = _compute_subject_grade(rows)
+		# The subject's final comes from the assessment plan and the teacher's
+		# own counting rule ("best three of four"), not a flat weighted average
+		# of every mark entered. Falling back to the flat average keeps the
+		# subjects that have no plan working exactly as before.
+		computed = _planned_subject_grade(student, course, academic_term) or (
+			_compute_subject_grade(rows)
+		)
 		subjects.append(
 			{
 				"course": course,
@@ -597,19 +953,34 @@ def term_grades(
 						"percentage": flt(r.percentage),
 						"is_bonus": bool(r.is_bonus),
 						"remarks": r.remarks,
+						# What the rest of the class scored on this same
+						# assessment, and which side of it this student is on.
+						"class_average": component_averages.get((course, r.component_name)),
 						**grade_for(flt(r.percentage)),
 					}
 					for r in rows
 				],
+				# How the section and the year group did in this same subject.
+				"section_average": (subject_averages.get(course) or {}).get("section"),
+				"grade_average": (subject_averages.get(course) or {}).get("grade"),
+				"section_name": (subject_averages.get(course) or {}).get("section_name"),
 				**computed,
 			}
 		)
 
 	subjects.sort(key=lambda s: s["course"] or "")
 
-	overall = (
-		round(sum(s["final"] for s in subjects) / len(subjects), 1) if subjects else 0.0
+	# The Final Term Average is the one figure that is rounded, and it is
+	# rounded to a whole number. Subject finals and individual marks keep their
+	# decimals: rounding them would compound across components and change a
+	# result the teacher actually entered.
+	overall_exact = (
+		sum(s["final"] for s in subjects) / len(subjects) if subjects else 0.0
 	)
+	overall = round(overall_exact) if subjects else 0
+	# Kept so a screen can show the working, and so a borderline case is
+	# auditable rather than looking arbitrary.
+	overall_precise = round(overall_exact, 2) if subjects else 0.0
 
 	student_doc = frappe.db.get_value(
 		"Student", student, ["student_name", "image"], as_dict=True
@@ -639,6 +1010,7 @@ def term_grades(
 	}
 	if show_overall:
 		result["overall"] = overall
+		result["overall_precise"] = overall_precise
 		result["overall_grade"] = grade_for(overall)
 	else:
 		result["overall"] = None
@@ -1052,3 +1424,158 @@ def import_assignments_combined(
 		},
 		persona=persona,
 	)
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def publish_component(
+	student_group: str = None,
+	course: str = None,
+	component_name: str = None,
+	academic_term: str = None,
+	published: int = 1,
+	persona: str = None,
+):
+	"""Show a component's marks to students, or take them back.
+
+	Publishing is per component rather than per student: a teacher finishes
+	marking one quiz and releases it, and the class sees that quiz. Marks stay
+	editable afterwards — unpublishing is for correcting a mistake, not for
+	locking anything.
+	"""
+	if not student_group or not course or not component_name:
+		return fail(
+			message_en="A class, course and component are required.",
+			message_ar="يجب تحديد الشعبة والمادة والمكوّن.",
+		)
+
+	# The same guards save_marks uses: the teacher must own the course, and
+	# entry must be open for this class and term.
+	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_owns_course
+
+	assert_teacher_owns_course(persona, course)
+	assert_entry_allowed(persona, student_group, course, academic_term)
+
+	filters = {
+		"student_group": student_group,
+		"course": course,
+		"component_name": component_name,
+	}
+	if academic_term:
+		filters["academic_term"] = academic_term
+
+	names = frappe.get_all("MS Gradebook Entry", filters=filters, pluck="name")
+	if not names:
+		return fail(
+			message_en="There are no marks to publish for this component.",
+			message_ar="لا توجد درجات لنشرها في هذا المكوّن.",
+		)
+
+	flag = 1 if cint(published) else 0
+	for name in names:
+		frappe.db.set_value(
+			"MS Gradebook Entry",
+			name,
+			{
+				"ms_is_published": flag,
+				"ms_published_on": frappe.utils.now() if flag else None,
+			},
+			update_modified=False,
+		)
+	frappe.db.commit()
+
+	return {
+		"published": bool(flag),
+		"count": len(names),
+		"message_ar": (
+			f"تم نشر {len(names)} درجة للطلاب."
+			if flag
+			else f"تم سحب {len(names)} درجة من الطلاب."
+		),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def class_standing(student: str, academic_term: str = None, persona: str = None):
+	"""How this student compares with their class, without naming anyone else.
+
+	A family is entitled to know where their child stands; they are not
+	entitled to other children's marks. So this returns the student's own
+	average, the class average, a rank and the class size — and never a list of
+	other students.
+
+	Only marks the family can already see are counted, so a rank cannot be used
+	to infer an unpublished result.
+	"""
+	_assert_can_see(persona, student)
+	academic_term = academic_term or get_default_academic_term()
+
+	groups = frappe.get_all(
+		"Student Group Student",
+		filters={"student": student, "parenttype": "Student Group", "active": 1},
+		fields=["parent"],
+		limit=5,
+	)
+	if not groups:
+		return {"available": False, "reason": "no_group"}
+
+	group = groups[0].parent
+	classmates = frappe.get_all(
+		"Student Group Student",
+		filters={"parent": group, "parenttype": "Student Group"},
+		pluck="student",
+	)
+	if len(classmates) < 2:
+		# A rank out of one tells a family nothing and identifies the class.
+		return {"available": False, "reason": "class_too_small"}
+
+	filters = {"student": ["in", classmates]}
+	if academic_term:
+		filters["academic_term"] = academic_term
+	# Families only see published marks, so the comparison is built from the
+	# same set — otherwise a rank would leak the existence of hidden results.
+	if persona in (ROLE_STUDENT, ROLE_PARENT):
+		filters["ms_is_published"] = 1
+
+	rows = frappe.get_all(
+		"MS Gradebook Entry",
+		filters=filters,
+		fields=["student", "score", "max_score"],
+		limit_page_length=0,
+	)
+	if not rows:
+		return {"available": False, "reason": "no_marks"}
+
+	totals: dict[str, list] = {}
+	for r in rows:
+		if not flt(r.max_score):
+			continue
+		totals.setdefault(r.student, []).append(flt(r.score) / flt(r.max_score) * 100)
+
+	averages = {s: sum(v) / len(v) for s, v in totals.items() if v}
+	if student not in averages or len(averages) < 2:
+		return {"available": False, "reason": "no_marks"}
+
+	mine = averages[student]
+	ordered = sorted(averages.values(), reverse=True)
+	# Standard competition ranking: equal averages share a rank, so two pupils
+	# on 90 are both 1st and the next is 3rd.
+	rank = sum(1 for v in ordered if v > mine) + 1
+	class_average = sum(ordered) / len(ordered)
+
+	return {
+		"available": True,
+		"studentAverage": round(mine, 1),
+		"classAverage": round(class_average, 1),
+		"difference": round(mine - class_average, 1),
+		"rank": rank,
+		"classSize": len(averages),
+		"highest": round(ordered[0], 1),
+		"lowest": round(ordered[-1], 1),
+		# Where the student sits, as a percentile band rather than a precise
+		# position — kinder to a child near the bottom, and just as useful.
+		"topPercent": round(rank / len(averages) * 100),
+		"group": group,
+		"academicTerm": academic_term,
+	}

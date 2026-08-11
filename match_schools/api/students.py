@@ -399,7 +399,7 @@ def _attendance_summary(student: str) -> dict:
 	return {
 		"present": present,
 		"absent": counts.get("Absent", 0),
-		"leave": counts.get("Leave", 0),
+		"leave": counts.get("Leave", 0) + counts.get("Excused", 0),
 		"total": total,
 		"rate": round(flt(present) / flt(total) * 100, 1) if total else 0.0,
 		"recent": _recent_attendance(student),
