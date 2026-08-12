@@ -14,6 +14,8 @@ it either finds a valid timetable or reports exactly what it could not place,
 rather than silently producing a broken one.
 """
 
+import random
+
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, getdate, now_datetime, today
@@ -73,6 +75,228 @@ DEFAULT_PERIODS = [
 	("الحصة الخامسة", 6, "11:35:00", "12:20:00", 0),
 	("الحصة السادسة", 7, "12:25:00", "13:10:00", 0),
 ]
+
+# Ordinal names, so a generated day reads the way a school writes it.
+PERIOD_ORDINALS = [
+	"الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة", "السادسة",
+	"السابعة", "الثامنة", "التاسعة", "العاشرة", "الحادية عشرة", "الثانية عشرة",
+]
+
+DEFAULT_WORKING_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"]
+
+# The school day as the school actually runs it, held once rather than being
+# retyped for every section. The builder loads these as its starting point and
+# a timetabler may still override them for a particular class.
+DAY_SHAPE_KEYS = {
+	"count": ("ms_periods_per_day", 7),
+	"minutes": ("ms_period_minutes", 45),
+	"gap": ("ms_period_gap", 5),
+	"break_after": ("ms_break_after_period", 2),
+	"break_minutes": ("ms_break_minutes", 20),
+}
+DAY_START_KEY = "ms_day_start"
+WORKING_DAYS_KEY = "ms_working_days"
+
+
+def school_day_shape() -> dict:
+	"""The school's default day, falling back to a sensible one."""
+	shape = {}
+	for field, (key, fallback) in DAY_SHAPE_KEYS.items():
+		stored = frappe.db.get_default(key)
+		# 0 is meaningful for break_after ("no break"), so only an unset value
+		# falls back — `or` would quietly restore the default.
+		shape[field] = cint(stored) if stored not in (None, "") else fallback
+
+	shape["start"] = _hhmmss(frappe.db.get_default(DAY_START_KEY) or "08:00:00")
+
+	stored_days = frappe.db.get_default(WORKING_DAYS_KEY)
+	days = [d.strip() for d in (stored_days or "").split(",") if d.strip()]
+	shape["working_days"] = days or list(DEFAULT_WORKING_DAYS)
+	return shape
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def get_day_shape(persona: str = None):
+	"""The school's default working days and period pattern."""
+	shape = school_day_shape()
+	# `build_periods`, not the endpoint: `preview_periods` is wrapped by
+	# ms_endpoint and would return an envelope nested inside this one.
+	periods = build_periods(
+		count=shape["count"],
+		minutes=shape["minutes"],
+		start=shape["start"],
+		gap=shape["gap"],
+		break_after=shape["break_after"],
+		break_minutes=shape["break_minutes"],
+	)
+	return {
+		**shape,
+		"days": [{"code": c, "label": l} for c, l in DAY_AR.items()],
+		"periods": [
+			{
+				"name": p["period_name"],
+				"order": p["period_order"],
+				"from_time": p["from_time"],
+				"to_time": p["to_time"],
+				"is_break": bool(p["is_break"]),
+			}
+			for p in periods
+		],
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def save_day_shape(
+	count: int = None,
+	minutes: int = None,
+	start: str = None,
+	gap: int = None,
+	break_after: int = None,
+	break_minutes: int = None,
+	working_days: str | list = None,
+	persona: str = None,
+):
+	"""Set the school-wide default day. Existing timetables are untouched."""
+	values = {
+		"count": count,
+		"minutes": minutes,
+		"gap": gap,
+		"break_after": break_after,
+		"break_minutes": break_minutes,
+	}
+	for field, value in values.items():
+		if value is None:
+			continue
+		key, _fallback = DAY_SHAPE_KEYS[field]
+		frappe.db.set_default(key, cint(value), parent="__default")
+
+	if start:
+		frappe.db.set_default(DAY_START_KEY, _hhmmss(start), parent="__default")
+
+	if working_days is not None:
+		days = parse_json_arg(working_days, []) or []
+		if isinstance(days, str):
+			days = [d.strip() for d in days.split(",") if d.strip()]
+		days = [d for d in days if d in DAY_AR]
+		if not days:
+			return fail(
+				message_en="Choose at least one working day.",
+				message_ar="اختر يوم دوام واحداً على الأقل.",
+			)
+		frappe.db.set_default(WORKING_DAYS_KEY, ",".join(days), parent="__default")
+
+	frappe.db.commit()
+	return {
+		**school_day_shape(),
+		"message_en": "Default school day saved.",
+		"message_ar": "تم حفظ إعدادات اليوم الدراسي.",
+	}
+
+
+def build_periods(
+	*,
+	count: int = 7,
+	minutes: int = 45,
+	start: str = "08:00:00",
+	gap: int = 5,
+	break_after: int = 2,
+	break_minutes: int = 20,
+) -> list[dict]:
+	"""Lay out a school day from the few facts that actually vary.
+
+	A school describes its day as "seven periods of forty-five minutes, break
+	after the second" — not as a list of timestamps. This turns that
+	description into the period rows the plan stores, so the times stay
+	consistent instead of being typed in one by one.
+
+	`break_after` is a teaching-period number; 0 means no break at all.
+	"""
+	count = max(1, cint(count) or 7)
+	minutes = max(5, cint(minutes) or 45)
+	gap = max(0, cint(gap))
+	break_after = max(0, cint(break_after))
+	break_minutes = max(0, cint(break_minutes))
+
+	# Times are computed in minutes from midnight; a datetime would drag
+	# timezones into something that is only ever a clock reading.
+	parts = (_hhmmss(start) or "08:00:00").split(":")
+	cursor = cint(parts[0]) * 60 + cint(parts[1])
+
+	def clock(total: int) -> str:
+		total %= 24 * 60
+		return f"{total // 60:02d}:{total % 60:02d}:00"
+
+	rows: list[dict] = []
+	order = 0
+	for n in range(1, count + 1):
+		order += 1
+		rows.append(
+			{
+				"period_name": f"الحصة {PERIOD_ORDINALS[n - 1]}"
+				if n <= len(PERIOD_ORDINALS)
+				else f"الحصة {n}",
+				"period_order": order,
+				"from_time": clock(cursor),
+				"to_time": clock(cursor + minutes),
+				"is_break": 0,
+			}
+		)
+		cursor += minutes
+
+		if break_after and n == break_after and n < count and break_minutes:
+			order += 1
+			rows.append(
+				{
+					"period_name": "استراحة",
+					"period_order": order,
+					"from_time": clock(cursor),
+					"to_time": clock(cursor + break_minutes),
+					"is_break": 1,
+				}
+			)
+			cursor += break_minutes
+		elif n < count:
+			cursor += gap
+
+	return rows
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def preview_periods(
+	count: int = 7,
+	minutes: int = 45,
+	start: str = "08:00:00",
+	gap: int = 5,
+	break_after: int = 2,
+	break_minutes: int = 20,
+	persona: str = None,
+):
+	"""The day these settings produce, without saving anything."""
+	periods = build_periods(
+		count=count,
+		minutes=minutes,
+		start=start,
+		gap=gap,
+		break_after=break_after,
+		break_minutes=break_minutes,
+	)
+	return {
+		"periods": [
+			{
+				"name": p["period_name"],
+				"order": p["period_order"],
+				"from_time": p["from_time"],
+				"to_time": p["to_time"],
+				"is_break": bool(p["is_break"]),
+			}
+			for p in periods
+		],
+		"teaching": sum(1 for p in periods if not p["is_break"]),
+		"ends_at": periods[-1]["to_time"] if periods else start,
+	}
 
 
 # --- Plans -----------------------------------------------------------------
@@ -314,12 +538,17 @@ class Solver:
 	teacher booked with another class is respected too.
 	"""
 
-	def __init__(self, days, slots, subjects, busy_teacher, busy_room):
+	def __init__(self, days, slots, subjects, busy_teacher, busy_room, seed=None):
 		self.days = days
 		self.slots = slots
 		self.subjects = subjects
 		self.busy_teacher = busy_teacher
 		self.busy_room = busy_room
+		# Ties are broken at random so pressing "build" again gives a genuinely
+		# different week to choose from. Only ties: the ordering that spreads a
+		# subject across the week still decides first, so a fresh arrangement is
+		# a different valid timetable rather than a worse one.
+		self.rng = random.Random(seed)
 		# day -> slot -> the placed lesson
 		self.grid: dict[str, dict[int, dict]] = {d: {} for d in days}
 		self.per_day: dict[str, dict[str, int]] = {d: {} for d in days}
@@ -368,6 +597,10 @@ class Solver:
 				0 if s.get("instructor") else 1,
 				0 if s.get("preferred_room") else 1,
 				-s["periods_per_week"],
+				# Subjects that are equally constrained are ordered differently
+				# each run, which is the other half of what makes a rebuild
+				# produce a different week.
+				self.rng.random(),
 			)
 
 		ordered = sorted(self.subjects, key=difficulty)
@@ -402,14 +635,20 @@ class Solver:
 		subject = lessons[index]
 		# Spread across the week: fewest of this subject already that day, then
 		# the least-full day overall, so the grid fills evenly.
+		# The random third key only separates days that are otherwise equally
+		# good, so spreading the subject across the week is never sacrificed.
 		ordered_days = sorted(
 			self.days,
 			key=lambda d: (
 				self.per_day[d].get(subject["course"], 0),
 				len(self.grid[d]),
+				self.rng.random(),
 			),
 		)
 
+		# Slots stay in time order — a school fills the day from the first
+		# period, and a shuffled order would leave free periods in the middle
+		# of the morning. Variation comes from the day ordering above.
 		for day in ordered_days:
 			for slot in self.slots:
 				if not self._fits(subject, day, slot):
@@ -472,8 +711,17 @@ def _weekday_name(date) -> str:
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
-def generate(plan: str, persona: str = None):
-	"""Build the weekly grid for a plan, without writing it to the timetable."""
+def generate(plan: str, variant: str | int = None, persona: str = None):
+	"""Build the weekly grid for a plan, without writing it to the timetable.
+
+	Nothing is saved: the caller gets an arrangement to look at, and the school
+	timetable only changes when the grid is saved and lessons are generated.
+
+	`variant` seeds the tie-breaking, so asking again returns a different valid
+	week rather than the same one — which is what makes "build again" useful to
+	someone who does not like the first attempt. Passing the same variant twice
+	reproduces the same grid.
+	"""
 	doc = frappe.get_doc("MS Timetable Plan", plan)
 
 	days = [d.strip() for d in (doc.working_days or "").split(",") if d.strip()]
@@ -523,7 +771,7 @@ def generate(plan: str, persona: str = None):
 	}
 
 	busy_teacher, busy_room = _existing_bookings(doc.student_group, doc.academic_term)
-	solver = Solver(days, slots, subjects, busy_teacher, busy_room)
+	solver = Solver(days, slots, subjects, busy_teacher, busy_room, seed=variant)
 	grid, unplaced = solver.solve()
 
 	_assign_rooms(grid, days, slots, busy_room)
@@ -656,6 +904,18 @@ def apply_plan(
 			date = _next_weekday(add_days(start, week * 7), lesson["day"])
 			if term_end and date > term_end:
 				continue
+			# Education titles a lesson "course by instructor" and crashes when
+			# the teacher is missing; say which subject needs one.
+			if not lesson.get("instructor"):
+				skipped.append(
+					{
+						"date": str(date),
+						"course": lesson["course"],
+						"reason": "لا يوجد معلم لهذه المادة — عيّن معلماً قبل التوليد",
+					}
+				)
+				continue
+
 			try:
 				schedule = frappe.get_doc(
 					{
@@ -663,7 +923,10 @@ def apply_plan(
 						"student_group": doc.student_group,
 						"course": lesson["course"],
 						"instructor": lesson.get("instructor"),
-						"room": lesson.get("room"),
+						# "" would be rejected by the Link field; None is the
+						# empty value. The room itself is optional — see the
+						# make_course_schedule_room_optional patch.
+						"room": lesson.get("room") or None,
 						"schedule_date": date,
 						"from_time": lesson["from_time"],
 						"to_time": lesson["to_time"],

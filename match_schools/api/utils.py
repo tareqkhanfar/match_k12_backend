@@ -384,3 +384,42 @@ def get_default_academic_term() -> str | None:
 		return rows[0] if rows else None
 
 	return frappe.db.get_single_value("Education Settings", "current_academic_term")
+
+
+def hhmm(value) -> str:
+	"""A lesson time as "08:00".
+
+	Frappe returns a Time column as a timedelta, and its str() drops the
+	leading zero — "9:40:00", not "09:40:00". Anything slicing five characters
+	off that renders "9:40:" on screen, which is how a correctly generated
+	timetable came to show the wrong times to students and teachers.
+
+	Every screen that prints a lesson time goes through here, so they cannot
+	drift apart again.
+	"""
+	text = str(value or "")
+	if not text:
+		return ""
+	parts = text.split(":")
+	try:
+		return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+	except (ValueError, IndexError):
+		return text[:5]
+
+
+def audience_filter(persona: str) -> dict:
+	"""Lesson visibility for a persona, as a `get_all` filter fragment.
+
+	A generated timetable is a draft until someone releases it. The back
+	office always sees everything — they are the ones building it. Teachers
+	see a week released to them or to everyone. Students and guardians see
+	only what has been released to all.
+
+	Returned as a filter rather than checked per row so a class's whole week
+	is excluded by the query, not filtered afterwards.
+	"""
+	if persona in BACK_OFFICE:
+		return {}
+	if persona == ROLE_TEACHER:
+		return {"ms_audience": ["in", ["teachers", "all"]]}
+	return {"ms_audience": "all"}

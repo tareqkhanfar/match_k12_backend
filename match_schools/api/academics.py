@@ -5,9 +5,11 @@
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, flt, getdate, today
+from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	audience_filter,
+	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -206,6 +208,85 @@ def list_subjects(
 # --- Teachers / instructors ------------------------------------------------
 
 
+def _groups_by_instructor(instructors: list[str]) -> dict[str, list[str]]:
+	"""Which classes each teacher takes.
+
+	Two things can say a teacher takes a class, and a school will usually only
+	do one of them:
+
+	  * `Student Group Instructor` — the roster on the class record, filled in
+	    by hand.
+	  * the timetable — a teacher named against a lesson for that class.
+
+	Reading only the roster made the staff screen report "no classes assigned"
+	for teachers with a full week of lessons, because building a timetable
+	never writes to the roster. Both are consulted and the results merged, so
+	the screen reflects who actually teaches whom however the school records it.
+	"""
+	if not instructors:
+		return {}
+
+	found: dict[str, set[str]] = {}
+
+	for g in frappe.get_all(
+		"Student Group Instructor",
+		filters={"instructor": ["in", instructors], "parenttype": "Student Group"},
+		fields=["instructor", "parent"],
+	):
+		found.setdefault(g.instructor, set()).add(g.parent)
+
+	# The weekly pattern: the timetable as designed.
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters={"instructor": ["in", instructors], "active": 1},
+		fields=["instructor", "student_group"],
+		limit_page_length=0,
+	):
+		if r.student_group:
+			found.setdefault(r.instructor, set()).add(r.student_group)
+
+	# Dated lessons, which also cover cover/substitution arrangements that were
+	# never part of the pattern.
+	for r in frappe.get_all(
+		"Course Schedule",
+		filters={"instructor": ["in", instructors], "docstatus": ["<", 2]},
+		fields=["instructor", "student_group"],
+		limit_page_length=0,
+	):
+		if r.student_group:
+			found.setdefault(r.instructor, set()).add(r.student_group)
+
+	return {k: sorted(v) for k, v in found.items()}
+
+
+def _instructors_of_group(student_group: str) -> set[str]:
+	"""Everyone who teaches this class, by roster or by timetable."""
+	names = set(
+		frappe.get_all(
+			"Student Group Instructor",
+			filters={"parent": student_group, "parenttype": "Student Group"},
+			pluck="instructor",
+		)
+	)
+	names.update(
+		frappe.get_all(
+			"MS Timetable Slot",
+			filters={"student_group": student_group, "active": 1},
+			pluck="instructor",
+			limit_page_length=0,
+		)
+	)
+	names.update(
+		frappe.get_all(
+			"Course Schedule",
+			filters={"student_group": student_group, "docstatus": ["<", 2]},
+			pluck="instructor",
+			limit_page_length=0,
+		)
+	)
+	return {n for n in names if n}
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def list_teachers(
@@ -229,14 +310,10 @@ def list_teachers(
 	# Teaching a particular class is a property of the group, not the
 	# instructor, so it is resolved to a set of names first.
 	if student_group:
-		teaching = frappe.get_all(
-			"Student Group Instructor",
-			filters={"parent": student_group, "parenttype": "Student Group"},
-			pluck="instructor",
-		)
+		teaching = _instructors_of_group(student_group)
 		if not teaching:
 			return []
-		filters["name"] = ["in", teaching]
+		filters["name"] = ["in", sorted(teaching)]
 
 	rows = frappe.get_all(
 		"Instructor",
@@ -246,14 +323,7 @@ def list_teachers(
 	)
 
 	# One query for every instructor's groups rather than one per instructor.
-	by_instructor: dict[str, list[str]] = {}
-	if rows:
-		for g in frappe.get_all(
-			"Student Group Instructor",
-			filters={"instructor": ["in", [r["name"] for r in rows]], "parenttype": "Student Group"},
-			fields=["instructor", "parent"],
-		):
-			by_instructor.setdefault(g.instructor, []).append(g.parent)
+	by_instructor = _groups_by_instructor([r["name"] for r in rows]) if rows else {}
 
 	for r in rows:
 		group_names = by_instructor.get(r["name"], [])
@@ -319,10 +389,17 @@ def timetable(
 		if not groups:
 			return {"week_start": str(start), "days": {}}
 		filters["student_group"] = ["in", groups]
-	elif student_group:
-		filters["student_group"] = student_group
-	elif instructor:
-		filters["instructor"] = instructor
+	else:
+		# Both filters apply when both are given. They used to be alternatives,
+		# so asking for "my timetable in this class" returned the whole class —
+		# every teacher's lessons, which is not what "جدولي" means.
+		if student_group:
+			filters["student_group"] = student_group
+		if instructor:
+			filters["instructor"] = instructor
+
+	# A week still being built is not shown to the people it is about.
+	filters.update(audience_filter(persona))
 
 	rows = frappe.get_all(
 		"Course Schedule",
@@ -330,9 +407,26 @@ def timetable(
 		fields=[
 			"name", "schedule_date", "from_time", "to_time", "course",
 			"student_group", "instructor", "instructor_name", "room", "title", "color",
+			"docstatus",
 		],
 		order_by="schedule_date, from_time",
 	)
+
+	# Why a lesson was called off, so the timetable says "cancelled — teacher
+	# absent" rather than leaving a family to guess at a struck-through row.
+	cancelled_names = [r.name for r in rows if cint(r.docstatus) == 2]
+	cancel_reason = {}
+	if cancelled_names:
+		for c in frappe.get_all(
+			"MS Lesson Change",
+			filters={
+				"course_schedule": ["in", cancelled_names],
+				"change_type": "Cancelled",
+				"docstatus": 1,
+			},
+			fields=["course_schedule", "reason", "notes"],
+		):
+			cancel_reason[c.course_schedule] = c.reason or c.notes
 
 	days: dict[str, list] = {}
 	for r in rows:
@@ -341,14 +435,16 @@ def timetable(
 			{
 				"id": r.name,
 				"date": str(r.schedule_date),
-				"from_time": str(r.from_time or ""),
-				"to_time": str(r.to_time or ""),
+				"from_time": hhmm(r.from_time),
+				"to_time": hhmm(r.to_time),
 				"subject": r.course,
 				"teacher": r.instructor_name,
 				"student_group": r.student_group,
 				"room": r.room,
 				"title": r.title,
 				"color": r.color,
+				"cancelled": cint(r.docstatus) == 2,
+				"cancelReason": cancel_reason.get(r.name),
 			}
 		)
 
@@ -386,8 +482,8 @@ def list_exams(academic_term: str = None, program: str = None, persona: str = No
 			"grade": r.program,
 			"student_group": r.student_group,
 			"date": str(r.schedule_date or ""),
-			"time": str(r.from_time or ""),
-			"to_time": str(r.to_time or ""),
+			"time": hhmm(r.from_time),
+			"to_time": hhmm(r.to_time),
 			"room": r.room,
 			"max": flt(r.maximum_assessment_score),
 			"type": r.assessment_group,

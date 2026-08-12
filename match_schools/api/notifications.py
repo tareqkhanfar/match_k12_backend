@@ -280,6 +280,38 @@ def _student_items(student: str, since: str, prefix_name: bool = False) -> list[
 				}
 			)
 
+	# Lessons called off. A cancelled period is the one timetable change a
+	# family must be told about — otherwise a child turns up for a lesson that
+	# is not happening, or waits at home for one that is.
+	if groups:
+		for c in frappe.get_all(
+			"MS Lesson Change",
+			filters={
+				"student_group": ["in", groups],
+				"change_type": "Cancelled",
+				"docstatus": 1,
+				"schedule_date": [">=", today()],
+			},
+			fields=["name", "course", "schedule_date", "reason", "notes", "modified"],
+			order_by="schedule_date",
+			limit=10,
+		):
+			items.append(
+				{
+					"id": f"cancel:{c.name}:{student}",
+					"category": "timetable",
+					"category_label": "إلغاء حصة",
+					"title": label(f"أُلغيت حصة {c.course}"),
+					"body": " — ".join(
+						p for p in (str(c.schedule_date), c.reason or c.notes) if p
+					),
+					"time": str(c.modified),
+					"tone": "danger",
+					"link": "/app/timetable",
+					"ref": c.name,
+				}
+			)
+
 	# Marks entered recently.
 	for g in frappe.get_all(
 		"MS Gradebook Entry",
@@ -359,6 +391,37 @@ def _teacher_items(scope: dict, since: str) -> list[dict]:
 		return []
 
 	items = []
+
+	# Lessons of theirs that were called off, so a teacher is not the last to
+	# know their own period is not running.
+	for c in frappe.get_all(
+		"MS Lesson Change",
+		filters={
+			"original_instructor": instructor,
+			"change_type": "Cancelled",
+			"docstatus": 1,
+			"schedule_date": [">=", today()],
+		},
+		fields=["name", "course", "student_group", "schedule_date", "reason", "notes", "modified"],
+		order_by="schedule_date",
+		limit=10,
+	):
+		items.append(
+			{
+				"id": f"cancel:{c.name}",
+				"category": "timetable",
+				"category_label": "إلغاء حصة",
+				"title": f"أُلغيت حصة {c.course} — {c.student_group}",
+				"body": " — ".join(
+					p for p in (str(c.schedule_date), c.reason or c.notes) if p
+				),
+				"time": str(c.modified),
+				"tone": "danger",
+				"link": "/app/timetable",
+				"ref": c.name,
+			}
+		)
+
 	assignments = frappe.get_all(
 		"MS Assignment",
 		filters={"instructor": instructor, "status": ["in", ["Open", "Grading"]]},

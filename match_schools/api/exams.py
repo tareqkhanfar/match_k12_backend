@@ -22,6 +22,7 @@ from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
+	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -179,8 +180,8 @@ def schedule(
 				"program": r.program,
 				"student_group": r.student_group,
 				"date": date,
-				"from_time": str(r.from_time or ""),
-				"to_time": str(r.to_time or ""),
+				"from_time": hhmm(r.from_time),
+				"to_time": hhmm(r.to_time),
 				"duration": _duration(r.from_time, r.to_time),
 				"room": r.room,
 				"room_name": rooms.get(r.room, r.room),

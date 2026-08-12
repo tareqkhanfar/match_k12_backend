@@ -16,6 +16,7 @@ import frappe
 from frappe.utils import cint, flt, getdate, nowdate
 
 from match_schools.api.utils import (
+	hhmm,
 	BACK_OFFICE,
 	ROLE_PARENT,
 	ROLE_STUDENT,
@@ -641,28 +642,24 @@ def _timetable(student: str) -> dict:
 
 	rows = frappe.get_all(
 		"Course Schedule",
-		filters={"student_group": ["in", groups], "docstatus": ["<", 2]},
+		filters={
+			"student_group": ["in", groups],
+			# Cancelled lessons stay in the list and are flagged below: a
+			# student needs to know a period was called off, not find a hole
+			# in their week with no explanation.
+			# This is a student's own week; a timetable still in draft is not
+			# shown to them, whoever happens to be reading the dossier.
+			"ms_audience": "all",
+		},
 		fields=[
 			"name", "course", "schedule_date", "from_time", "to_time",
-			"instructor_name", "room", "student_group",
+			"instructor_name", "room", "student_group", "docstatus",
 		],
 		order_by="schedule_date desc, from_time asc",
 		limit=400,
 	)
 	if not rows:
 		return empty
-
-	def hhmm(value) -> str:
-		"""Frappe returns a Time as a timedelta whose str() is "8:00:00" —
-		one digit short, so a naive slice yields "8:00:" on screen."""
-		text = str(value or "")
-		if not text:
-			return ""
-		parts = text.split(":")
-		try:
-			return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
-		except (ValueError, IndexError):
-			return text[:5]
 
 	# One cell per (weekday, start time); the same lesson repeats every week,
 	# so the most recent occurrence wins and the rest collapse into it.
@@ -689,6 +686,11 @@ def _timetable(student: str) -> dict:
 				"instructor": r.instructor_name,
 				"room": r.room,
 				"group": r.student_group,
+				# The weekly grid describes the pattern, and one cancelled date
+				# does not change it. The dated list below carries the
+				# cancellation, which is where a student looks for "is my
+				# lesson on today?".
+				"cancelled": cint(r.docstatus) == 2,
 			}
 
 	# Keep the school week in order, and only the days that actually have
@@ -725,6 +727,7 @@ def _timetable(student: str) -> dict:
 				"instructor": r.instructor_name,
 				"room": r.room,
 				"group": r.student_group,
+				"cancelled": cint(r.docstatus) == 2,
 			}
 			for r in rows[:60]
 		],
@@ -841,14 +844,12 @@ def teacher_dossier(instructor: str, persona: str = None):
 			or {}
 		)
 
-	groups = _rows(
-		"Student Group Instructor",
-		{"instructor": instructor, "parenttype": "Student Group"},
-		["parent"],
-		"idx asc",
-		limit=60,
-	)
-	group_names = [g.parent for g in groups]
+	# The roster alone under-reports: building a timetable never writes to
+	# `Student Group Instructor`, so a teacher with a full week of lessons
+	# showed no classes at all. Both sources are merged.
+	from match_schools.api.academics import _groups_by_instructor
+
+	group_names = _groups_by_instructor([instructor]).get(instructor, [])
 
 	group_detail = []
 	student_total = 0
@@ -958,8 +959,8 @@ def teacher_dossier(instructor: str, persona: str = None):
 				"id": r.name,
 				"course": r.course,
 				"date": str(r.schedule_date or ""),
-				"from": str(r.from_time or ""),
-				"to": str(r.to_time or ""),
+				"from": hhmm(r.from_time),
+				"to": hhmm(r.to_time),
 				"room": r.room,
 				"group": r.student_group,
 			}

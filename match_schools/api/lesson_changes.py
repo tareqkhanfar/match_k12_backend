@@ -85,7 +85,11 @@ def day_lessons(date: str = None, student_group: str = None, instructor: str = N
 	"""Every lesson on one day, with any change already applied to it."""
 	date = date or today()
 
-	filters: dict = {"schedule_date": date, "docstatus": ["<", 2]}
+	# Cancelled lessons are included, not filtered out. Cancelling set
+	# docstatus=2 and every reader dropped the row, so the lesson vanished from
+	# the very screen the undo button lives on — there was no way back. A
+	# cancelled period is still part of the day; it is shown struck through.
+	filters: dict = {"schedule_date": date}
 	if student_group:
 		filters["student_group"] = student_group
 
@@ -167,7 +171,11 @@ def available_instructors(course_schedule: str, persona: str = None):
 		as_dict=True,
 	)
 	if not lesson:
-		return fail("Lesson not found", "لم يتم العثور على الحصة")
+		return fail(
+			"Lesson no longer exists",
+			"الحصة لم تعد موجودة — قد يكون جدول الشعبة أُعيد توليده. "
+			"حدّث الصفحة ثم أعد المحاولة.",
+		)
 
 	day = getdate(lesson.schedule_date).strftime("%A")
 	start = sched.hhmmss(lesson.from_time)
@@ -207,6 +215,114 @@ def available_instructors(course_schedule: str, persona: str = None):
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def swap_candidates(course_schedule: str, persona: str = None):
+	"""The other lessons this one could trade teachers with, and which work.
+
+	A swap is only valid inside the same class, and only when each teacher is
+	free for the other's period. Working that out for every candidate here —
+	rather than letting the user pick and be refused — is what lets the screen
+	show at a glance which options are open.
+	"""
+	lesson = frappe.db.get_value(
+		"Course Schedule",
+		course_schedule,
+		["schedule_date", "from_time", "to_time", "instructor", "student_group", "course"],
+		as_dict=True,
+	)
+	if not lesson:
+		return fail(
+			"Lesson no longer exists",
+			"الحصة لم تعد موجودة — قد يكون جدول الشعبة أُعيد توليده. "
+			"حدّث الصفحة ثم أعد المحاولة.",
+		)
+
+	rows = frappe.get_all(
+		"Course Schedule",
+		filters={
+			"schedule_date": lesson.schedule_date,
+			# Same class only: swapping across sections would move a teacher
+			# into a class they do not teach.
+			"student_group": lesson.student_group,
+			"name": ["!=", course_schedule],
+			"docstatus": ["<", 2],
+		},
+		fields=[
+			"name", "course", "instructor", "instructor_name",
+			"from_time", "to_time", "student_group",
+		],
+		order_by="from_time",
+		limit_page_length=0,
+	)
+
+	day = getdate(lesson.schedule_date).strftime("%A")
+	changed = set(
+		frappe.get_all(
+			"MS Lesson Change",
+			filters={"schedule_date": lesson.schedule_date, "docstatus": 1},
+			pluck="course_schedule",
+		)
+	)
+
+	out = []
+	for r in rows:
+		entry = _lesson_row(r)
+		if r.instructor == lesson.instructor and r.course == lesson.course:
+			entry["available"] = False
+			entry["reason"] = "نفس المادة ونفس المعلم — لا يوجد ما يُبدَّل"
+			out.append(entry)
+			continue
+		if r.name in changed:
+			entry["available"] = False
+			entry["reason"] = "على هذه الحصة تغيير مسجَّل — ألغِه أولاً"
+			out.append(entry)
+			continue
+
+		# Each teacher must be free for the other's slot, with both lessons
+		# excluded: they are the two being rearranged.
+		both = {course_schedule, r.name}
+		blocked = None
+		# One teacher holding both periods is simply reordering their own day:
+		# the two slots stay occupied by the same person, so there is nothing
+		# to check. Testing anyway reported each lesson as clashing with the
+		# other one it was swapping with.
+		pairs = (
+			()
+			if lesson.instructor and lesson.instructor == r.instructor
+			else ((lesson.instructor, r), (r.instructor, lesson))
+		)
+		for teacher, target in pairs:
+			clashes = sched.find_conflicts(
+				[
+					{
+						"day": day,
+						"from_time": sched.hhmmss(target.from_time),
+						"to_time": sched.hhmmss(target.to_time),
+						"instructor": teacher,
+						"room": None,
+						"student_group": None,
+					}
+				],
+				exclude=both,
+			)
+			first = _first_conflict(clashes)
+			if first:
+				blocked = first["detail"]
+				break
+
+		entry["available"] = blocked is None
+		if blocked:
+			entry["reason"] = blocked
+		out.append(entry)
+
+	return {
+		"lesson": _lesson_row({**lesson, "name": course_schedule}),
+		"candidates": out,
+		"availableCount": sum(1 for c in out if c["available"]),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def record_change(
 	course_schedule: str,
 	change_type: str,
@@ -218,7 +334,11 @@ def record_change(
 ):
 	"""Record and apply a one-day change to a lesson."""
 	if not frappe.db.exists("Course Schedule", course_schedule):
-		return fail("Lesson not found", "لم يتم العثور على الحصة")
+		return fail(
+			"Lesson no longer exists",
+			"الحصة لم تعد موجودة — قد يكون جدول الشعبة أُعيد توليده. "
+			"حدّث الصفحة ثم أعد المحاولة.",
+		)
 	if change_type not in CHANGE_AR:
 		return fail("Unknown change type", "نوع التغيير غير معروف")
 
@@ -341,6 +461,16 @@ def undo_change(change: str, persona: str = None):
 			)
 		if doc.original_room:
 			frappe.db.set_value("Course Schedule", lesson, "room", doc.original_room)
+		# A swap moved the subject as well, so undoing has to move it back.
+		if doc.get("original_course") and doc.original_course != doc.course:
+			frappe.db.set_value(
+				"Course Schedule",
+				lesson,
+				{
+					"course": doc.original_course,
+					"title": f"{doc.original_course} — {doc.student_group}",
+				},
+			)
 
 	doc.cancel()
 	frappe.db.commit()
@@ -356,30 +486,60 @@ def swap_lessons(first: str, second: str, reason: str = None, persona: str = Non
 	room at its own time, which is what a school does when two colleagues
 	trade a period.
 	"""
-	for name in (first, second):
-		if not frappe.db.exists("Course Schedule", name):
-			return fail("Lesson not found", "لم يتم العثور على الحصة")
+	# Almost always a stale id: regenerating a class's timetable deletes the
+	# old lessons and creates new ones, so a screen left open still points at
+	# rows that no longer exist. Saying so is the difference between a message
+	# that explains and one that just refuses.
+	missing = [name for name in (first, second) if not frappe.db.exists("Course Schedule", name)]
+	if missing:
+		return fail(
+			"Lesson no longer exists: {0}".format("، ".join(missing)),
+			"الحصة لم تعد موجودة — على الأرجح أُعيد توليد جدول الشعبة بعد فتح هذه "
+			"الشاشة، فتغيّرت الحصص. حدّث الصفحة ثم أعد المحاولة.",
+		)
 
-	a = frappe.db.get_value(
-		"Course Schedule", first, ["schedule_date", "instructor", "from_time", "to_time"], as_dict=True
-	)
-	b = frappe.db.get_value(
-		"Course Schedule", second, ["schedule_date", "instructor", "from_time", "to_time"], as_dict=True
-	)
+	fields = ["schedule_date", "instructor", "from_time", "to_time", "student_group", "course"]
+	a = frappe.db.get_value("Course Schedule", first, fields, as_dict=True)
+	b = frappe.db.get_value("Course Schedule", second, fields, as_dict=True)
 
 	if str(a.schedule_date) != str(b.schedule_date):
 		return fail(
 			"The lessons are on different days",
 			"الحصتان في يومين مختلفين — التبديل يكون في نفس اليوم",
 		)
-	if a.instructor == b.instructor:
-		return fail("Both lessons have the same teacher", "الحصتان لنفس المعلم")
+
+	# Two periods can only trade within one section. Swapping across sections
+	# would move a teacher into a class they do not teach and leave the other
+	# class with a subject that is not on its timetable — a swap is two periods
+	# of the same class changing places, not two classes exchanging staff.
+	if a.student_group != b.student_group:
+		return fail(
+			"The lessons belong to different classes",
+			"الحصتان لشعبتين مختلفتين — التبديل يكون داخل الشعبة نفسها "
+			f"({a.student_group} مقابل {b.student_group}).",
+		)
+	# Same teacher is fine now that the subject moves too — a teacher
+	# reordering two of their own periods is a real swap. Identical subject
+	# *and* teacher is not: nothing would change.
+	if a.instructor == b.instructor and a.course == b.course:
+		return fail(
+			"Both lessons have the same subject and teacher",
+			"الحصتان لنفس المادة ونفس المعلم — لا يوجد ما يُبدَّل",
+		)
 
 	# After swapping, each teacher must be free for the other's slot. Both
 	# lessons are excluded because they are the two being rearranged.
 	day = getdate(a.schedule_date).strftime("%A")
 	both = {first, second}
-	for teacher, target in ((a.instructor, b), (b.instructor, a)):
+	# Same teacher on both periods: they are reordering their own day, and the
+	# two slots stay occupied by the same person. Checking would report each
+	# lesson clashing with the very one it is trading with.
+	pairs = (
+		()
+		if a.instructor and a.instructor == b.instructor
+		else ((a.instructor, b), (b.instructor, a))
+	)
+	for teacher, target in pairs:
 		clashes = sched.find_conflicts(
 			[
 				{
@@ -393,18 +553,29 @@ def swap_lessons(first: str, second: str, reason: str = None, persona: str = Non
 			],
 			exclude=both,
 		)
-		first = _first_conflict(clashes)
-		if first:
+		# Named `clash`, not `first`: reusing the parameter name overwrote the
+		# lesson id with the conflict result, and when there was no conflict it
+		# became None — so a valid swap then wrote against a lesson that did
+		# not exist and failed with "Lesson None not found".
+		clash = _first_conflict(clashes)
+		if clash:
 			return fail(
-				"Swap would clash: {0}".format(first["detail"]),
-				"التبديل يسبب تعارضاً — {0}".format(first["detail"]),
+				"Swap would clash: {0}".format(clash["detail"]),
+				"التبديل يسبب تعارضاً — {0}".format(clash["detail"]),
 			)
 
-	for lesson, new_teacher in ((first, b.instructor), (second, a.instructor)):
+	# The whole lesson trades places, subject and teacher together — a class
+	# swapping its second and fifth periods expects maths to move to the fifth,
+	# not to stay put with a different name against it.
+	for lesson, new_teacher, new_course in (
+		(first, b.instructor, b.course),
+		(second, a.instructor, a.course),
+	):
 		doc = frappe.new_doc("MS Lesson Change")
 		doc.course_schedule = lesson
 		doc.change_type = "Swap"
 		doc.instructor = new_teacher
+		doc.course = new_course
 		doc.reason = reason
 		doc.notes = "تبديل مع {0}".format(second if lesson == first else first)
 		doc.insert(ignore_permissions=True)

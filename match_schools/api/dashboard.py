@@ -5,9 +5,10 @@
 
 import frappe
 from frappe import _
-from frappe.utils import add_months, flt, getdate, today
+from frappe.utils import add_months, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -329,8 +330,16 @@ def _schedule_for_instructor(instructor: str | None, date: str) -> list[dict]:
 		return []
 	rows = frappe.get_all(
 		"Course Schedule",
-		filters={"instructor": instructor, "schedule_date": date},
-		fields=["name", "course", "student_group", "room", "from_time", "to_time", "title"],
+		# Teachers see a week released to them, or to everyone.
+		filters={
+			"instructor": instructor,
+			"schedule_date": date,
+			"ms_audience": ["in", ["teachers", "all"]],
+		},
+		fields=[
+			"name", "course", "student_group", "room", "from_time", "to_time",
+			"title", "docstatus",
+		],
 		order_by="from_time",
 	)
 	return [
@@ -339,9 +348,12 @@ def _schedule_for_instructor(instructor: str | None, date: str) -> list[dict]:
 			"course": r.course,
 			"student_group": r.student_group,
 			"room": r.room,
-			"from_time": str(r.from_time or ""),
-			"to_time": str(r.to_time or ""),
+			"from_time": hhmm(r.from_time),
+			"to_time": hhmm(r.to_time),
 			"title": r.title,
+			# A called-off period stays on the day, struck through, rather than
+			# leaving an unexplained gap.
+			"cancelled": cint(r.docstatus) == 2,
 		}
 		for r in rows
 	]
@@ -505,8 +517,16 @@ def _schedule_for_student(student: str, date: str) -> list[dict]:
 		return []
 	rows = frappe.get_all(
 		"Course Schedule",
-		filters={"student_group": ["in", groups], "schedule_date": date},
-		fields=["name", "course", "instructor_name", "room", "from_time", "to_time", "title"],
+		# A student's own day: a draft week is not theirs to see yet.
+		filters={
+			"student_group": ["in", groups],
+			"schedule_date": date,
+			"ms_audience": "all",
+		},
+		fields=[
+			"name", "course", "instructor_name", "room", "from_time", "to_time",
+			"title", "docstatus",
+		],
 		order_by="from_time",
 	)
 	return [
@@ -515,9 +535,12 @@ def _schedule_for_student(student: str, date: str) -> list[dict]:
 			"course": r.course,
 			"teacher": r.instructor_name,
 			"room": r.room,
-			"from_time": str(r.from_time or ""),
-			"to_time": str(r.to_time or ""),
+			"from_time": hhmm(r.from_time),
+			"to_time": hhmm(r.to_time),
 			"title": r.title,
+			# A called-off period stays on the day, struck through, rather than
+			# leaving an unexplained gap.
+			"cancelled": cint(r.docstatus) == 2,
 		}
 		for r in rows
 	]

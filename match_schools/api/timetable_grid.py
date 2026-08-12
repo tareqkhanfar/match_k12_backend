@@ -20,7 +20,7 @@ reported before anything is saved rather than thrown on the first offence.
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, getdate, today
+from frappe.utils import add_days, cint, getdate, now_datetime, today
 
 from match_schools.api import academic_context as ctx
 from match_schools.api import scheduling as sched
@@ -40,20 +40,33 @@ from match_schools.api.utils import (
 
 
 @frappe.request_cache
-def _periods() -> list[dict]:
-	"""The school's period definitions — the rows of the grid.
+def _periods(student_group: str | None = None) -> list[dict]:
+	"""The period definitions — the rows of the grid.
 
 	Cached per request: a grid check asks for a period's times once per cell,
 	and the definitions cannot change mid-request.
 
 	`MS Timetable Period` is a child table of `MS Timetable Plan`, so reading it
 	unfiltered returns every plan's rows stacked together. One period order is
-	one row of the grid, so the rows are collapsed by order and the most
-	recently defined plan wins.
+	one row of the grid, so the rows are collapsed by order.
+
+	A class's own plan is preferred when it has one: sections may run different
+	days, and falling back to the globally newest plan would give one section
+	another's clock. Without a class — drawing an empty grid, before anything is
+	chosen — the most recently defined plan stands in.
 	"""
-	plan = frappe.db.get_value(
-		"MS Timetable Plan", {}, "name", order_by="modified desc"
-	)
+	plan = None
+	if student_group:
+		plan = frappe.db.get_value(
+			"MS Timetable Plan",
+			{"student_group": student_group},
+			"name",
+			order_by="modified desc",
+		)
+	if not plan:
+		plan = frappe.db.get_value(
+			"MS Timetable Plan", {}, "name", order_by="modified desc"
+		)
 	filters = {"parenttype": "MS Timetable Plan"}
 	if plan:
 		filters["parent"] = plan
@@ -108,7 +121,7 @@ def grid_options(student_group: str = None, persona: str = None):
 	"""
 	return {
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
-		"periods": _periods(),
+		"periods": _periods(student_group),
 		"groups": frappe.get_all(
 			"Student Group",
 			filters={"disabled": 0},
@@ -224,7 +237,7 @@ def get_pattern(
 		# Without it the builder looks empty and a teacher gets double-booked,
 		# with the clash only surfacing on save.
 		"busy": _busy_slots(student_group, instructor, academic_term),
-		"periods": _periods(),
+		"periods": _periods(student_group),
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
 		"studentGroup": student_group,
 		"instructor": instructor,
@@ -308,7 +321,7 @@ def _busy_from_lessons(student_group: str | None, instructor: str | None) -> lis
 	A dated lesson is mapped to its weekday and matched to a period by start
 	time, so a Sunday 08:00 lesson occupies period 1 of Sunday in the builder.
 	"""
-	periods = _periods()
+	periods = _periods(student_group)
 	if not periods:
 		return []
 
@@ -395,14 +408,26 @@ def check_slots(slots: str | list, student_group: str = None, persona: str = Non
 
 
 def _period_time(slot: dict, edge: str) -> str:
-	"""A slot's time, from the slot itself or from its period definition."""
+	"""A slot's time, taken from its period definition.
+
+	The period is authoritative: a lesson in period 5 runs when period 5 runs.
+	Trusting a time sent alongside the slot let the two drift apart — dragging
+	a lesson between periods changed its number but kept its old clock, and the
+	stored week then disagreed with the grid that produced it.
+
+	A time supplied for a period the school has not defined is still honoured,
+	so a one-off slot outside the standard day is not silently blanked.
+	"""
+	period = cint(slot.get("period"))
+	# This class's own plan when it has one: two sections may run different
+	# days, and the globally newest plan would then supply the wrong clock.
+	for p in _periods(slot.get("student_group")):
+		if p["order"] == period:
+			return sched.hhmmss((p["from"] if edge == "from" else p["to"]) + ":00")
+
 	direct = slot.get(edge) or slot.get(f"{edge}_time")
 	if direct:
 		return sched.hhmmss(direct if len(str(direct)) > 5 else f"{direct}:00")
-
-	for p in _periods():
-		if p["order"] == cint(slot.get("period")):
-			return sched.hhmmss((p["from"] if edge == "from" else p["to"]) + ":00")
 	return ""
 
 
@@ -484,7 +509,7 @@ def save_pattern(
 		doc.to_time = _period_time(s, "to")
 		doc.course = s.get("course")
 		doc.instructor = s.get("instructor")
-		doc.room = s.get("room")
+		doc.room = s.get("room") or None
 		doc.academic_year = academic_year
 		doc.academic_term = academic_term
 		doc.active = 1
@@ -502,6 +527,7 @@ def generate_lessons(
 	from_date: str = None,
 	to_date: str = None,
 	replace: int = 1,
+	audience: str = "draft",
 	persona: str = None,
 ):
 	"""Turn the weekly pattern into dated lessons for a date range.
@@ -537,6 +563,7 @@ def generate_lessons(
 		return fail("The end date is before the start", "تاريخ النهاية قبل تاريخ البداية")
 
 	removed = 0
+	kept_attended = 0
 	if cint(replace):
 		# Regenerating replaces the untouched lessons but keeps any that were
 		# deliberately changed — a substitution is a decision, not noise.
@@ -547,7 +574,7 @@ def generate_lessons(
 				pluck="course_schedule",
 			)
 		)
-		for name in frappe.get_all(
+		candidates = frappe.get_all(
 			"Course Schedule",
 			filters={
 				"student_group": student_group,
@@ -555,17 +582,46 @@ def generate_lessons(
 				"docstatus": ["<", 2],
 			},
 			pluck="name",
-		):
-			if name in changed:
-				continue
-			frappe.delete_doc("Course Schedule", name, ignore_permissions=True, force=True)
-			removed += 1
+		)
+
+		# A lesson that has already been register-marked is a record of what
+		# happened, not a plan. Regenerating must not delete it and orphan the
+		# attendance rows that point at it.
+		attended = set(
+			frappe.get_all(
+				"Student Attendance",
+				filters={"course_schedule": ["in", candidates]} if candidates else {"name": ""},
+				pluck="course_schedule",
+			)
+		)
+
+		doomed = [n for n in candidates if n not in changed and n not in attended]
+		kept_attended = len([n for n in candidates if n in attended])
+
+		# Deleted in batches rather than one document at a time. A whole term is
+		# well over a thousand lessons, and `delete_doc` per row held a single
+		# transaction open long enough to hit MariaDB's 50-second lock wait —
+		# the run then failed after ~53s, which over HTTP reached the browser as
+		# an unparseable gateway error rather than a message.
+		#
+		# Course Schedule owns no child tables and nothing links to it here, so
+		# a direct delete is equivalent to `delete_doc` minus the per-row
+		# document load.
+		BATCH = 200
+		for i in range(0, len(doomed), BATCH):
+			chunk = doomed[i : i + BATCH]
+			frappe.db.delete("Course Schedule", {"name": ["in", chunk]})
+			removed += len(chunk)
+			# Commit each batch so locks are released as we go instead of
+			# accumulating across the whole term.
+			frappe.db.commit()
 
 	by_day: dict[str, list] = {}
 	for s in slots:
 		by_day.setdefault(s.day, []).append(s)
 
 	created, skipped = 0, []
+	committed_at = 0
 	current = getdate(start)
 	last = getdate(end)
 	while current <= last:
@@ -578,15 +634,36 @@ def generate_lessons(
 			continue
 
 		for s in by_day.get(current.strftime("%A"), []):
+			# Education builds the lesson title as "course by instructor" and
+			# crashes on a missing teacher. Refusing here names the subject,
+			# instead of failing later with a TypeError nobody can act on.
+			if not s.instructor:
+				skipped.append(
+					{
+						"date": str(current),
+						"course": s.course,
+						"reason": "لا يوجد معلم لهذه المادة — عيّن معلماً قبل التوليد",
+					}
+				)
+				continue
+
 			try:
 				doc = frappe.new_doc("Course Schedule")
 				doc.student_group = student_group
 				doc.course = s.course
 				doc.instructor = s.instructor
-				doc.room = s.room
+				# A Link field rejects "" but accepts None. Schools that never
+				# record rooms leave this empty, and the room is optional here
+				# (see the make_course_schedule_room_optional patch).
+				doc.room = s.room or None
 				doc.schedule_date = current
 				doc.from_time = s.from_time
 				doc.to_time = s.to_time
+				# Who may read this lesson. Defaults to draft so a week being
+				# worked on is not broadcast to families mid-build.
+				doc.ms_audience = audience
+				if audience != "draft":
+					doc.ms_published_on = now_datetime()
 				doc.insert(ignore_permissions=True)
 				created += 1
 			except Exception as exc:
@@ -600,6 +677,11 @@ def generate_lessons(
 						"reason": str(exc)[:140],
 					}
 				)
+		# Commit as we go rather than holding one transaction across a whole
+		# term, for the same reason the deletes are batched.
+		if created - committed_at >= 200:
+			frappe.db.commit()
+			committed_at = created
 		current = add_days(current, 1)
 
 	frappe.db.commit()
@@ -609,7 +691,127 @@ def generate_lessons(
 		"to": str(end),
 		"created": created,
 		"removed": removed,
+		# Lessons left alone because a register was already taken against them.
+		"keptAttended": kept_attended,
 		"skipped": skipped,
+	}
+
+
+AUDIENCES = {
+	"draft": "الإدارة فقط",
+	"teachers": "المعلمون",
+	"all": "المعلمون والطلاب وأولياء الأمور",
+}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def publication_status(student_group: str = None, persona: str = None):
+	"""How much of this class's timetable each audience can currently see."""
+	if not student_group:
+		return fail("Choose a class", "اختر الشعبة")
+
+	counts: dict[str, int] = {}
+	for value in AUDIENCES:
+		filters = {"student_group": student_group, "docstatus": ["<", 2]}
+		# Rows predating the audience field read as draft.
+		filters["ms_audience"] = ["in", [value, ""]] if value == "draft" else value
+		n = frappe.db.count("Course Schedule", filters)
+		if n:
+			counts[value] = n
+	return {
+		"studentGroup": student_group,
+		"counts": counts,
+		"total": sum(counts.values()),
+		"audiences": [{"value": k, "label": v} for k, v in AUDIENCES.items()],
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def publish_timetable(
+	student_group: str = None,
+	audience: str = "all",
+	from_date: str = None,
+	to_date: str = None,
+	persona: str = None,
+):
+	"""Decide who may see a class's generated lessons.
+
+	Separate from generating them: a week is built, checked, and only then
+	released — first to the teachers who have to teach it, then to families.
+	Moving back to `draft` withdraws it again.
+	"""
+	if not student_group:
+		return fail("Choose a class", "اختر الشعبة")
+	if audience not in AUDIENCES:
+		return fail("Unknown audience", "جمهور غير معروف")
+
+	filters: dict = {"student_group": student_group, "docstatus": ["<", 2]}
+	if from_date and to_date:
+		filters["schedule_date"] = ["between", [from_date, to_date]]
+
+	names = frappe.get_all("Course Schedule", filters=filters, pluck="name")
+	if not names:
+		return fail(
+			"No lessons to publish",
+			"لا توجد حصص لنشرها — ولّد حصص الفصل أولاً.",
+		)
+
+	# Batched for the same reason the deletes are: a term is well over a
+	# thousand lessons, and one long transaction hits the lock wait timeout.
+	stamp = now_datetime() if audience != "draft" else None
+	BATCH = 500
+	for i in range(0, len(names), BATCH):
+		chunk = names[i : i + BATCH]
+		frappe.db.set_value(
+			"Course Schedule",
+			{"name": ["in", chunk]},
+			{"ms_audience": audience, "ms_published_on": stamp},
+			update_modified=False,
+		)
+		frappe.db.commit()
+
+	return {
+		"studentGroup": student_group,
+		"audience": audience,
+		"audienceLabel": AUDIENCES[audience],
+		"lessons": len(names),
+		"message_en": f"{len(names)} lessons are now visible to: {audience}.",
+		"message_ar": f"تم ضبط ظهور {len(names)} حصة لـ: {AUDIENCES[audience]}.",
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def default_range(student_group: str = None, persona: str = None):
+	"""The dates generation would use if none were given.
+
+	The dialog prefills its two date fields from this, so a user sees the term
+	about to be generated instead of two empty boxes and a silent assumption.
+	"""
+	if not student_group:
+		return fail("Choose a class", "اختر الشعبة")
+
+	start, end = _resolve_range(student_group, None, None)
+	group = frappe.db.get_value(
+		"Student Group", student_group, ["academic_year", "academic_term"], as_dict=True
+	) or {}
+
+	label = group.get("academic_term") or group.get("academic_year") or ""
+	if not group.get("academic_term") and start:
+		# The section names no term, so say which one the dates came from.
+		term = frappe.db.get_value(
+			"Academic Term",
+			{"term_start_date": start, "term_end_date": end},
+			"name",
+		)
+		label = term or label
+
+	return {
+		"from": str(start or ""),
+		"to": str(end or ""),
+		"label": label,
 	}
 
 
@@ -631,7 +833,31 @@ def _resolve_range(student_group: str, from_date: str | None, to_date: str | Non
 		if term and term.term_start_date:
 			return from_date or term.term_start_date, to_date or term.term_end_date
 
+	# A section with no term of its own falls back to the school's current term
+	# rather than the whole academic year. Generating a year at once is 1400+
+	# lessons and took ~50 seconds — long enough for the gateway to cut the
+	# request off, which reached the browser as an unparseable response rather
+	# than a result. A term is the unit a school actually timetables anyway.
 	if group and group.academic_year:
+		term = frappe.db.get_value(
+			"Academic Term",
+			{
+				"academic_year": group.academic_year,
+				"term_start_date": ["<=", today()],
+				"term_end_date": [">=", today()],
+			},
+			["term_start_date", "term_end_date"],
+			as_dict=True,
+		) or frappe.db.get_value(
+			"Academic Term",
+			{"academic_year": group.academic_year},
+			["term_start_date", "term_end_date"],
+			as_dict=True,
+			order_by="term_start_date",
+		)
+		if term and term.term_start_date:
+			return from_date or term.term_start_date, to_date or term.term_end_date
+
 		year = frappe.db.get_value(
 			"Academic Year",
 			group.academic_year,

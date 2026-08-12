@@ -31,13 +31,19 @@ class MSLessonChange(Document):
 			frappe.throw(_("Lesson {0} not found").format(self.course_schedule))
 
 		self.student_group = lesson.student_group
-		self.course = lesson.course
 		self.schedule_date = self.schedule_date or lesson.schedule_date
 		# Only captured the first time; afterwards it is history.
 		if not self.original_instructor:
 			self.original_instructor = lesson.instructor
 		if not self.original_room:
 			self.original_room = lesson.room
+		if not self.original_course:
+			self.original_course = lesson.course
+		# `course` is the subject the lesson will carry *after* the change. A
+		# swap sets it to the other period's subject; everything else leaves it
+		# alone and it stays what the lesson already had.
+		if not self.course:
+			self.course = lesson.course
 
 	def validate_change(self):
 		if self.change_type == "Substitute":
@@ -84,3 +90,16 @@ class MSLessonChange(Document):
 			)
 		if self.room:
 			frappe.db.set_value("Course Schedule", self.course_schedule, "room", self.room)
+
+		# A swap moves the whole lesson: the subject travels with the teacher,
+		# otherwise a class that traded two periods keeps both subjects where
+		# they were and only the names against them change.
+		if self.course and self.course != self.original_course:
+			frappe.db.set_value(
+				"Course Schedule",
+				self.course_schedule,
+				{
+					"course": self.course,
+					"title": f"{self.course} — {self.student_group}",
+				},
+			)

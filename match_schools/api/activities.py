@@ -18,6 +18,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from match_schools.api.utils import (
+	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -213,8 +214,8 @@ def list_activities(
 				"status_label": STATUS_AR.get(r.status, r.status),
 				"start_date": str(r.start_date or ""),
 				"end_date": str(r.end_date or ""),
-				"from_time": str(r.from_time or ""),
-				"to_time": str(r.to_time or ""),
+				"from_time": hhmm(r.from_time),
+				"to_time": hhmm(r.to_time),
 				"location": r.location,
 				"capacity": capacity,
 				"fee": flt(r.fee),

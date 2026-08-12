@@ -45,6 +45,68 @@ CONFLICT_AR = {
 }
 
 
+def _explain(
+	field: str,
+	value: str,
+	day: str,
+	start: str,
+	end: str,
+	other_course: str | None,
+	other_group: str | None,
+	other_instructor: str | None,
+	other_start: str,
+	other_end: str,
+	*,
+	existing: bool,
+) -> str:
+	"""Why exactly these two lessons cannot both happen.
+
+	"يتعارض مع حصة أخرى" tells a timetabler nothing they can act on: they still
+	have to hunt for the other lesson. This spells out who or what is
+	double-booked, on which day, at which two times, and with which class and
+	subject — so the fix is obvious from the message alone.
+	"""
+	day_ar = WEEKDAY_AR.get(day, day)
+	when = f"{start[:5]}–{end[:5]}"
+	other_when = f"{other_start[:5]}–{other_end[:5]}"
+	# Two lessons in the same period read better as one time than as two
+	# identical ranges repeated.
+	times = when if when == other_when else f"{when} مع {other_when}"
+
+	# What the clashing lesson is, in the school's own words. The class is left
+	# out when it is the thing already named as clashing, so the message does
+	# not repeat "الصف الأول - أ ... الصف الأول - أ".
+	parts = [other_course]
+	if field != "student_group":
+		parts.append(other_group)
+	other_desc = " — ".join([p for p in parts if p]) or "حصة أخرى"
+
+	where = "بحصة محفوظة مسبقاً" if existing else "بحصة أخرى في هذا الجدول"
+
+	if field == "instructor":
+		return (
+			f"المعلم {value} مرتبط {where}: {other_desc}. "
+			f"يوم {day_ar} {times}. "
+			"لا يمكن للمعلم أن يكون في شعبتين بنفس الوقت — "
+			"غيّر الوقت أو أسند معلماً آخر."
+		)
+
+	if field == "room":
+		return (
+			f"القاعة {value} محجوزة {where}: {other_desc}"
+			+ (f" مع {other_instructor}" if other_instructor else "")
+			+ f". يوم {day_ar} {times}. اختر قاعة أخرى أو وقتاً آخر."
+		)
+
+	# student_group
+	return (
+		f"الشعبة {value} مرتبطة {where} بنفس الوقت: {other_desc}"
+		+ (f" مع {other_instructor}" if other_instructor else "")
+		+ f". يوم {day_ar} {times}. "
+		"الشعبة لا تدرس مادتين في نفس الحصة — انقل إحداهما لحصة فارغة."
+	)
+
+
 def hhmmss(value) -> str:
 	"""Normalise a time to HH:MM:SS so string comparison is safe.
 
@@ -122,11 +184,18 @@ def find_conflicts(
 						{
 							"kind": field,
 							"label": CONFLICT_AR[field],
-							"detail": "{} — {} ({}–{})".format(
+							"detail": _explain(
+								field,
 								value,
-								other.get("course") or other["name"],
-								other["from_time"][:5],
-								other["to_time"][:5],
+								day,
+								start,
+								end,
+								other.get("course"),
+								other.get("student_group"),
+								other.get("instructor"),
+								other["from_time"],
+								other["to_time"],
+								existing=True,
 							),
 							"with": other["name"],
 						}
@@ -148,7 +217,19 @@ def find_conflicts(
 						{
 							"kind": field,
 							"label": CONFLICT_AR[field],
-							"detail": "يتعارض مع حصة أخرى في نفس الجدول",
+							"detail": _explain(
+								field,
+								lesson[field],
+								day,
+								start,
+								end,
+								other.get("course"),
+								other.get("student_group"),
+								other.get("instructor"),
+								o_start,
+								o_end,
+								existing=False,
+							),
 							"with": None,
 						}
 					)
@@ -200,9 +281,13 @@ def _existing_bookings(exclude: set[str], academic_term: str | None) -> dict:
 		if r.name in exclude:
 			continue
 		day = _weekday(r.schedule_date)
+		# The class and the teacher travel with the booking so a clash can name
+		# the lesson it collides with, not just the time.
 		entry = {
 			"name": r.name,
 			"course": r.course,
+			"student_group": r.student_group,
+			"instructor": r.instructor,
 			"from_time": hhmmss(r.from_time),
 			"to_time": hhmmss(r.to_time),
 		}
