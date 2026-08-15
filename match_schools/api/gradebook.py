@@ -247,9 +247,34 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 					markable.append(c)
 					seen_names.add(c.component_name)
 
+			# The plan's own shape travels with it. The sheet needs to know
+			# which assessments roll up into which heading, and what that
+			# heading is worth, so it can total a parent from its children and
+			# show the arithmetic — none of which is recoverable from a flat
+			# list of markable assessments.
+			parents = []
+			for c in doc.components:
+				kids = children_of.get(c.component_name)
+				if c.get("ms_parent_component") or not kids:
+					continue
+				parents.append(
+					{
+						"component_name": c.component_name,
+						"component_type": c.component_type,
+						"weight": flt(c.weight),
+						"max_score": flt(c.max_score),
+						"quarter": c.get("ms_quarter"),
+						# What the children add up to, which is the figure a
+						# teacher checks the heading against.
+						"children_total": sum(flt(k.max_score) for k in kids),
+						"children": [k.component_name for k in kids],
+					}
+				)
+
 			return {
 				"id": doc.name,
 				"scheme_name": doc.scheme_name,
+				"parents": parents,
 				"components": [
 					{
 						"component_name": c.component_name,
@@ -385,7 +410,47 @@ def get_entry_sheet(
 		# lowest, how many are marked — and asking the browser to recompute
 		# them for every keystroke on a class of forty is wasteful.
 		"columns": _column_stats(scheme, existing, len(roster)),
+		# The plan's headings, with what each is worth. The sheet totals a
+		# heading from its children per student; the weight is what that
+		# heading contributes to the subject mark.
+		"parents": (scheme or {}).get("parents", []),
+		# What each quarter is worth in total — the sum of the weights of the
+		# headings that sit under it. Without this the sheet showed quarters
+		# as bare labels with no indication of what they counted for.
+		"quarter_totals": _quarter_totals(scheme),
 	}
+
+
+def _quarter_totals(scheme: dict | None) -> list[dict]:
+	"""Weight and maximum per quarter, taken from what actually scores.
+
+	A parent heading carries the weight for its children, so counting both
+	would double it. Only headings and childless assessments are counted.
+	"""
+	if not scheme:
+		return []
+	owned: set[str] = set()
+	for p in scheme.get("parents", []):
+		owned.update(p.get("children") or [])
+
+	by_quarter: dict[str, dict] = {}
+	for p in scheme.get("parents", []):
+		q = p.get("quarter") or ""
+		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0, "max_score": 0.0})
+		row["weight"] += flt(p.get("weight"))
+		row["max_score"] += flt(p.get("max_score"))
+	for c in scheme.get("components", []):
+		if c["component_name"] in owned:
+			continue
+		q = c.get("quarter") or ""
+		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0, "max_score": 0.0})
+		row["weight"] += flt(c.get("weight"))
+		row["max_score"] += flt(c.get("max_score"))
+
+	return [
+		{"quarter": k, "weight": round(v["weight"], 2), "max_score": round(v["max_score"], 2)}
+		for k, v in by_quarter.items()
+	]
 
 
 def _column_stats(scheme: dict | None, entries: list, roster_size: int) -> list[dict]:
