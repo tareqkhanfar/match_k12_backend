@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 *.egg-info
 node_modules/
+
+# فحوصات محلية: كوكيز جلسات — لا تُرفع أبداً
+sa.txt
+st.txt
+tk.txt
+*.cookies
+cookies*.txt
