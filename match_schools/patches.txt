@@ -17,3 +17,4 @@ match_schools.patches.add_timetable_audience
 match_schools.patches.add_lesson_change_original_course
 match_schools.patches.add_grandfather_name
 match_schools.patches.add_component_exclusion
+match_schools.patches.add_component_aggregation

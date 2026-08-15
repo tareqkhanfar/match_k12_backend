@@ -268,6 +268,8 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 						# teacher checks the heading against.
 						"children_total": sum(flt(k.max_score) for k in kids),
 						"children": [k.component_name for k in kids],
+						"aggregation": c.get("ms_aggregation") or "sum",
+						"aggregation_n": cint(c.get("ms_aggregation_n")),
 					}
 				)
 
@@ -800,6 +802,87 @@ def save_grid(payload: str | dict, persona: str = None):
 
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def set_aggregation(
+	course: str = None,
+	component_name: str = None,
+	mode: str = "sum",
+	n: int = 0,
+	program: str = None,
+	persona: str = None,
+):
+	"""Change how a category combines the assessments inside it.
+
+	The choice belongs to the plan, not to one class: a teacher who decides to
+	count the best three of four short tests means it for everyone sitting that
+	plan. It is stored on the category and every sheet reading that plan picks
+	it up, which is why the sheet refetches rather than guessing locally.
+	"""
+	from match_schools.api.gradeflow import assert_teacher_owns_course
+
+	if not course or not component_name:
+		return fail(
+			message_en="A course and a category are required.",
+			message_ar="يجب تحديد المادة والبند.",
+		)
+	assert_teacher_owns_course(persona, course)
+
+	if mode not in ("sum", "average", "best_n", "worst_drop"):
+		return fail(
+			message_en="Unknown aggregation mode.",
+			message_ar="طريقة احتساب غير معروفة.",
+		)
+
+	n = cint(n)
+	if mode in ("best_n", "worst_drop") and n < 1:
+		return fail(
+			message_en="Give how many assessments to keep or drop.",
+			message_ar="حدّد عدد الاختبارات المطلوب احتسابها أو استبعادها.",
+		)
+
+	scheme_name = frappe.db.get_value("MS Grade Scheme", {"course": course, "program": program}, "name") \
+		or frappe.db.get_value("MS Grade Scheme", {"course": course}, "name")
+	if not scheme_name:
+		return fail(
+			message_en="No assessment plan for this course.",
+			message_ar="لا توجد خطة تقييم لهذه المادة.",
+		)
+
+	rows = frappe.get_all(
+		"MS Grade Scheme Component",
+		filters={
+			"parent": scheme_name,
+			"component_name": component_name,
+			"ms_parent_component": ["in", ["", None]],
+		},
+		pluck="name",
+	)
+	if not rows:
+		return fail(
+			message_en="That category is not in this plan.",
+			message_ar="هذا البند غير موجود في خطة المادة.",
+		)
+
+	for name in rows:
+		frappe.db.set_value("MS Grade Scheme Component", name, "ms_aggregation", mode)
+		frappe.db.set_value("MS Grade Scheme Component", name, "ms_aggregation_n", n)
+	frappe.db.commit()
+
+	label = {
+		"sum": "جمع العلامات",
+		"average": "متوسط النسب",
+		"best_n": f"أفضل {n}",
+		"worst_drop": f"استبعاد أدنى {n}",
+	}[mode]
+	return {
+		"success": True,
+		"data": {"component": component_name, "mode": mode, "n": n},
+		"message_en": f"Aggregation set to {mode}.",
+		"message_ar": f"تم ضبط احتساب «{component_name}»: {label}.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def exclude_column(
 	student_group: str = None,
 	course: str = None,
@@ -941,6 +1024,45 @@ def delete_mark(entry: str, persona: str = None):
 # --- Term grades and the academic record -----------------------------------
 
 
+def apply_aggregation(
+	pairs: list[tuple[float, float]], mode: str = "sum", n: int = 0
+) -> tuple[float, float]:
+	"""Combine a category's assessments into one (earned, outOf) pair.
+
+	`pairs` is (score, max) for each marked assessment. Unmarked ones are the
+	caller's business to leave out — a paper nobody sat is not a zero.
+
+	The modes exist because schools do not all add marks the same way:
+
+	- sum: the plain total, which is what a plan meant before this was
+	  configurable, so it stays the default.
+	- average: the mean of the percentages, rescaled to the assessments'
+	  combined maximum. Use when a 5-mark quiz should count as much as a
+	  20-mark test.
+	- best_n / worst_drop: rank by percentage, then keep or drop. Ranking by
+	  raw score would make a 3/5 beat a 19/20.
+
+	Asking for the best 3 of 2 marked papers returns both rather than nothing:
+	mid-term, a teacher has not finished setting the papers yet.
+	"""
+	pairs = [(flt(a), flt(b)) for a, b in pairs if flt(b)]
+	if not pairs:
+		return 0.0, 0.0
+
+	if mode == "average":
+		total_max = sum(b for _, b in pairs)
+		mean = sum(a / b for a, b in pairs) / len(pairs)
+		return round(mean * total_max, 4), round(total_max, 4)
+
+	if mode in ("best_n", "worst_drop") and n > 0:
+		ranked = sorted(pairs, key=lambda x: x[0] / x[1], reverse=True)
+		keep = n if mode == "best_n" else max(len(ranked) - n, 1)
+		kept = ranked[: min(keep, len(ranked))] or ranked
+		return round(sum(a for a, _ in kept), 4), round(sum(b for _, b in kept), 4)
+
+	return round(sum(a for a, _ in pairs), 4), round(sum(b for _, b in pairs), 4)
+
+
 def _compute_subject_grade(entries: list[dict]) -> dict:
 	"""Weighted percentage for one subject, with bonus added on top.
 
@@ -972,6 +1094,7 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 	names = {e.get("component_name") for e in graded if e.get("component_name")}
 	tree: dict[str, str] = {}
 	weights: dict[str, float] = {}
+	rules: dict[str, tuple[str, int]] = {}
 	if names:
 		for row in frappe.get_all(
 			"MS Grade Scheme Component",
@@ -985,33 +1108,42 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 			for row in frappe.get_all(
 				"MS Grade Scheme Component",
 				filters={"component_name": ["in", list(set(tree.values()))]},
-				fields=["component_name", "weight", "ms_parent_component"],
+				fields=[
+					"component_name", "weight", "ms_parent_component",
+					"ms_aggregation", "ms_aggregation_n",
+				],
 				limit_page_length=0,
 			):
 				if not row.get("ms_parent_component"):
 					weights[row["component_name"]] = flt(row.get("weight"))
+					rules[row["component_name"]] = (
+						row.get("ms_aggregation") or "sum",
+						cint(row.get("ms_aggregation_n")),
+					)
 
-	by_parent: dict[str, dict] = {}
+	by_parent: dict[str, list] = {}
 	standalone = []
 	for e in graded:
 		parent = tree.get(e.get("component_name"))
 		if parent:
-			row = by_parent.setdefault(parent, {"earned": 0.0, "outOf": 0.0})
-			row["earned"] += flt(e.get("score"))
-			row["outOf"] += flt(e.get("max_score"))
+			by_parent.setdefault(parent, []).append(
+				(flt(e.get("score")), flt(e.get("max_score")))
+			)
 		else:
 			standalone.append(e)
 
 	weighted_sum = 0.0
 	covered = 0.0
 
-	for parent, row in by_parent.items():
-		if not row["outOf"]:
-			continue
+	for parent, pairs in by_parent.items():
 		weight = weights.get(parent, 0.0)
 		if not weight:
 			continue
-		weighted_sum += (row["earned"] / row["outOf"]) * weight
+		mode, n = rules.get(parent, ("sum", 0))
+		earned, out_of = apply_aggregation(pairs, mode, n)
+		if not out_of:
+			continue
+		weighted_sum += (earned / out_of) * weight
 		covered += weight
 
 	for e in standalone:
