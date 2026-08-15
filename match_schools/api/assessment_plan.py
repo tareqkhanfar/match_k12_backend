@@ -351,6 +351,9 @@ def save_plan(
 	problems: list[str] = []
 	weight_by_quarter: dict[str, float] = {}
 	names_by_quarter: dict[str, set] = {}
+	# Every assessment name in the plan and the quarter it came from, so a
+	# name reused in another quarter can be reported with both locations.
+	assessment_names: dict[str, str] = {}
 
 	for cat in rows:
 		name = (cat.get("name") or "").strip()
@@ -380,6 +383,21 @@ def save_plan(
 			if cname in child_names:
 				problems.append(f"{name}: «{cname}» مكرر داخل التصنيف")
 			child_names.add(cname)
+
+			# A mark is filed against (course, component_name) — the quarter is
+			# not part of the key. So the same assessment name used in two
+			# quarters produced one duplicated row in the marks screen and no
+			# way to tell which quarter a score belonged to. Names must be
+			# unique across the whole plan, not just within a category.
+			if cname in assessment_names:
+				problems.append(
+					f"«{cname}» مستخدم مرتين في الخطة "
+					f"({assessment_names[cname]} و {quarter}) — "
+					"لا يمكن تكرار اسم الامتحان لأن العلامات تُحفظ بالاسم."
+				)
+			else:
+				assessment_names[cname] = quarter
+
 			if flt(child.get("maxScore")) <= 0:
 				problems.append(f"{cname}: العلامة العظمى يجب أن تكون أكبر من صفر")
 

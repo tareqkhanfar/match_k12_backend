@@ -230,11 +230,22 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 					children_of.setdefault(parent, []).append(c)
 
 			markable = []
+			# A mark is stored against (course, component_name), so two
+			# assessments sharing a name are the same cell as far as the
+			# gradebook is concerned. Offering both listed the subject twice
+			# and left the sheet unable to say which one was being marked.
+			# Plans saved from now on refuse duplicate names outright; this
+			# keeps the screen usable on plans built before that check.
+			seen_names: set[str] = set()
 			for c in doc.components:
+				if c.component_name in seen_names:
+					continue
 				if c.get("ms_parent_component"):
 					markable.append(c)
+					seen_names.add(c.component_name)
 				elif not children_of.get(c.component_name):
 					markable.append(c)
+					seen_names.add(c.component_name)
 
 			return {
 				"id": doc.name,
@@ -313,7 +324,7 @@ def get_entry_sheet(
 		fields=[
 			"name", "student", "component_name", "component_type",
 			"score", "max_score", "weight", "is_bonus", "remarks",
-			"ms_is_published",
+			"ms_is_published", "ms_excluded", "ms_release_on",
 		],
 	)
 	by_student: dict[str, list] = {}
@@ -342,6 +353,7 @@ def get_entry_sheet(
 						"score": flt(m.score),
 						"max_score": flt(m.max_score),
 						"is_bonus": bool(m.is_bonus),
+						"excluded": bool(m.get("ms_excluded")),
 					}
 					for m in marks
 				],
@@ -368,7 +380,61 @@ def get_entry_sheet(
 		"draftCount": sum(
 			1 for e in existing if not cint(e.get("ms_is_published"))
 		),
+		# Per-column state and statistics. Worked out here because the mark
+		# sheet shows one row of figures per assessment — average, highest,
+		# lowest, how many are marked — and asking the browser to recompute
+		# them for every keystroke on a class of forty is wasteful.
+		"columns": _column_stats(scheme, existing, len(roster)),
 	}
+
+
+def _column_stats(scheme: dict | None, entries: list, roster_size: int) -> list[dict]:
+	"""One summary per assessment: how it was marked and where it stands.
+
+	A teacher looking at a column wants to know whether the paper worked —
+	an average of 40% says the paper was too hard far more clearly than
+	thirty individual marks do.
+	"""
+	by_component: dict[str, list] = {}
+	for e in entries:
+		by_component.setdefault(e.component_name, []).append(e)
+
+	out = []
+	for c in (scheme or {}).get("components", []):
+		name = c["component_name"]
+		rows = by_component.get(name, [])
+		scores = [flt(r.score) for r in rows]
+		maximum = flt(c.get("max_score")) or 100
+
+		published = sum(1 for r in rows if cint(r.get("ms_is_published")))
+		out.append(
+			{
+				"component_name": name,
+				"marked": len(rows),
+				"missing": max(roster_size - len(rows), 0),
+				"published": published,
+				# Three states, not two: a column published and then added to
+				# is neither fully out nor fully withheld.
+				"publish_state": (
+					"published"
+					if rows and published == len(rows)
+					else "partial"
+					if published
+					else "draft"
+				),
+				"excluded": bool(rows and all(cint(r.get("ms_excluded")) for r in rows)),
+				"release_on": next(
+					(str(r.get("ms_release_on")) for r in rows if r.get("ms_release_on")), None
+				),
+				"average": round(sum(scores) / len(scores), 2) if scores else None,
+				"highest": round(max(scores), 2) if scores else None,
+				"lowest": round(min(scores), 2) if scores else None,
+				"average_pct": (
+					round(sum(scores) / len(scores) / maximum * 100, 1) if scores and maximum else None
+				),
+			}
+		)
+	return out
 
 
 @frappe.whitelist()
@@ -406,7 +472,16 @@ def save_marks(payload: str | dict, persona: str = None):
 		as_dict=True,
 	)
 	academic_year = data.get("academic_year") or (group.academic_year if group else None) or get_default_academic_year()
-	academic_term = data.get("academic_term") or (group.academic_term if group else None)
+	# The school's current term is the last resort, exactly as the year above
+	# already did. A section with no term of its own used to store marks with
+	# a null term while every screen reads by the active one, so a teacher
+	# saved a sheet and got back an empty one — the marks were there, filed
+	# under a term nothing matches.
+	academic_term = (
+		data.get("academic_term")
+		or (group.academic_term if group else None)
+		or get_default_academic_term()
+	)
 
 	# Once the marks are with the administration the teacher may not edit them.
 	assert_entry_allowed(persona, data["student_group"], data["course"], academic_term)
@@ -571,6 +646,215 @@ def save_marks(payload: str | dict, persona: str = None):
 	}
 
 
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def save_grid(payload: str | dict, persona: str = None):
+	"""Save the whole sheet — every column, every student, in one go.
+
+	The column-at-a-time screen made a teacher pick a component, mark thirty
+	students, save, and repeat for each assessment. On a spreadsheet the marks
+	are entered wherever the eye lands, so the save has to take everything at
+	once.
+
+	Each column is delegated to `save_marks`, which already owns the
+	validation: nothing is written unless the whole column is valid, so a typo
+	in one cell cannot leave half a sheet saved.
+
+	payload = {
+	  student_group, course, academic_year, academic_term,
+	  columns: [{component_name, component_type, max_score, weight, is_bonus,
+	             marks: [{student, score}]}]
+	}
+	"""
+	data = frappe.parse_json(payload) if isinstance(payload, str) else payload
+	if not data:
+		return fail(message_en="No data supplied.", message_ar="لم يتم إرسال أي بيانات.")
+
+	columns = data.get("columns") or []
+	if not columns:
+		return fail(
+			message_en="No columns to save.",
+			message_ar="لا توجد أعمدة للحفظ.",
+		)
+
+	saved = updated = 0
+	problems: list[str] = []
+
+	for column in columns:
+		if not column.get("component_name") or not (column.get("marks") or []):
+			continue
+		result = save_marks(
+			payload={
+				"student_group": data.get("student_group"),
+				"course": data.get("course"),
+				"academic_year": data.get("academic_year"),
+				"academic_term": data.get("academic_term"),
+				"component_name": column.get("component_name"),
+				"component_type": column.get("component_type"),
+				"max_score": column.get("max_score"),
+				"weight": column.get("weight"),
+				"is_bonus": column.get("is_bonus"),
+				"marks": column.get("marks"),
+			},
+			persona=persona,
+		)
+		body = result.get("data") if isinstance(result, dict) else None
+		if isinstance(result, dict) and result.get("success") is False:
+			# Name the column: "a mark is out of range" is unusable when
+			# fourteen columns were sent at once.
+			problems.append(
+				"{0}: {1}".format(
+					column.get("component_name"),
+					(result.get("message_ar") or result.get("message_en") or "").split("\n")[0],
+				)
+			)
+			continue
+		if body:
+			saved += cint(body.get("saved"))
+			updated += cint(body.get("updated"))
+
+	if problems:
+		return fail(
+			message_en="Some columns were not saved.",
+			message_ar="تعذّر حفظ بعض الأعمدة:\n" + "\n".join(f"• {p}" for p in problems[:8]),
+			data={"problems": problems, "saved": saved, "updated": updated},
+		)
+
+	return {
+		"success": True,
+		"data": {"saved": saved, "updated": updated, "columns": len(columns)},
+		"message_en": f"Saved {saved + updated} marks.",
+		"message_ar": f"تم حفظ {saved + updated} علامة.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def exclude_column(
+	student_group: str = None,
+	course: str = None,
+	component_name: str = None,
+	excluded: int = 1,
+	academic_term: str = None,
+	persona: str = None,
+):
+	"""Drop an assessment from the total, or put it back.
+
+	The marks are kept either way: a cancelled quiz is still a record of what
+	the students did, and a teacher who excludes one by mistake has lost
+	nothing.
+	"""
+	from match_schools.api.gradeflow import assert_teacher_owns_course
+
+	if not student_group or not course or not component_name:
+		return fail(
+			message_en="A class, course and component are required.",
+			message_ar="يجب تحديد الشعبة والمادة والمكوّن.",
+		)
+	assert_teacher_owns_course(persona, course)
+
+	filters = {
+		"student_group": student_group,
+		"course": course,
+		"component_name": component_name,
+	}
+	if academic_term:
+		filters["academic_term"] = academic_term
+
+	names = frappe.get_all("MS Gradebook Entry", filters=filters, pluck="name")
+	for name in names:
+		frappe.db.set_value("MS Gradebook Entry", name, "ms_excluded", cint(excluded))
+	frappe.db.commit()
+
+	return {
+		"success": True,
+		"data": {"component": component_name, "excluded": bool(cint(excluded)), "rows": len(names)},
+		"message_en": f"{component_name} {'excluded' if cint(excluded) else 'included'}.",
+		"message_ar": (
+			f"تم استبعاد «{component_name}» من الاحتساب."
+			if cint(excluded)
+			else f"تمت إعادة «{component_name}» إلى الاحتساب."
+		),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def curve_column(
+	student_group: str = None,
+	course: str = None,
+	component_name: str = None,
+	points: float = 0,
+	percent: float = 0,
+	academic_term: str = None,
+	persona: str = None,
+):
+	"""Move a whole column up or down.
+
+	A curve is a decision about the paper, not about a student — the exam was
+	harder than intended, so everyone gains two marks. Doing that by hand for
+	thirty students invites the one typo nobody notices.
+
+	Marks are clamped to the component's maximum and to zero: a curve must not
+	invent a score above the paper's own total, or push a zero negative.
+	"""
+	from match_schools.api.gradeflow import assert_teacher_owns_course
+
+	if not student_group or not course or not component_name:
+		return fail(
+			message_en="A class, course and component are required.",
+			message_ar="يجب تحديد الشعبة والمادة والمكوّن.",
+		)
+	assert_teacher_owns_course(persona, course)
+
+	points = flt(points)
+	percent = flt(percent)
+	if not points and not percent:
+		return fail(
+			message_en="Give an amount to curve by.",
+			message_ar="حدّد مقدار التعديل.",
+		)
+
+	filters = {
+		"student_group": student_group,
+		"course": course,
+		"component_name": component_name,
+	}
+	if academic_term:
+		filters["academic_term"] = academic_term
+
+	rows = frappe.get_all(
+		"MS Gradebook Entry",
+		filters=filters,
+		fields=["name", "score", "max_score"],
+		limit_page_length=0,
+	)
+	if not rows:
+		return fail(
+			message_en="No marks recorded for this component yet.",
+			message_ar="لا توجد علامات مرصودة لهذا المكوّن.",
+		)
+
+	changed = 0
+	for r in rows:
+		maximum = flt(r.max_score) or 100
+		value = flt(r.score)
+		value = value + (value * percent / 100) if percent else value + points
+		value = max(0, min(round(value, 2), maximum))
+		if abs(value - flt(r.score)) >= 0.001:
+			frappe.db.set_value("MS Gradebook Entry", r.name, "score", value)
+			changed += 1
+
+	frappe.db.commit()
+	direction = "رفع" if (points > 0 or percent > 0) else "خفض"
+	return {
+		"success": True,
+		"data": {"changed": changed, "total": len(rows)},
+		"message_en": f"Curved {changed} marks.",
+		"message_ar": f"تم {direction} {changed} علامة في «{component_name}».",
+	}
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def delete_mark(entry: str, persona: str = None):
@@ -599,6 +883,10 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 	# flag, but an entry created directly may only carry the type.
 	def _is_bonus(e):
 		return bool(e.get("is_bonus")) or e.get("component_type") == "Bonus"
+
+	# An excluded assessment stays on the student's record but is not part of
+	# the sum — a cancelled quiz must neither help nor hurt the total.
+	entries = [e for e in entries if not cint(e.get("ms_excluded"))]
 
 	graded = [e for e in entries if not _is_bonus(e)]
 	bonus = [e for e in entries if _is_bonus(e)]

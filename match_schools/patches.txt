@@ -15,3 +15,5 @@ match_schools.patches.add_quarter_assessment_tree
 match_schools.patches.make_course_schedule_room_optional
 match_schools.patches.add_timetable_audience
 match_schools.patches.add_lesson_change_original_course
+match_schools.patches.add_grandfather_name
+match_schools.patches.add_component_exclusion

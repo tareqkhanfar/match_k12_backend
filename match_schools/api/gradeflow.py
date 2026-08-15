@@ -537,7 +537,11 @@ def term_overview(academic_term: str = None, persona: str = None):
 	academic_term = academic_term or get_default_academic_term()
 	filters = {"disabled": 0}
 	if academic_term:
-		filters["academic_term"] = academic_term
+		# A section that names no term belongs to whichever term is current —
+		# filtering on an exact match hid every class on a school that leaves
+		# the field blank, so the console came up empty and nothing could be
+		# published or withdrawn.
+		filters["academic_term"] = ["in", [academic_term, ""]]
 	groups = frappe.get_all(
 		"Student Group", filters=filters, fields=["name", "student_group_name"], limit=300
 	)
