@@ -470,6 +470,36 @@ def _groups_of_student(student: str) -> list[dict]:
 	)
 
 
+def set_full_name(doc, method=None):
+	"""Rebuild `student_name` from all four names.
+
+	An Arabic name is four parts — given, father, grandfather, family — and
+	Education joins only three, so the grandfather's name never reached the
+	record however carefully it was typed. Runs on validate, after the core
+	has set its own three-part title, and so replaces it.
+
+	Falls back to whatever parts exist: a school that has not filled in the
+	grandfather's name still gets a sensible name rather than a gap.
+	"""
+	parts = [
+		doc.get("first_name"),
+		doc.get("middle_name"),
+		doc.get("ms_grandfather_name"),
+		doc.get("last_name"),
+	]
+	full = " ".join(p.strip() for p in parts if p and str(p).strip())
+	if not full:
+		return
+
+	# The two doctypes hold the assembled name under different fieldnames:
+	# Student calls it `student_name`, Student Applicant calls it `title`.
+	# Writing only one left the applicant showing three names.
+	if doc.meta.has_field("student_name"):
+		doc.student_name = full
+	if doc.meta.has_field("title"):
+		doc.title = full
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def save_student(payload: str | dict, persona: str = None):
@@ -482,6 +512,9 @@ def save_student(payload: str | dict, persona: str = None):
 	fields = {
 		"first_name": data.get("first_name"),
 		"middle_name": data.get("middle_name"),
+		# The third of four names; `student_name` is rebuilt from all of them
+		# by `set_full_name` on validate.
+		"ms_grandfather_name": data.get("grandfather_name"),
 		"last_name": data.get("last_name"),
 		"gender": data.get("gender"),
 		"date_of_birth": data.get("date_of_birth"),
@@ -493,6 +526,15 @@ def save_student(payload: str | dict, persona: str = None):
 		"joining_date": data.get("joining_date"),
 		"image": data.get("image"),
 		"ms_id_number": data.get("id_number"),
+		# The rest of what an admission form already collects. Creating a
+		# student directly used to capture eight fields while an applicant
+		# arriving through admissions carried twenty, so the same child had a
+		# thinner record depending on which door they came through.
+		"blood_group": data.get("blood_group"),
+		"address_line_2": data.get("address_line_2"),
+		"state": data.get("state"),
+		"pincode": data.get("pincode"),
+		"country": data.get("country"),
 	}
 	fields = {k: v for k, v in fields.items() if v is not None}
 
@@ -521,6 +563,30 @@ def save_student(payload: str | dict, persona: str = None):
 		with _student_user_creation_guard(doc):
 			doc.insert()
 		message_en, message_ar = "Student created.", "تم إنشاء الطالب."
+
+	# Guardians, when the caller sent them. Absent means "not editing this",
+	# not "remove them all" — a screen that only edits the address must not
+	# silently unlink a child's parents.
+	guardians = data.get("guardians")
+	if isinstance(guardians, list):
+		# Reloaded first: insert() and save() both stamp `modified`, and
+		# appending to the in-memory copy then saving it again raises
+		# "has been modified after you have opened it".
+		doc = frappe.get_doc("Student", doc.name)
+		doc.set("guardians", [])
+		for g in guardians:
+			guardian = (g or {}).get("guardian") if isinstance(g, dict) else g
+			if not guardian:
+				continue
+			doc.append(
+				"guardians",
+				{
+					"guardian": guardian,
+					"relation": (g or {}).get("relation") if isinstance(g, dict) else None,
+				},
+			)
+		with _student_user_creation_guard(doc):
+			doc.save()
 
 	frappe.db.commit()
 	return {

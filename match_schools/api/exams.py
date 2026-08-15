@@ -461,10 +461,37 @@ def save_exam(payload: str | dict, persona: str = None):
 
 
 def _default_grading_scale() -> str | None:
-	"""Any active scale will do — the schedule never grades against it."""
-	return frappe.db.get_value("Grading Scale", {"docstatus": 1}, "name") or frappe.db.get_value(
-		"Grading Scale", {}, "name"
+	"""Any active scale will do — the schedule never grades against it.
+
+	Education marks `grading_scale` mandatory on Assessment Plan, so a school
+	with no scale defined could not schedule an exam at all: every attempt
+	failed with a raw "[Assessment Plan, ...]: grading_scale". One is created
+	on demand, exactly as `_default_criterion` already does, because the
+	timetable has no opinion about grading — it only needs the field filled.
+	"""
+	existing = frappe.db.get_value(
+		"Grading Scale", {"docstatus": 1}, "name"
+	) or frappe.db.get_value("Grading Scale", {}, "name")
+	if existing:
+		return existing
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Grading Scale",
+			"grading_scale_name": "المقياس الافتراضي",
+			"description": "أُنشئ تلقائياً لجدولة الامتحانات.",
+			"intervals": [
+				{"grade_code": "A", "threshold": 90},
+				{"grade_code": "B", "threshold": 80},
+				{"grade_code": "C", "threshold": 70},
+				{"grade_code": "D", "threshold": 60},
+				{"grade_code": "F", "threshold": 0},
+			],
+		}
 	)
+	doc.insert(ignore_permissions=True)
+	doc.submit()
+	return doc.name
 
 
 def _default_criterion() -> str | None:

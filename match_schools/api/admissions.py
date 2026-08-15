@@ -64,6 +64,7 @@ ALLOWED_MOVES = {
 FIELD_MAP = {
 	"first_name": "firstName",
 	"middle_name": "middleName",
+	"ms_grandfather_name": "grandfatherName",
 	"last_name": "lastName",
 	"program": "program",
 	"academic_term": "academicTerm",
@@ -88,6 +89,7 @@ LIST_FIELDS = [
 	"name",
 	"first_name",
 	"middle_name",
+	"ms_grandfather_name",
 	"last_name",
 	"title",
 	"ms_id_number",
@@ -110,7 +112,17 @@ def _row(doc: dict) -> dict:
 	return {
 		"id": doc.get("name"),
 		"name": doc.get("title")
-		or " ".join(filter(None, [doc.get("first_name"), doc.get("middle_name"), doc.get("last_name")])),
+		or " ".join(
+			filter(
+				None,
+				[
+					doc.get("first_name"),
+					doc.get("middle_name"),
+					doc.get("ms_grandfather_name"),
+					doc.get("last_name"),
+				],
+			)
+		),
 		"idNumber": doc.get("ms_id_number"),
 		"status": status,
 		"statusLabel": STATUS_AR.get(status, status),
@@ -479,13 +491,18 @@ def admit(applicant: str, persona: str = None):
 		)
 
 	full_name = doc.title or " ".join(
-		filter(None, [doc.first_name, doc.middle_name, doc.last_name])
+		filter(
+			None,
+			[doc.first_name, doc.middle_name, doc.get("ms_grandfather_name"), doc.last_name],
+		)
 	)
 
 
 	student = frappe.new_doc("Student")
 	student.first_name = doc.first_name
 	student.middle_name = doc.middle_name
+	# The fourth name travels with the applicant into the Student record.
+	student.ms_grandfather_name = doc.get("ms_grandfather_name")
 	student.last_name = doc.last_name
 	student.student_applicant = applicant
 	student.date_of_birth = doc.date_of_birth

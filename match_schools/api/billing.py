@@ -241,12 +241,21 @@ def invoice_student(
 		if not item or not frappe.db.exists("Item", item):
 			missing_items.append(row.get("category") or row.get("item"))
 			continue
+		rate = flt(row.get("amount"))
 		doc.append(
 			"items",
 			{
 				"item_code": item,
 				"qty": flt(row.get("qty")) or 1,
-				"rate": flt(row.get("amount")),
+				"rate": rate,
+				# `price_list_rate` and `margin_type` pin the rate against
+				# ERPNext's own pricing: it re-fetches the item's list price
+				# when the rate looks unset, so a deliberate zero — a waived
+				# or complimentary line — came back billed at the item's
+				# catalogue price instead of nothing.
+				"price_list_rate": rate,
+				"margin_type": "",
+				"discount_percentage": 0,
 				"description": row.get("description") or row.get("category") or item,
 			},
 		)

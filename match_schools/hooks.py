@@ -141,6 +141,15 @@ doc_events = {
 	"Sales Invoice": {
 		"validate": "match_schools.ms_billing.validate_student_invoice",
 	},
+	# Education builds `student_name` from three names and runs it in its own
+	# validate. These hooks run afterwards, so rebuilding the name here is what
+	# makes the fourth (grandfather's) name actually appear on the record.
+	"Student": {
+		"validate": "match_schools.api.students.set_full_name",
+	},
+	"Student Applicant": {
+		"validate": "match_schools.api.students.set_full_name",
+	},
 }
 
 # Scheduled Tasks

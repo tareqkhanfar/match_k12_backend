@@ -17,6 +17,7 @@ from match_schools.api.utils import (
 	ROLE_STUDENT,
 	ROLE_TEACHER,
 	fail,
+	get_default_academic_term,
 	get_default_academic_year,
 	ms_endpoint,
 	parse_json_arg,
@@ -607,6 +608,82 @@ def report_card(student: str, academic_year: str = None, academic_term: str = No
 # --- Write endpoints: classes / subjects / teachers / exams ----------------
 
 
+def _batch_for_section(group_name: str | None, program: str | None) -> str | None:
+	"""The batch a section belongs to, created if the school has not yet.
+
+	Schools name sections after the batch: "الصف الأول - أ" is batch "أ" of the
+	first grade. The part after the last dash is taken as the batch name, which
+	is how these names are written in practice; a section named without one
+	simply gets no batch rather than a guess.
+
+	`Student Batch Name` is a plain list of names, so creating the missing one
+	is safe — it carries no marks, fees or enrolments of its own.
+	"""
+	if not group_name:
+		return None
+
+	for sep in ("-", "–", "—"):
+		if sep in group_name:
+			candidate = group_name.rsplit(sep, 1)[-1].strip()
+			break
+	else:
+		return None
+
+	# A "batch" of more than a few characters is part of the grade's name, not
+	# a section letter — "الصف الأول - المسار العلمي" is not batch "المسار العلمي".
+	if not candidate or len(candidate) > 12:
+		return None
+
+	if not frappe.db.exists("Student Batch Name", candidate):
+		frappe.get_doc(
+			{"doctype": "Student Batch Name", "batch_name": candidate}
+		).insert(ignore_permissions=True)
+
+	return candidate
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def backfill_class_context(persona: str = None):
+	"""Give existing sections the term and batch they were created without.
+
+	Sections made before this carried a null term, which filed their marks
+	under a term no screen reads. Repairing them is a one-off the school can
+	run rather than editing nine records by hand.
+	"""
+	term = get_default_academic_term()
+	year = get_default_academic_year()
+	fixed_term = fixed_batch = 0
+
+	for g in frappe.get_all(
+		"Student Group",
+		filters={"disabled": 0},
+		fields=["name", "student_group_name", "program", "academic_term", "academic_year", "batch"],
+		limit_page_length=0,
+	):
+		patch = {}
+		if not g.academic_term and term:
+			patch["academic_term"] = term
+			fixed_term += 1
+		if not g.academic_year and year:
+			patch["academic_year"] = year
+		if not g.batch:
+			batch = _batch_for_section(g.student_group_name, g.program)
+			if batch:
+				patch["batch"] = batch
+				fixed_batch += 1
+		if patch:
+			frappe.db.set_value("Student Group", g.name, patch, update_modified=False)
+
+	frappe.db.commit()
+	return {
+		"terms": fixed_term,
+		"batches": fixed_batch,
+		"message_en": f"{fixed_term} terms and {fixed_batch} batches set.",
+		"message_ar": f"تم ضبط الفصل لـ {fixed_term} شعبة والدفعة لـ {fixed_batch} شعبة.",
+	}
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def save_class(payload: str | dict, persona: str = None):
@@ -637,9 +714,38 @@ def save_class(payload: str | dict, persona: str = None):
 	}
 	fields.setdefault("group_based_on", "Batch")
 	fields.setdefault("academic_year", get_default_academic_year())
+	# The term had no default while the year did, so a section created without
+	# one carried a null term. Marks are filed by term and every screen reads
+	# by the active one, so a teacher saved a sheet and got an empty one back.
+	fields.setdefault("academic_term", get_default_academic_term())
+	# A section is a batch of a grade — "الصف الأول - أ" is batch "أ". Without
+	# it a student's Program Enrollment has no batch either, so nothing that
+	# reports by batch can see them.
+	if not fields.get("batch"):
+		batch = _batch_for_section(fields.get("student_group_name"), fields.get("program"))
+		if batch:
+			fields["batch"] = batch
 
 	if group_id:
 		doc = frappe.get_doc("Student Group", group_id)
+
+		# Student Group is named by its own label (`autoname: field:...`), so
+		# the record id *is* the name shown on screen. Updating the field alone
+		# left the id — and therefore every timetable, mark and enrolment that
+		# points at it — still reading the old name, and the rename appeared to
+		# do nothing at all.
+		new_name = (fields.get("student_group_name") or "").strip()
+		if new_name and new_name != group_id:
+			if frappe.db.exists("Student Group", new_name):
+				return fail(
+					message_en=f"A class named {new_name} already exists.",
+					message_ar=f"توجد شعبة بنفس الاسم: {new_name}.",
+				)
+			# `merge=False`: this is a rename, not a fold of two sections into
+			# one. Frappe repoints every link for us.
+			frappe.rename_doc("Student Group", group_id, new_name, force=True, merge=False)
+			doc = frappe.get_doc("Student Group", new_name)
+
 		doc.update(fields)
 	else:
 		doc = frappe.get_doc({"doctype": "Student Group", **fields})

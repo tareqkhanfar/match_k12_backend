@@ -78,6 +78,7 @@ TRIGGERS = {
 # misconfigured rule can never lock a student out of the whole system.
 BLOCKABLE_PAGES = {
 	"/app/record": "علامات الطلبة",
+	"/app/finals": "العلامات النهائية",
 	"/app/exams": "جدول الامتحانات",
 	"/app/certificates": "الشهادات والوثائق",
 	"/app/library": "المكتبة",
@@ -85,6 +86,13 @@ BLOCKABLE_PAGES = {
 	"/app/quizzes": "الاختبارات الإلكترونية",
 	"/app/resources": "مصادر المواد",
 }
+
+# The whole portal, not a list of pages. A school that suspends a student
+# wants everything closed, and listing every route would miss the next one
+# added. The alerts page itself is never blocked — a block nobody can read the
+# reason for is a dead end, and the student has to be able to see what to fix.
+BLOCK_EVERYTHING = "*"
+ALWAYS_ALLOWED = ("/app/alerts", "/app")
 
 
 def _compare(value: float, operator: str, threshold: float) -> bool:
@@ -439,7 +447,7 @@ def _level_for(rule, student: str) -> tuple[str, bool, list[str]]:
 	pages = [
 		p.strip()
 		for p in (action.block_pages or "").split(",")
-		if p.strip() in BLOCKABLE_PAGES
+		if p.strip() in BLOCKABLE_PAGES or p.strip() == BLOCK_EVERYTHING
 	]
 	return action.action_type, action.action_type == "Block Access", pages
 
@@ -558,7 +566,7 @@ def escalate_open_alerts() -> int:
 		pages = [
 			p.strip()
 			for p in (nxt.block_pages or "").split(",")
-			if p.strip() in BLOCKABLE_PAGES
+			if p.strip() in BLOCKABLE_PAGES or p.strip() == BLOCK_EVERYTHING
 		]
 		doc = frappe.get_doc("MS Student Alert", alert.name)
 		doc.level = nxt.action_type
@@ -814,7 +822,12 @@ def rule_options(persona: str = None):
 			{"code": c, "label": l, "emoji": SEVERITY_EMOJI[c]} for c, l in SEVERITY_AR.items()
 		],
 		"levels": [{"code": c, "label": l} for c, l in LEVEL_AR.items()],
-		"pages": [{"path": p, "label": l} for p, l in BLOCKABLE_PAGES.items()],
+		"pages": [
+			# Listed first: it is the widest possible action, and a school
+			# reaching for it should not have to hunt past seven page names.
+			{"path": BLOCK_EVERYTHING, "label": "الموقع بالكامل (عدا التنبيهات)"},
+			*({"path": p, "label": l} for p, l in BLOCKABLE_PAGES.items()),
+		],
 		"operators": [
 			{"code": ">=", "label": "أكبر من أو يساوي"},
 			{"code": ">", "label": "أكبر من"},
@@ -1037,7 +1050,11 @@ def student_file(student: str = None, persona: str = None):
 def _pages_of(alert: str) -> list[str]:
 	"""Which pages this alert blocks; stored on the alert when it was raised."""
 	notes = frappe.db.get_value("MS Student Alert", alert, "resolution_notes") or ""
-	return [p.strip() for p in notes.split(",") if p.strip() in BLOCKABLE_PAGES]
+	return [
+		p.strip()
+		for p in notes.split(",")
+		if p.strip() in BLOCKABLE_PAGES or p.strip() == BLOCK_EVERYTHING
+	]
 
 
 @frappe.whitelist()
@@ -1078,15 +1095,78 @@ def my_blocks(persona: str = None):
 				"message": r.message_ar,
 				"emoji": r.emoji,
 				"severity": r.severity,
-				"pages": [BLOCKABLE_PAGES.get(p, p) for p in pages],
+				"pages": [
+					"الموقع بالكامل" if p == BLOCK_EVERYTHING else BLOCKABLE_PAGES.get(p, p)
+					for p in pages
+				],
 			}
 		)
 
-	return {"blocked": sorted(blocked), "reasons": reasons}
+	# `everything` is reported separately rather than as a page in the list:
+	# the guard has to close routes it has never heard of, which a list of
+	# known paths cannot do.
+	return {
+		"blocked": sorted(p for p in blocked if p != BLOCK_EVERYTHING),
+		"everything": BLOCK_EVERYTHING in blocked,
+		"allowed": list(ALWAYS_ALLOWED),
+		"reasons": reasons,
+	}
 
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_PARENT, ROLE_STUDENT)
+def my_alerts(persona: str = None):
+	"""Alerts the caller has not yet acknowledged.
+
+	`my_blocks` answers "which pages am I locked out of", which is only the
+	last step of an escalation. A first warning blocks nothing, so a student
+	saw no sign of it at all until the day access was cut — the point of a
+	warning is that it arrives before that.
+
+	Returned newest and most severe first, so a dialog can show the one that
+	matters without the caller having to rank them.
+	"""
+	if persona in BACK_OFFICE or persona == ROLE_TEACHER:
+		return {"alerts": []}
+
+	scope = resolve_scope(persona)
+	students = scope.get("students") or []
+	if not students:
+		return {"alerts": []}
+
+	rows = frappe.get_all(
+		"MS Student Alert",
+		filters={
+			"student": ["in", students],
+			"status": ["in", ["Open", "Escalated"]],
+			# Acknowledged means "I have seen this"; it stays on the student's
+			# file but stops interrupting them on every page load.
+			"acknowledged_by_parent": 0,
+		},
+		fields=[
+			"name", "student", "student_name", "title_ar", "message_ar", "emoji",
+			"severity", "level", "measured_value", "threshold", "raised_on",
+			"blocks_access",
+		],
+		limit=20,
+	)
+
+	for r in rows:
+		r["severity_label"] = SEVERITY_AR.get(r.severity, r.severity)
+		r["level_label"] = LEVEL_AR.get(r.level, r.level)
+		r["pages"] = [BLOCKABLE_PAGES.get(p, p) for p in _pages_of(r.name)]
+
+	# Most serious first, then most recent: a final warning outranks an
+	# information notice raised an hour later.
+	rows.sort(
+		key=lambda r: (SEVERITY_RANK.get(r["severity"], 0), str(r["raised_on"] or "")),
+		reverse=True,
+	)
+	return {"alerts": rows, "count": len(rows)}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_STUDENT, ROLE_PARENT)
 def acknowledge_alert(alert: str, persona: str = None):
 	"""A parent confirms they have seen the warning."""
 	doc = frappe.get_doc("MS Student Alert", alert)

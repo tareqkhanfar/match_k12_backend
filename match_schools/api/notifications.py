@@ -312,6 +312,42 @@ def _student_items(student: str, since: str, prefix_name: bool = False) -> list[
 				}
 			)
 
+	# Surveys open to this student. Writing one and opening it used to notify
+	# nobody, so a survey aimed at families reached only whoever happened to
+	# visit the surveys page while it was still open.
+	for s in frappe.get_all(
+		"MS Survey",
+		filters={
+			"status": "Open",
+			"audience": ["in", ["Students", "All"]],
+		},
+		fields=["name", "title", "closes_on", "modified"],
+		order_by="modified desc",
+		limit=10,
+	):
+		# Responses are recorded against the user who answered, not the
+		# student, so an already-answered survey stops nagging its respondent.
+		student_user = frappe.db.get_value("Student", student, "user")
+		if student_user and frappe.db.exists(
+			"MS Survey Response", {"survey": s.name, "respondent": student_user}
+		):
+			continue
+		items.append(
+			{
+				"id": f"survey:{s.name}:{student}",
+				"category": "survey",
+				"category_label": "استبيان",
+				"title": label(s.title),
+				"body": (
+					f"يغلق في {str(s.closes_on)[:10]}" if s.closes_on else "بانتظار رأيك"
+				),
+				"time": str(s.modified),
+				"tone": "info",
+				"link": "/app/surveys",
+				"ref": s.name,
+			}
+		)
+
 	# Marks entered recently.
 	for g in frappe.get_all(
 		"MS Gradebook Entry",
@@ -419,6 +455,32 @@ def _teacher_items(scope: dict, since: str) -> list[dict]:
 				"tone": "danger",
 				"link": "/app/timetable",
 				"ref": c.name,
+			}
+		)
+
+	# Surveys aimed at staff.
+	for s in frappe.get_all(
+		"MS Survey",
+		filters={"status": "Open", "audience": ["in", ["Teachers", "All"]]},
+		fields=["name", "title", "closes_on", "modified"],
+		order_by="modified desc",
+		limit=10,
+	):
+		if frappe.db.exists(
+			"MS Survey Response", {"survey": s.name, "respondent": frappe.session.user}
+		):
+			continue
+		items.append(
+			{
+				"id": f"survey:{s.name}",
+				"category": "survey",
+				"category_label": "استبيان",
+				"title": s.title,
+				"body": f"يغلق في {str(s.closes_on)[:10]}" if s.closes_on else "بانتظار رأيك",
+				"time": str(s.modified),
+				"tone": "info",
+				"link": "/app/surveys",
+				"ref": s.name,
 			}
 		)
 
