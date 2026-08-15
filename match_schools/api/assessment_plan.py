@@ -445,7 +445,18 @@ def save_plan(
 				"component_name": cat["name"].strip(),
 				"component_type": cat.get("type") or "Exam",
 				"weight": flt(cat.get("weight")),
-				"max_score": flt(cat.get("maxScore")) or 100,
+				# A category with assessments inside it is never marked
+				# directly, so its own maximum is unused. One without them is
+				# marked directly, and the plan editor offers a single figure
+				# for it — "العلامة" — which is both what it is worth and what
+				# it is out of. Defaulting to 100 made the sheet invite a mark
+				# of 90 against a category the plan says is worth 20, and made
+				# a 40-mark quarter read as 245.
+				"max_score": (
+					flt(cat.get("maxScore"))
+					or (flt(cat.get("weight")) if not (cat.get("children") or []) else 100)
+					or 100
+				),
 				"ms_quarter": (cat.get("quarter") or "").strip(),
 				"ms_parent_component": None,
 			},

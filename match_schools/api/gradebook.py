@@ -435,27 +435,32 @@ def _quarter_totals(scheme: dict | None) -> list[dict]:
 	for p in scheme.get("parents", []):
 		owned.update(p.get("children") or [])
 
+	# A quarter is worth the sum of its headings' weights, and nothing else.
+	#
+	# `weight` is the marks a heading contributes to the subject — the figure
+	# the plan editor shows as "العلامة". `max_score` is what its own paper is
+	# out of and defaults to 100 whether or not anyone meant it, so summing
+	# max_score made a 40-mark quarter read as 245. Reporting the weight makes
+	# the sheet say exactly what the plan says.
 	by_quarter: dict[str, dict] = {}
 	for p in scheme.get("parents", []):
 		q = p.get("quarter") or ""
-		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0, "max_score": 0.0})
+		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0})
 		row["weight"] += flt(p.get("weight"))
-		# A heading's own max_score is decorative — plans routinely set it to
-		# 100 while the assessments beneath it add up to something else. What
-		# a teacher can actually total is the children, so that is what the
-		# quarter reports; otherwise the quarter's figure contradicts the
-		# headings printed directly beneath it.
-		row["max_score"] += flt(p.get("children_total"))
 	for c in scheme.get("components", []):
 		if c["component_name"] in owned:
 			continue
 		q = c.get("quarter") or ""
-		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0, "max_score": 0.0})
+		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0})
 		row["weight"] += flt(c.get("weight"))
-		row["max_score"] += flt(c.get("max_score"))
 
 	return [
-		{"quarter": k, "weight": round(v["weight"], 2), "max_score": round(v["max_score"], 2)}
+		{
+			"quarter": k,
+			"weight": round(v["weight"], 2),
+			# The quarter is out of its own weight: 40 marks of the 100.
+			"max_score": round(v["weight"], 2),
+		}
 		for k, v in by_quarter.items()
 	]
 
