@@ -438,7 +438,12 @@ def _quarter_totals(scheme: dict | None) -> list[dict]:
 		q = p.get("quarter") or ""
 		row = by_quarter.setdefault(q, {"quarter": q, "weight": 0.0, "max_score": 0.0})
 		row["weight"] += flt(p.get("weight"))
-		row["max_score"] += flt(p.get("max_score"))
+		# A heading's own max_score is decorative — plans routinely set it to
+		# 100 while the assessments beneath it add up to something else. What
+		# a teacher can actually total is the children, so that is what the
+		# quarter reports; otherwise the quarter's figure contradicts the
+		# headings printed directly beneath it.
+		row["max_score"] += flt(p.get("children_total"))
 	for c in scheme.get("components", []):
 		if c["component_name"] in owned:
 			continue
@@ -956,9 +961,60 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 	graded = [e for e in entries if not _is_bonus(e)]
 	bonus = [e for e in entries if _is_bonus(e)]
 
+	# Assessments that sit under a heading carry no weight of their own — the
+	# heading does. Left alone, each such assessment fell into the "no weight"
+	# branch below and was treated as if it were worth a full 100, so a plan
+	# with four short tests under a 10% heading counted them as 400% of the
+	# subject. They are pooled here into their heading instead: the children
+	# add up, the heading's weight applies once.
+	# The entry itself does not record which heading it belongs to — only the
+	# plan knows — so the tree is read once, keyed by assessment name.
+	names = {e.get("component_name") for e in graded if e.get("component_name")}
+	tree: dict[str, str] = {}
+	weights: dict[str, float] = {}
+	if names:
+		for row in frappe.get_all(
+			"MS Grade Scheme Component",
+			filters={"component_name": ["in", list(names)]},
+			fields=["component_name", "ms_parent_component"],
+			limit_page_length=0,
+		):
+			if row.get("ms_parent_component"):
+				tree[row["component_name"]] = row["ms_parent_component"]
+		if tree:
+			for row in frappe.get_all(
+				"MS Grade Scheme Component",
+				filters={"component_name": ["in", list(set(tree.values()))]},
+				fields=["component_name", "weight", "ms_parent_component"],
+				limit_page_length=0,
+			):
+				if not row.get("ms_parent_component"):
+					weights[row["component_name"]] = flt(row.get("weight"))
+
+	by_parent: dict[str, dict] = {}
+	standalone = []
+	for e in graded:
+		parent = tree.get(e.get("component_name"))
+		if parent:
+			row = by_parent.setdefault(parent, {"earned": 0.0, "outOf": 0.0})
+			row["earned"] += flt(e.get("score"))
+			row["outOf"] += flt(e.get("max_score"))
+		else:
+			standalone.append(e)
+
 	weighted_sum = 0.0
 	covered = 0.0
-	for e in graded:
+
+	for parent, row in by_parent.items():
+		if not row["outOf"]:
+			continue
+		weight = weights.get(parent, 0.0)
+		if not weight:
+			continue
+		weighted_sum += (row["earned"] / row["outOf"]) * weight
+		covered += weight
+
+	for e in standalone:
 		max_score = flt(e.get("max_score"))
 		if not max_score:
 			continue
