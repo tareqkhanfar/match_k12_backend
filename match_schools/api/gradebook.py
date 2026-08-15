@@ -1100,31 +1100,50 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 	tree: dict[str, str] = {}
 	weights: dict[str, float] = {}
 	rules: dict[str, tuple[str, int]] = {}
-	if names:
+
+	# The tree must be read from THIS subject's plan and no other. Assessment
+	# names repeat across subjects — every plan has an "امتحان يومي 3" — so a
+	# lookup by name alone silently filed a mark under a heading belonging to
+	# a different subject's plan, and the student's mark moved by several
+	# points with nothing on screen to explain it.
+	scheme = None
+	course = next((e.get("course") for e in graded if e.get("course")), None)
+	if course:
+		scheme = frappe.db.get_value("MS Grade Scheme", {"course": course}, "name")
+	if not scheme and names:
+		# Older callers do not pass the course on the entry. Fall back to the
+		# plan that actually contains these assessments, preferring the one
+		# covering most of them.
+		counts: dict[str, int] = {}
 		for row in frappe.get_all(
 			"MS Grade Scheme Component",
 			filters={"component_name": ["in", list(names)]},
-			fields=["component_name", "ms_parent_component"],
+			fields=["parent"],
+			limit_page_length=0,
+		):
+			counts[row["parent"]] = counts.get(row["parent"], 0) + 1
+		if counts:
+			scheme = max(counts, key=lambda k: counts[k])
+
+	if names and scheme:
+		for row in frappe.get_all(
+			"MS Grade Scheme Component",
+			filters={"parent": scheme},
+			fields=[
+				"component_name", "ms_parent_component", "weight",
+				"ms_aggregation", "ms_aggregation_n",
+			],
 			limit_page_length=0,
 		):
 			if row.get("ms_parent_component"):
-				tree[row["component_name"]] = row["ms_parent_component"]
-		if tree:
-			for row in frappe.get_all(
-				"MS Grade Scheme Component",
-				filters={"component_name": ["in", list(set(tree.values()))]},
-				fields=[
-					"component_name", "weight", "ms_parent_component",
-					"ms_aggregation", "ms_aggregation_n",
-				],
-				limit_page_length=0,
-			):
-				if not row.get("ms_parent_component"):
-					weights[row["component_name"]] = flt(row.get("weight"))
-					rules[row["component_name"]] = (
-						row.get("ms_aggregation") or "sum",
-						cint(row.get("ms_aggregation_n")),
-					)
+				if row["component_name"] in names:
+					tree[row["component_name"]] = row["ms_parent_component"]
+			else:
+				weights[row["component_name"]] = flt(row.get("weight"))
+				rules[row["component_name"]] = (
+					row.get("ms_aggregation") or "sum",
+					cint(row.get("ms_aggregation_n")),
+				)
 
 	by_parent: dict[str, list] = {}
 	standalone = []
