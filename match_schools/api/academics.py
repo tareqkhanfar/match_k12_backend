@@ -429,8 +429,31 @@ def timetable(
 		):
 			cancel_reason[c.course_schedule] = c.reason or c.notes
 
+	# Which lessons carry preparation, so a cell can be marked without the
+	# frontend asking once per cell.
+	from match_schools.api.lesson_plans import markers_for
+
+	markers = markers_for([r.name for r in rows], persona)
+
+	# The class a lesson belongs to, by readable name. A teacher's timetable
+	# showed the subject and nothing else, so two lessons of the same subject
+	# to different sections were indistinguishable — the one thing a teacher
+	# most needs to tell apart at a glance.
+	group_names: dict[str, dict] = {}
+	group_ids = {r.student_group for r in rows if r.student_group}
+	if group_ids:
+		for g in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list(group_ids)]},
+			fields=["name", "student_group_name", "program", "batch"],
+			limit_page_length=0,
+		):
+			group_names[g.name] = g
+
 	days: dict[str, list] = {}
 	for r in rows:
+		group = group_names.get(r.student_group) or frappe._dict()
+		marker = markers.get(r.name) or {}
 		day_label = WEEK_DAYS_AR[getdate(r.schedule_date).weekday()]
 		days.setdefault(day_label, []).append(
 			{
@@ -441,11 +464,18 @@ def timetable(
 				"subject": r.course,
 				"teacher": r.instructor_name,
 				"student_group": r.student_group,
+				"class_name": group.get("student_group_name") or r.student_group,
+				"program": group.get("program"),
+				"batch": group.get("batch"),
 				"room": r.room,
 				"title": r.title,
 				"color": r.color,
 				"cancelled": cint(r.docstatus) == 2,
 				"cancelReason": cancel_reason.get(r.name),
+				"has_plan": bool(marker.get("has_plan")),
+				"plan_published": bool(marker.get("published")),
+				"has_homework": bool(marker.get("has_homework")),
+				"plan_title": marker.get("title"),
 			}
 		)
 

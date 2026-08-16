@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "course_schedule",
+  "title",
+  "column_break_main",
+  "student_group",
+  "course",
+  "instructor",
+  "schedule_date",
+  "section_content",
+  "objectives",
+  "content",
+  "homework",
+  "section_extra",
+  "resources",
+  "notes",
+  "section_meta",
+  "is_published",
+  "column_break_meta",
+  "prepared_by",
+  "prepared_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "MS-LPL-.YYYY.-"
+  },
+  {
+   "fieldname": "course_schedule",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lesson",
+   "options": "Course Schedule",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title"
+  },
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {
+   "fieldname": "student_group",
+   "fieldtype": "Link",
+   "label": "Class",
+   "options": "Student Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Subject",
+   "options": "Course",
+   "read_only": 1
+  },
+  {
+   "fieldname": "instructor",
+   "fieldtype": "Link",
+   "label": "Teacher",
+   "options": "Instructor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "schedule_date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "read_only": 1
+  },
+  {"fieldname": "section_content", "fieldtype": "Section Break", "label": "Preparation"},
+  {
+   "fieldname": "objectives",
+   "fieldtype": "Text Editor",
+   "label": "Objectives"
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Text Editor",
+   "label": "Lesson content"
+  },
+  {
+   "fieldname": "homework",
+   "fieldtype": "Text Editor",
+   "label": "Homework"
+  },
+  {"fieldname": "section_extra", "fieldtype": "Section Break"},
+  {
+   "fieldname": "resources",
+   "fieldtype": "Small Text",
+   "label": "Resource links"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Teacher notes",
+   "description": "Never shown to students or parents."
+  },
+  {"fieldname": "section_meta", "fieldtype": "Section Break"},
+  {
+   "default": "1",
+   "fieldname": "is_published",
+   "fieldtype": "Check",
+   "label": "Visible to students and parents"
+  },
+  {"fieldname": "column_break_meta", "fieldtype": "Column Break"},
+  {
+   "fieldname": "prepared_by",
+   "fieldtype": "Link",
+   "label": "Prepared by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prepared_on",
+   "fieldtype": "Datetime",
+   "label": "Prepared on",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Lesson Plan",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
