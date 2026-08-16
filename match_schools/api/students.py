@@ -32,6 +32,7 @@ def list_students(
 	program: str = None,
 	batch: str = None,
 	payment_status: str = None,
+	enrolment_status: str = None,
 	page: int = 1,
 	page_size: int = 20,
 	persona: str = None,
@@ -45,8 +46,19 @@ def list_students(
 	if allowed is not None and not allowed:
 		return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-	conditions = ["s.enabled = 1"]
+	# A student who has left is still a student: their marks, invoices and
+	# certificates all remain. Hiding them from the directory outright meant
+	# the office could not find them at all — so the roster is filtered by
+	# choice, and defaults to the active ones the school works with daily.
+	conditions = []
 	params: dict = {}
+
+	status = (enrolment_status or "active").lower()
+	if status == "active":
+		conditions.append("s.enabled = 1")
+	elif status == "left":
+		conditions.append("s.enabled = 0")
+	# "all" adds no condition.
 
 	if allowed is not None:
 		conditions.append("s.name IN %(allowed)s")
@@ -74,7 +86,9 @@ def list_students(
 			conditions.append("pe.academic_year = %(academic_year)s")
 			params["academic_year"] = academic_year
 
-	where = " AND ".join(conditions)
+	# "all" leaves no conditions at all, which would emit a bare WHERE and a
+	# syntax error, so the list always starts from a true predicate.
+	where = " AND ".join(conditions) if conditions else "1 = 1"
 
 	total = frappe.db.sql(
 		f"""
@@ -92,7 +106,8 @@ def list_students(
 		f"""
 		SELECT DISTINCT s.name, s.student_name, s.gender, s.image,
 			s.student_email_id, s.student_mobile_number, s.date_of_birth,
-			s.address_line_1, s.joining_date
+			s.address_line_1, s.joining_date, s.enabled, s.date_of_leaving,
+			s.reason_for_leaving
 		FROM `tabStudent` s {joins}
 		WHERE {where}
 		ORDER BY s.student_name
@@ -170,7 +185,13 @@ def _student_row(r: dict) -> dict:
 		"average": _average_score(r["name"]),
 		"feeTotal": fees["total"],
 		"feePaid": fees["paid"],
+		# `status` is the fee standing and has been since this screen existed;
+		# enrolment is reported separately rather than overloading it.
 		"status": fees["status"],
+		"active": bool(cint(r.get("enabled", 1))),
+		"enrolmentStatus": "active" if cint(r.get("enabled", 1)) else "left",
+		"leftOn": str(r.get("date_of_leaving") or ""),
+		"leftReason": r.get("reason_for_leaving") or "",
 	}
 
 

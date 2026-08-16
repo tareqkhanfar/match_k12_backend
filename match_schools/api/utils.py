@@ -13,6 +13,7 @@ from typing import Any
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 # --- Roles -----------------------------------------------------------------
@@ -85,6 +86,71 @@ def get_persona(user: str | None = None) -> str | None:
 	return None
 
 
+def account_block_reason(user: str | None = None) -> dict | None:
+	"""Why this account may not use the portal, or None if it may.
+
+	Being able to sign in is not the same as being enrolled. A student who has
+	left, a teacher whose employment ended, a guardian whose children have all
+	left — each keeps a Frappe User that authenticates perfectly well, and
+	until this check existed each of them walked straight into the portal and
+	saw a live view of a school they no longer belong to.
+
+	The Frappe User's own `enabled` flag is handled by the login manager; this
+	covers the school's own record behind it.
+	"""
+	user = user or frappe.session.user
+	if user in ("Guest", "Administrator"):
+		return None
+
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return None
+
+	# Checked by record, not by persona. A leaver often keeps only the stock
+	# Frappe "Student" role, which get_persona does not recognise, so gating
+	# on the persona let exactly the people this is meant to stop walk past.
+	OFF = {
+		"en": "This account is no longer active. Please contact the school.",
+		"ar": "هذا الحساب غير مفعّل حالياً. الرجاء التواصل مع إدارة المدرسة.",
+	}
+
+	student = frappe.db.get_value("Student", {"user": user}, ["name", "enabled"], as_dict=True)
+	if student and not cint(student.enabled):
+		return OFF
+
+	employee = frappe.db.get_value(
+		"Employee", {"user_id": user}, ["name", "status"], as_dict=True
+	)
+	if employee and employee.status and employee.status != "Active":
+		return OFF
+
+	if employee:
+		status = frappe.db.get_value("Instructor", {"employee": employee.name}, "status")
+		if status and status != "Active":
+			return OFF
+
+	guardian = frappe.db.get_value("Guardian", {"user": user}, "name")
+	if guardian and not student:
+		# A guardian has no status of their own: they are active for as long
+		# as one of their children is. Blocking on "no children at all" would
+		# also lock out a parent whose record was created before the child was
+		# linked, so only an all-inactive roster counts.
+		children = frappe.get_all(
+			"Student Guardian",
+			filters={"guardian": guardian, "parenttype": "Student"},
+			pluck="parent",
+		)
+		if children:
+			active = frappe.db.count("Student", {"name": ["in", children], "enabled": 1})
+			if not active:
+				return {
+					"en": "No active student is linked to this guardian.",
+					"ar": "لا يوجد طالب مفعّل مرتبط بهذا الحساب. الرجاء التواصل مع إدارة المدرسة.",
+				}
+
+	return None
+
+
 def require_login():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Please log in to continue."), frappe.AuthenticationError)
@@ -104,6 +170,9 @@ def require_persona(*allowed: str) -> str:
 			_("You are not allowed to access this resource."),
 			frappe.PermissionError,
 		)
+	blocked = account_block_reason()
+	if blocked:
+		frappe.throw(_(blocked["en"]), frappe.PermissionError)
 	return persona
 
 
@@ -256,8 +325,6 @@ def build_order_by(
 
 def paginate(page, page_size, max_size: int = 200) -> tuple[int, int, int]:
 	"""Return (page, page_size, offset) with sane bounds."""
-	from frappe.utils import cint
-
 	page = max(cint(page) or 1, 1)
 	page_size = min(max(cint(page_size) or 20, 1), max_size)
 	return page, page_size, (page - 1) * page_size

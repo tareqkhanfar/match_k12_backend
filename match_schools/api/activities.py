@@ -596,8 +596,13 @@ def form_options(persona: str = None):
 		],
 		"supervisors": [
 			{"id": i.name, "name": i.instructor_name or i.name}
+			# A teacher who has left should not be offered to run an
+			# activity. They keep their history; they leave the picker.
 			for i in frappe.get_all(
-				"Instructor", fields=["name", "instructor_name"], limit=200
+				"Instructor",
+				filters={"status": "Active"},
+				fields=["name", "instructor_name"],
+				limit=200,
 			)
 		],
 	}

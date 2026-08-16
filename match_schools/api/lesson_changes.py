@@ -182,7 +182,10 @@ def available_instructors(course_schedule: str, persona: str = None):
 	end = sched.hhmmss(lesson.to_time)
 
 	everyone = frappe.get_all(
-		"Instructor", fields=["name", "instructor_name"], order_by="instructor_name"
+		"Instructor",
+		filters={"status": "Active"},
+		fields=["name", "instructor_name"],
+		order_by="instructor_name",
 	)
 
 	free, busy = [], []

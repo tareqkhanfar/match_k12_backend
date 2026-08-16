@@ -130,7 +130,10 @@ def grid_options(student_group: str = None, persona: str = None):
 			limit_page_length=0,
 		),
 		"instructors": frappe.get_all(
-			"Instructor", fields=["name", "instructor_name"], order_by="instructor_name"
+			"Instructor",
+			filters={"status": "Active"},
+			fields=["name", "instructor_name"],
+			order_by="instructor_name",
 		),
 		"rooms": frappe.get_all("Room", fields=["name", "room_name"], order_by="name"),
 		"courses": _courses_for_group(student_group),

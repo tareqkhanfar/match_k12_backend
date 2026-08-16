@@ -15,6 +15,7 @@ from frappe.auth import LoginManager
 from frappe.utils import cint
 
 from match_schools.api.utils import (
+	account_block_reason,
 	fail,
 	get_default_academic_term,
 	get_default_academic_year,
@@ -113,6 +114,16 @@ def login(email: str, password: str):
 			message_en="This account is not linked to a Match Schools role.",
 			message_ar="هذا الحساب غير مرتبط بأي دور في نظام Match Schools.",
 		)
+
+	# The password was right and the role is real, but the person behind it
+	# may have left the school. Refusing here rather than on the first request
+	# means they are told why instead of watching an empty portal fail.
+	blocked = account_block_reason()
+	if blocked:
+		frappe.local.login_manager.logout()
+		frappe.db.commit()
+		frappe.local.response["http_status_code"] = 403
+		return fail(message_en=blocked["en"], message_ar=blocked["ar"])
 
 	frappe.local.response["http_status_code"] = 200
 	return ok(
