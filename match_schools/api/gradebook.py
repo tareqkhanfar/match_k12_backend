@@ -1659,6 +1659,14 @@ def class_term_grades(
 	persona: str = None,
 ):
 	"""Term grades for a whole class — the teacher's overview."""
+
+	# Whole-class marks for one subject: the teacher must take that subject in
+	# that class. Without a course this is the class's overall standing, which
+	# a teacher of the class may see.
+	from match_schools.api.gradeflow import assert_teacher_teaches
+
+	if student_group and course:
+		assert_teacher_teaches(persona, student_group, course)
 	roster = frappe.get_all(
 		"Student Group Student",
 		filters={"parent": student_group, "parenttype": "Student Group", "active": 1},

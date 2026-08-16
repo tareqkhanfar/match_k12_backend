@@ -142,6 +142,13 @@ def change_log(
 	to outline exactly the cells that moved, so a teacher correcting one appeal
 	can see at a glance that they have not touched anyone else.
 	"""
+
+	# A teacher reads the history of what they teach in this class, and no
+	# more: the log names students and their marks.
+	from match_schools.api.gradeflow import assert_teacher_teaches
+
+	if student_group and course:
+		assert_teacher_teaches(persona, student_group, course)
 	if not student_group or not course:
 		return fail(
 			message_en="A class and a course are required.",
