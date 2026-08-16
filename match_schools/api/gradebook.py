@@ -312,11 +312,11 @@ def get_entry_sheet(
 	"""
 	from match_schools.api.gradeflow import (
 		STATUS_AR,
-		assert_teacher_owns_course,
+		assert_teacher_teaches,
 		submission_status,
 	)
 
-	assert_teacher_owns_course(persona, course)
+	assert_teacher_teaches(persona, student_group, course)
 
 	group = frappe.db.get_value(
 		"Student Group", student_group, ["name", "program", "academic_year", "academic_term"], as_dict=True
@@ -902,14 +902,14 @@ def exclude_column(
 	the students did, and a teacher who excludes one by mistake has lost
 	nothing.
 	"""
-	from match_schools.api.gradeflow import assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_teacher_teaches
 
 	if not student_group or not course or not component_name:
 		return fail(
 			message_en="A class, course and component are required.",
 			message_ar="يجب تحديد الشعبة والمادة والمكوّن.",
 		)
-	assert_teacher_owns_course(persona, course)
+	assert_teacher_teaches(persona, student_group, course)
 
 	filters = {
 		"student_group": student_group,
@@ -956,14 +956,14 @@ def curve_column(
 	Marks are clamped to the component's maximum and to zero: a curve must not
 	invent a score above the paper's own total, or push a zero negative.
 	"""
-	from match_schools.api.gradeflow import assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_teacher_teaches
 
 	if not student_group or not course or not component_name:
 		return fail(
 			message_en="A class, course and component are required.",
 			message_ar="يجب تحديد الشعبة والمادة والمكوّن.",
 		)
-	assert_teacher_owns_course(persona, course)
+	assert_teacher_teaches(persona, student_group, course)
 
 	points = flt(points)
 	percent = flt(percent)
@@ -1777,10 +1777,10 @@ def importable_assignments(
 	student_group: str, course: str = None, academic_term: str = None, persona: str = None
 ):
 	"""Graded assignments that can be carried into the term marks."""
-	from match_schools.api.gradeflow import assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_teacher_teaches
 
 	if course:
-		assert_teacher_owns_course(persona, course)
+		assert_teacher_teaches(persona, student_group, course)
 
 	filters = {"student_group": student_group}
 	if course:
@@ -1921,9 +1921,9 @@ def import_assignments_combined(
 	row per assignment, so each student's assignments are averaged as a
 	percentage first.
 	"""
-	from match_schools.api.gradeflow import assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_teacher_teaches
 
-	assert_teacher_owns_course(persona, course)
+	assert_teacher_teaches(persona, student_group, course)
 
 	names = parse_json_arg(assignments, []) or []
 	if isinstance(names, str):
@@ -2016,9 +2016,9 @@ def publish_component(
 
 	# The same guards save_marks uses: the teacher must own the course, and
 	# entry must be open for this class and term.
-	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_teaches
 
-	assert_teacher_owns_course(persona, course)
+	assert_teacher_teaches(persona, student_group, course)
 	assert_entry_allowed(persona, student_group, course, academic_term)
 
 	filters = {

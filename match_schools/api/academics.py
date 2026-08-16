@@ -128,12 +128,64 @@ def class_students(student_group: str, persona: str = None):
 # --- Subjects / courses ----------------------------------------------------
 
 
+def courses_taught(instructor: str, student_group: str = None) -> list[str]:
+	"""Which subjects this teacher actually teaches, optionally in one class.
+
+	Read from Course Schedule — the timetable is what says who teaches what to
+	whom. A Programme's course list is the whole curriculum for that grade: a
+	biology teacher offered all nine subjects of the first grade is being shown
+	other people's work, and picking one lands them on a mark sheet they have
+	no business in.
+
+	A group whose `instructor` field names them, with no timetable yet, counts
+	too — otherwise a class assigned in September looks empty until the first
+	week is generated.
+	"""
+	if not instructor:
+		return []
+
+	filters = {"instructor": instructor, "docstatus": ["<", 2]}
+	if student_group:
+		filters["student_group"] = student_group
+	taught = {
+		r.course
+		for r in frappe.get_all(
+			"Course Schedule",
+			filters=filters,
+			fields=["course"],
+			limit_page_length=0,
+		)
+		if r.course
+	}
+
+	# A Student Group can name a single course directly; that is the older
+	# per-subject group shape and still in use.
+	group_filters = {"instructor": instructor, "parenttype": "Student Group"}
+	owned = frappe.get_all("Student Group Instructor", filters=group_filters, pluck="parent")
+	if owned:
+		if student_group:
+			owned = [g for g in owned if g == student_group]
+		for g in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", owned or [""]], "course": ["!=", ""]},
+			fields=["course"],
+			limit_page_length=0,
+		):
+			if g.course:
+				taught.add(g.course)
+
+	return sorted(taught)
+
+
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def list_subjects(
 	search: str = None,
 	department: str = None,
 	program: str = None,
+	student_group: str = None,
 	persona: str = None,
 ):
 	"""Subjects with the grades that teach them and who teaches each.
@@ -147,6 +199,31 @@ def list_subjects(
 	if department:
 		filters["department"] = department
 
+	# A teacher is only ever offered what they teach — and when a class is
+	# named, only what they teach in that class. Anything wider puts another
+	# teacher's subject in the picker, and every screen downstream trusts this
+	# list to decide what may be opened.
+	if persona == ROLE_TEACHER:
+		instructor = resolve_scope(persona).get("instructor")
+		mine = courses_taught(instructor, student_group)
+		if not mine:
+			return []
+		filters["name"] = ["in", mine]
+	elif student_group:
+		# Everyone else asking about a class gets that class's own subjects.
+		in_group = frappe.get_all(
+			"Course Schedule",
+			filters={"student_group": student_group, "docstatus": ["<", 2]},
+			pluck="course",
+		)
+		named = frappe.db.get_value("Student Group", student_group, "course")
+		in_group = {c for c in in_group if c}
+		if named:
+			in_group.add(named)
+		if not in_group:
+			return []
+		filters["name"] = ["in", sorted(in_group)]
+
 	# Belonging to a programme is a property of Program Course, so it is
 	# resolved to a set of course names first.
 	if program:
@@ -157,7 +234,18 @@ def list_subjects(
 		)
 		if not in_program:
 			return []
-		filters["name"] = ["in", in_program]
+		# Narrows what is already there rather than replacing it. Assigning
+		# straight to filters["name"] would have let a teacher who passes a
+		# programme see every subject in that grade — the exact leak the scope
+		# above exists to close.
+		existing = filters.get("name")
+		if existing:
+			allowed = set(existing[1]) & set(in_program)
+			if not allowed:
+				return []
+			filters["name"] = ["in", sorted(allowed)]
+		else:
+			filters["name"] = ["in", in_program]
 
 	courses = frappe.get_all(
 		"Course",

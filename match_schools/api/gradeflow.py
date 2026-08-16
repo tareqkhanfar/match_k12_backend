@@ -112,6 +112,59 @@ def teacher_may_see_course(persona: str, course: str, scope: dict | None = None)
 	return course in courses_of_instructor(scope.get("instructor"))
 
 
+def teacher_teaches_in_group(persona: str, student_group: str, course: str) -> bool:
+	"""Whether this teacher takes THIS subject in THIS class.
+
+	`courses_of_instructor` answers the looser question — which subjects the
+	teacher touches anywhere — and treats every subject of a section they are
+	listed on as theirs. That is right for "may I see this subject at all" and
+	wrong for a mark sheet: a biology teacher listed on 1-أ was able to open
+	the maths marks for 1-أ, because maths is a subject of a section they are
+	on. The pairing is what the timetable records, so the timetable is what is
+	asked.
+	"""
+	if persona in BACK_OFFICE:
+		return True
+	if persona != ROLE_TEACHER:
+		return True
+	instructor = resolve_scope(persona).get("instructor")
+	if not instructor:
+		return False
+	if frappe.db.exists(
+		"Course Schedule",
+		{
+			"instructor": instructor,
+			"student_group": student_group,
+			"course": course,
+			"docstatus": ["<", 2],
+		},
+	):
+		return True
+	# A per-subject group names its own course and its own instructors, and may
+	# have no timetable yet.
+	named = frappe.db.get_value("Student Group", student_group, "course")
+	if named and named == course:
+		return bool(
+			frappe.db.exists(
+				"Student Group Instructor",
+				{
+					"parent": student_group,
+					"instructor": instructor,
+					"parenttype": "Student Group",
+				},
+			)
+		)
+	return False
+
+
+def assert_teacher_teaches(persona: str, student_group: str, course: str):
+	if not teacher_teaches_in_group(persona, student_group, course):
+		frappe.throw(
+			_("You only have access to the subjects you teach in this class."),
+			frappe.PermissionError,
+		)
+
+
 def assert_teacher_owns_course(persona: str, course: str):
 	if not teacher_may_see_course(persona, course):
 		frappe.throw(
