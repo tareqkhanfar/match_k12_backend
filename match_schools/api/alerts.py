@@ -406,6 +406,52 @@ MEASURERS = {
 # --- Evaluation ------------------------------------------------------------
 
 
+# Money is the guardian's business, not the child's. A ten-year-old told the
+# family owes 6,600 cannot act on it and should not be carrying it, so a fee
+# alert reaches the guardian alone — and a block raised for unpaid fees closes
+# the guardian's portal, never the student's schoolwork. Every other trigger
+# (attendance, behaviour, marks) is about the student's own conduct and goes to
+# both, which is what a school means by "notify the family".
+FEE_TRIGGERS = {"Fee Overdue Amount", "Fee Overdue Days"}
+
+
+def audience_for(trigger: str | None, roles: str | None = None) -> set[str]:
+	"""Who may see an alert raised by this trigger.
+
+	`roles` is the rule's own `notify_roles`, which until now was stored and
+	never read: every alert reached everyone regardless of what the rule said.
+	"""
+	if trigger in FEE_TRIGGERS:
+		return {ROLE_PARENT}
+	if roles:
+		chosen = {r.strip().lower() for r in str(roles).split(",") if r.strip()}
+		allowed = chosen & {ROLE_STUDENT, ROLE_PARENT}
+		if allowed:
+			return allowed
+	return {ROLE_STUDENT, ROLE_PARENT}
+
+
+def _visible_to(persona: str, rows: list) -> list:
+	"""Drop alerts this persona is not an audience for."""
+	if persona not in (ROLE_STUDENT, ROLE_PARENT):
+		return rows
+	roles_by_rule: dict[str, str] = {}
+	for rule in {r.get("rule") for r in rows if r.get("rule")}:
+		actions = frappe.get_all(
+			"MS Alert Action",
+			filters={"parent": rule, "parenttype": "MS Alert Rule"},
+			fields=["notify_roles"],
+			limit_page_length=0,
+		)
+		joined = ",".join(a.notify_roles for a in actions if a.notify_roles)
+		roles_by_rule[rule] = joined
+	return [
+		r
+		for r in rows
+		if persona in audience_for(r.get("trigger"), roles_by_rule.get(r.get("rule")))
+	]
+
+
 def _format_message(rule, value: float) -> tuple[str, str]:
 	"""Fill the rule's own wording with the measured value.
 
@@ -1079,8 +1125,16 @@ def my_blocks(persona: str = None):
 			"blocks_access": 1,
 			"status": ["in", ["Open", "Acknowledged", "Escalated"]],
 		},
-		fields=["name", "student_name", "title_ar", "message_ar", "emoji", "severity"],
+		fields=[
+			"name", "student_name", "title_ar", "message_ar", "emoji", "severity",
+			"trigger", "rule",
+		],
 	)
+
+	# A block raised over unpaid fees locks the guardian out, not the child:
+	# a student shut out of their timetable and homework over a bill they have
+	# no part in is a punishment aimed at the wrong person.
+	rows = _visible_to(persona, rows)
 
 	blocked: set[str] = set()
 	reasons = []
@@ -1146,10 +1200,12 @@ def my_alerts(persona: str = None):
 		fields=[
 			"name", "student", "student_name", "title_ar", "message_ar", "emoji",
 			"severity", "level", "measured_value", "threshold", "raised_on",
-			"blocks_access",
+			"blocks_access", "trigger", "rule",
 		],
 		limit=20,
 	)
+
+	rows = _visible_to(persona, rows)
 
 	for r in rows:
 		r["severity_label"] = SEVERITY_AR.get(r.severity, r.severity)
