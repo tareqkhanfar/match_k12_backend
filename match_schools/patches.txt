@@ -19,3 +19,4 @@ match_schools.patches.add_grandfather_name
 match_schools.patches.add_component_exclusion
 match_schools.patches.add_component_aggregation
 match_schools.patches.add_survey_class_audience
+match_schools.patches.add_instructor_user_link

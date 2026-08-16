@@ -124,8 +124,14 @@ def account_block_reason(user: str | None = None) -> dict | None:
 	if employee and employee.status and employee.status != "Active":
 		return OFF
 
-	if employee:
-		status = frappe.db.get_value("Instructor", {"employee": employee.name}, "status")
+	# The Instructor is found the same way the rest of the system finds it —
+	# through Employee when there is one, otherwise by matching the user's
+	# name. Requiring an Employee here meant that on a school running without
+	# HR, where every Instructor has no Employee at all, marking a teacher as
+	# Left changed nothing and they kept signing in.
+	instructor = get_linked_instructor(user)
+	if instructor:
+		status = frappe.db.get_value("Instructor", instructor, "status")
 		if status and status != "Active":
 			return OFF
 
@@ -341,14 +347,26 @@ def get_linked_student(user: str | None = None) -> str | None:
 
 
 def get_linked_instructor(user: str | None = None) -> str | None:
-	"""Instructor links to a User indirectly, through Employee."""
+	"""The Instructor record behind a user account.
+
+	Three routes, most reliable first. `ms_user` is the explicit link and
+	survives a rename on either side; Employee is the HR route; matching on the
+	name is the last resort for schools that set neither, and is the one that
+	quietly breaks — rename a teacher and they lose their classes, or keep
+	signing in after being marked Left because nothing can find their record.
+	"""
 	user = user or frappe.session.user
+
+	direct = frappe.db.get_value("Instructor", {"ms_user": user}, "name")
+	if direct:
+		return direct
+
 	employee = frappe.db.get_value("Employee", {"user_id": user}, "name")
 	if employee:
 		instructor = frappe.db.get_value("Instructor", {"employee": employee}, "name")
 		if instructor:
 			return instructor
-	# Fall back to matching on the instructor name for setups without HR.
+
 	full_name = frappe.db.get_value("User", user, "full_name")
 	if full_name:
 		return frappe.db.get_value("Instructor", {"instructor_name": full_name}, "name")
