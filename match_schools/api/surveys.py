@@ -44,10 +44,54 @@ TYPE_AR = {
 }
 
 AUDIENCE_FOR_PERSONA = {
-	ROLE_STUDENT: ("Students", "All"),
+	# "Classes" is a narrower "Students": the child sits in the class, and the
+	# parent answers on behalf of a child who does. Which classes is a second
+	# question, answered by _in_audience once the rows are in hand.
+	ROLE_STUDENT: ("Students", "Classes", "All"),
 	ROLE_TEACHER: ("Teachers", "All"),
-	ROLE_PARENT: ("Parents", "All"),
+	ROLE_PARENT: ("Parents", "Classes", "All"),
 }
+
+
+def _classes_of(students: list[str]) -> set[str]:
+	"""Every active Student Group these students belong to."""
+	if not students:
+		return set()
+	return {
+		r.parent
+		for r in frappe.get_all(
+			"Student Group Student",
+			filters={"student": ["in", students], "active": 1},
+			fields=["parent"],
+			limit_page_length=0,
+		)
+	}
+
+
+def _survey_classes(row) -> list[str]:
+	"""The classes a survey names, from either the old field or the new one."""
+	raw = (row.get("ms_student_groups") or "").strip()
+	named = [c.strip() for c in raw.split(",") if c.strip()]
+	if not named and row.get("student_group"):
+		named = [row["student_group"]]
+	return named
+
+
+def _in_audience(row, persona: str, my_classes: set[str]) -> bool:
+	"""Whether this caller is inside a survey's audience.
+
+	Only "Classes" narrows further than the audience name already does. A
+	Classes survey naming no class at all is aimed at every class, which is
+	what "aim it at the classes" means when none are picked.
+	"""
+	if row.get("audience") != "Classes":
+		return True
+	if persona not in (ROLE_STUDENT, ROLE_PARENT):
+		return False
+	named = _survey_classes(row)
+	if not named:
+		return True
+	return bool(my_classes & set(named))
 
 
 def _is_open(survey) -> bool:
@@ -59,6 +103,70 @@ def _is_open(survey) -> bool:
 	if survey.closes_on and str(survey.closes_on) < stamp:
 		return False
 	return True
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def pending_required(persona: str = None):
+	"""Compulsory surveys this caller still owes an answer to.
+
+	The portal blocks on these: consent forms and start-of-term declarations
+	otherwise take six reminders to collect, and chasing them by hand is the
+	job this replaces. Staff are never blocked — someone has to be able to
+	work while the forms come in.
+
+	An anonymous survey records no respondent, so it can never be marked as
+	answered and would lock the portal permanently. Those are never required.
+	"""
+	rows = frappe.get_all(
+		"MS Survey",
+		filters={
+			"status": "Open",
+			"ms_is_required": 1,
+			"anonymous": 0,
+			"audience": ["in", list(AUDIENCE_FOR_PERSONA.get(persona, ("All",)))],
+		},
+		fields=[
+			# `status` is filtered on above but must also be selected: _is_open
+			# reads it off the row, and a missing attribute reads as "not Open"
+			# — which silently emptied the list rather than failing loudly.
+			"name", "title", "intro", "audience", "closes_on", "opens_on",
+			"status", "student_group", "ms_student_groups",
+		],
+		limit=20,
+	)
+	rows = [r for r in rows if _is_open(frappe._dict(r))]
+
+	if persona in (ROLE_STUDENT, ROLE_PARENT):
+		mine = _classes_of(resolve_scope(persona).get("students") or [])
+		rows = [r for r in rows if _in_audience(r, persona, mine)]
+
+	if not rows:
+		return {"surveys": [], "count": 0}
+
+	answered = {
+		r.survey
+		for r in frappe.get_all(
+			"MS Survey Response",
+			filters={
+				"survey": ["in", [r["name"] for r in rows]],
+				"respondent": frappe.session.user,
+			},
+			fields=["survey"],
+			limit_page_length=0,
+		)
+	}
+	outstanding = [
+		{
+			"id": r["name"],
+			"title": r["title"],
+			"intro": r.get("intro"),
+			"closes_on": str(r.get("closes_on") or ""),
+		}
+		for r in rows
+		if r["name"] not in answered
+	]
+	return {"surveys": outstanding, "count": len(outstanding)}
 
 
 @frappe.whitelist()
@@ -78,10 +186,15 @@ def list_surveys(status: str = None, persona: str = None):
 		fields=[
 			"name", "title", "audience", "status", "anonymous", "opens_on",
 			"closes_on", "intro", "response_count", "program", "student_group", "course",
+			"ms_student_groups", "ms_is_required",
 		],
 		order_by="modified desc",
 		limit=100,
 	)
+
+	if persona in (ROLE_STUDENT, ROLE_PARENT):
+		mine = _classes_of(resolve_scope(persona).get("students") or [])
+		rows = [r for r in rows if _in_audience(r, persona, mine)]
 
 	# Which of these the caller has already answered. An anonymous survey does
 	# not record who responded, so it cannot be marked as done.
@@ -138,6 +251,12 @@ def get_survey(survey: str, persona: str = None):
 	if persona not in BACK_OFFICE:
 		if doc.audience not in AUDIENCE_FOR_PERSONA.get(persona, ("All",)):
 			frappe.throw(_("This survey is not aimed at you."), frappe.PermissionError)
+		# A Classes survey names the sections it is for; being a student is
+		# not enough to be inside it.
+		if doc.audience == "Classes":
+			mine = _classes_of(resolve_scope(persona).get("students") or [])
+			if not _in_audience(doc.as_dict(), persona, mine):
+				frappe.throw(_("This survey is not aimed at you."), frappe.PermissionError)
 		if not _is_open(doc):
 			frappe.throw(_("This survey is not open."), frappe.PermissionError)
 
@@ -187,7 +306,8 @@ def save_survey(payload: str | dict, persona: str = None):
 				message_ar="تم استلام إجابات — لا يمكن تعديل الأسئلة الآن.",
 			)
 
-	for field in ("title", "audience", "status", "opens_on", "closes_on", "intro",
+	for field in ("ms_is_required", "ms_student_groups",
+		"title", "audience", "status", "opens_on", "closes_on", "intro",
 	              "program", "student_group", "course"):
 		if data.get(field) is not None:
 			setattr(doc, field, data[field])
@@ -253,6 +373,12 @@ def submit_response(survey: str, answers: str | list, persona: str = None):
 	if persona not in BACK_OFFICE:
 		if doc.audience not in AUDIENCE_FOR_PERSONA.get(persona, ("All",)):
 			frappe.throw(_("This survey is not aimed at you."), frappe.PermissionError)
+		# A Classes survey names the sections it is for; being a student is
+		# not enough to be inside it.
+		if doc.audience == "Classes":
+			mine = _classes_of(resolve_scope(persona).get("students") or [])
+			if not _in_audience(doc.as_dict(), persona, mine):
+				frappe.throw(_("This survey is not aimed at you."), frappe.PermissionError)
 	if not _is_open(doc):
 		return fail(message_en="This survey is closed.", message_ar="الاستبيان مغلق.")
 
