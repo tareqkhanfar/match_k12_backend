@@ -14,6 +14,7 @@ from frappe import _
 from frappe.utils import cint, flt, now_datetime, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -425,6 +426,7 @@ def submit_response(survey: str, answers: str | list, persona: str = None):
 			},
 		)
 
+	anchor_term(response)
 	response.insert(ignore_permissions=True)
 	frappe.db.sql(
 		"UPDATE `tabMS Survey` SET response_count = COALESCE(response_count, 0) + 1 WHERE name = %s",

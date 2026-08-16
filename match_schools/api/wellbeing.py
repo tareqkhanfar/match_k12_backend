@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, flt, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -183,6 +184,7 @@ def save_health_visit(payload: str | dict, persona: str = None):
 		msg_en, msg_ar = "Visit updated.", "تم تحديث الزيارة."
 	else:
 		doc = frappe.get_doc({"doctype": "MS Health Visit", **fields})
+		anchor_term(doc, doc.get("visit_date"))
 		doc.insert()
 		msg_en, msg_ar = "Visit recorded.", "تم تسجيل الزيارة."
 
@@ -352,6 +354,7 @@ def save_behaviour(payload: str | dict, persona: str = None):
 		msg_en, msg_ar = "Behaviour record updated.", "تم تحديث السجل السلوكي."
 	else:
 		doc = frappe.get_doc({"doctype": "MS Behaviour Record", **fields})
+		anchor_term(doc, doc.get("record_date"))
 		doc.insert()
 		msg_en, msg_ar = "Behaviour record added.", "تمت إضافة السجل السلوكي."
 

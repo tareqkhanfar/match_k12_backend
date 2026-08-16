@@ -157,6 +157,47 @@ def account_block_reason(user: str | None = None) -> dict | None:
 	return None
 
 
+def anchor_term(doc, when=None) -> None:
+	"""Stamp a document with the year and term it belongs to.
+
+	Every record that describes something happening inside a school year needs
+	this. Without it, last year's rows and this year's are the same list: every
+	report that filters by term silently misses them, and questions like "how
+	many detentions this term" stop having an answer.
+
+	`when` lets a back-dated record land in the term it actually happened in
+	rather than today's. The fields are the custom ones added by the anchoring
+	patch, so this is a no-op on a doctype that has neither.
+	"""
+	if not doc:
+		return
+	meta = frappe.get_meta(doc.doctype)
+	has_year = bool(meta.get_field("ms_academic_year"))
+	has_term = bool(meta.get_field("ms_academic_term"))
+	if not has_year and not has_term:
+		return
+
+	year = term = None
+	if when:
+		day = frappe.utils.getdate(when)
+		row = frappe.db.sql(
+			"""
+			select name, academic_year from `tabAcademic Term`
+			where term_start_date <= %(d)s and term_end_date >= %(d)s
+			order by term_start_date desc limit 1
+			""",
+			{"d": day},
+			as_dict=True,
+		)
+		if row:
+			term, year = row[0].name, row[0].academic_year
+
+	if has_year and not doc.get("ms_academic_year"):
+		doc.ms_academic_year = year or get_default_academic_year()
+	if has_term and not doc.get("ms_academic_term"):
+		doc.ms_academic_term = term or get_default_academic_term()
+
+
 def require_login():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Please log in to continue."), frappe.AuthenticationError)

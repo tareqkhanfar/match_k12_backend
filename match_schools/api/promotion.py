@@ -25,6 +25,7 @@ from match_schools.api.utils import (
 	ROLE_ADMIN,
 	ROLE_SECRETARY,
 	fail,
+	get_default_academic_term,
 	get_default_academic_year,
 	ms_endpoint,
 )
@@ -321,7 +322,53 @@ def evaluate_student(
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def options(persona: str = None):
+	"""Grades, years and terms for the promotion screen.
+
+	Grades come back with their level and their next grade already worked out,
+	so the screen never has to guess the ladder — and a grade with no next one
+	says so before an administrator picks it.
+	"""
+	programs = frappe.get_all(
+		"Program",
+		fields=["name", "program_name", "ms_level"],
+		order_by="ms_level, name",
+		limit_page_length=0,
+	)
+	rows = []
+	for p in programs:
+		nxt = next_program(p.name) if cint(p.ms_level) else None
+		rows.append(
+			{
+				"id": p.name,
+				"name": p.program_name or p.name,
+				"level": cint(p.ms_level),
+				"next_program": nxt,
+			}
+		)
+
+	terms = frappe.get_all(
+		"Academic Term",
+		fields=["name", "academic_year", "term_name"],
+		order_by="term_start_date desc, name",
+		limit_page_length=0,
+	)
+	return {
+		"programs": rows,
+		"years": frappe.get_all("Academic Year", pluck="name", order_by="year_start_date desc"),
+		"terms": [
+			{"id": t.name, "name": t.term_name or t.name, "academic_year": t.academic_year}
+			for t in terms
+		],
+		"default_year": get_default_academic_year(),
+		"default_term": get_default_academic_term(),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def preview(
+	program: str = None,
 	student_group: str = None,
 	academic_year: str = None,
 	academic_term: str = None,
@@ -333,74 +380,124 @@ def preview(
 	deciding, which is the whole point: the tool this replaces enrolled first
 	and left the checking to whoever noticed afterwards.
 	"""
-	if not student_group:
+	if not program and not student_group:
 		return fail(
-			message_en="A class is required.",
-			message_ar="يجب تحديد الشعبة.",
+			message_en="A grade is required.",
+			message_ar="يجب تحديد الصف.",
 		)
 
-	group = frappe.db.get_value(
+	# Promotion is a decision about a year group, not a section. A grade is
+	# promoted as a whole — its sections are an internal arrangement that
+	# changes between years — so a class, when given, is only a way of naming
+	# the grade it belongs to.
+	if not program:
+		program = frappe.db.get_value("Student Group", student_group, "program")
+		if not program:
+			return fail(
+				message_en="This class has no programme.",
+				message_ar="هذه الشعبة غير مرتبطة بصف.",
+			)
+
+	academic_year = academic_year or get_default_academic_year()
+	academic_term = academic_term or get_default_academic_term()
+	if not academic_year:
+		return fail(
+			message_en="An academic year is required.",
+			message_ar="يجب تحديد العام الدراسي.",
+		)
+	if not academic_term:
+		return fail(
+			message_en="An academic term is required.",
+			message_ar="يجب تحديد الفصل الدراسي.",
+		)
+
+	# Every section of the grade for this year and term. A section from last
+	# year holds last year's roster, and promoting from it would move students
+	# who have already moved.
+	group_filters = {"program": program, "disabled": 0, "academic_year": academic_year}
+	if student_group:
+		group_filters["name"] = student_group
+	groups = frappe.get_all(
 		"Student Group",
-		student_group,
-		["name", "student_group_name", "program", "batch", "academic_year", "academic_term"],
-		as_dict=True,
-	)
-	if not group:
-		return fail(message_en="Class not found.", message_ar="لم يتم العثور على الشعبة.")
-
-	academic_year = academic_year or group.academic_year or get_default_academic_year()
-	academic_term = academic_term or group.academic_term
-
-	settings = _settings()
-	marks_ok, pending = _marks_state(student_group, academic_term)
-
-	roster = frappe.get_all(
-		"Student Group Student",
-		filters={"parent": student_group, "parenttype": "Student Group", "active": 1},
-		fields=["student", "student_name"],
-		order_by="group_roll_number, student_name",
+		filters=group_filters,
+		fields=["name", "student_group_name", "academic_year", "academic_term"],
 		limit_page_length=0,
 	)
+	if not groups:
+		return fail(
+			message_en="No classes found for this grade in that year.",
+			message_ar="لا توجد شعب لهذا الصف في العام المحدّد.",
+		)
 
-	target = next_program(group.program) if group.program else None
+	settings = _settings()
+	target = next_program(program)
 
 	rows = []
-	for r in roster:
-		# A student already disabled has left; promoting them would resurrect
-		# a record the school closed on purpose.
-		if not cint(frappe.db.get_value("Student", r.student, "enabled")):
+	pending_all: list[str] = []
+	marks_ready_all = True
+
+	for group in groups:
+		marks_ok, pending = _marks_state(group.name, academic_term)
+		if not marks_ok:
+			marks_ready_all = False
+		pending_all.extend(pending)
+
+		roster = frappe.get_all(
+			"Student Group Student",
+			filters={"parent": group.name, "parenttype": "Student Group", "active": 1},
+			fields=["student", "student_name"],
+			order_by="group_roll_number, student_name",
+			limit_page_length=0,
+		)
+
+		for r in roster:
+			# A student already disabled has left; promoting them would
+			# resurrect a record the school closed on purpose.
+			if not cint(frappe.db.get_value("Student", r.student, "enabled")):
+				rows.append(
+					{
+						"student": r.student,
+						"student_name": r.student_name,
+						"student_group": group.name,
+						"class_name": group.student_group_name,
+						"eligible": False,
+						"blockers": [
+							{
+								"check": "inactive",
+								"label": "الطالب غير مقيّد",
+								"detail": "سجل الطالب غير مفعّل.",
+							}
+						],
+					}
+				)
+				continue
+
+			verdict = evaluate_student(
+				r.student, group.name, settings, academic_year, academic_term,
+				marks_ok, pending,
+			)
 			rows.append(
 				{
 					"student": r.student,
 					"student_name": r.student_name,
-					"eligible": False,
-					"blockers": [
-						{
-							"check": "inactive",
-							"label": "الطالب غير مقيّد",
-							"detail": "سجل الطالب غير مفعّل.",
-						}
-					],
+					"student_group": group.name,
+					"class_name": group.student_group_name,
+					**verdict,
 				}
 			)
-			continue
 
-		verdict = evaluate_student(
-			r.student, student_group, settings, academic_year, academic_term, marks_ok, pending
-		)
-		rows.append({"student": r.student, "student_name": r.student_name, **verdict})
-
-	eligible = [r for r in rows if r["eligible"]]
+		eligible = [r for r in rows if r["eligible"]]
 	return {
-		"student_group": student_group,
-		"class_name": group.student_group_name,
-		"program": group.program,
+		"program": program,
 		"next_program": target,
-		"next_program_missing": bool(group.program and not target),
+		"next_program_missing": bool(not target),
 		"academic_year": academic_year,
 		"academic_term": academic_term,
-		"marks_ready": marks_ok,
-		"pending_courses": pending,
+		"classes": [
+			{"name": g.name, "class_name": g.student_group_name} for g in groups
+		],
+		"marks_ready": marks_ready_all,
+		"pending_courses": sorted(set(pending_all)),
 		"students": rows,
 		"total": len(rows),
 		"eligible_count": len(eligible),
@@ -420,33 +517,39 @@ def promote(payload: str | dict = None, persona: str = None):
 	so explicitly.
 	"""
 	data = frappe.parse_json(payload) if isinstance(payload, str) else (payload or {})
-	student_group = data.get("student_group")
+	program = data.get("program")
 	students = data.get("students") or []
 	target_program = data.get("new_program")
 	new_batch = data.get("new_batch")
 	new_year = data.get("new_academic_year")
 	new_term = data.get("new_academic_term")
+	from_year = data.get("academic_year")
+	from_term = data.get("academic_term")
 	override = cint(data.get("override"))
 	reason = (data.get("override_reason") or "").strip()
 
-	if not student_group or not students:
+	if not program or not students:
 		return fail(
-			message_en="A class and at least one student are required.",
-			message_ar="يجب تحديد الشعبة وطالب واحد على الأقل.",
+			message_en="A grade and at least one student are required.",
+			message_ar="يجب تحديد الصف وطالب واحد على الأقل.",
 		)
 	if not new_year:
 		return fail(
 			message_en="The new academic year is required.",
 			message_ar="يجب تحديد العام الدراسي الجديد.",
 		)
+	# The term is not optional. A Program Enrollment with a year but no term
+	# cannot be told apart from the other term's, and every report that filters
+	# by term skips it silently.
+	if not new_term:
+		return fail(
+			message_en="The new academic term is required.",
+			message_ar="يجب تحديد الفصل الدراسي الجديد.",
+		)
 
-	group = frappe.db.get_value(
-		"Student Group", student_group, ["program", "academic_year", "academic_term"], as_dict=True
-	)
-	if not group:
-		return fail(message_en="Class not found.", message_ar="لم يتم العثور على الشعبة.")
-
-	target_program = target_program or next_program(group.program)
+	from_year = from_year or get_default_academic_year()
+	from_term = from_term or get_default_academic_term()
+	target_program = target_program or next_program(program)
 	if not target_program:
 		return fail(
 			message_en="No next grade is configured for this programme.",
@@ -462,14 +565,27 @@ def promote(payload: str | dict = None, persona: str = None):
 		)
 
 	settings = _settings()
-	marks_ok, pending = _marks_state(student_group, group.academic_term)
+
+	# Each student is re-checked against their own section: marks are submitted
+	# per class, so one section being finished says nothing about another.
+	marks_cache: dict[str, tuple[bool, list]] = {}
+
+	def marks_for(group_name: str):
+		if group_name not in marks_cache:
+			marks_cache[group_name] = _marks_state(group_name, from_term)
+		return marks_cache[group_name]
 
 	promoted, skipped = [], []
 	for student in students:
 		name = frappe.db.get_value("Student", student, "student_name")
+		section = frappe.db.get_value(
+			"Student Group Student",
+			{"student": student, "parenttype": "Student Group", "active": 1},
+			"parent",
+		)
+		marks_ok, pending = marks_for(section) if section else (False, [])
 		verdict = evaluate_student(
-			student, student_group, settings, group.academic_year,
-			group.academic_term, marks_ok, pending,
+			student, section or "", settings, from_year, from_term, marks_ok, pending,
 		)
 		if not verdict["eligible"] and not override:
 			skipped.append(
@@ -502,7 +618,7 @@ def promote(payload: str | dict = None, persona: str = None):
 
 		previous = frappe.db.get_value(
 			"Program Enrollment",
-			{"student": student, "program": group.program, "docstatus": ["<", 2]},
+			{"student": student, "program": program, "docstatus": ["<", 2]},
 			"name",
 		)
 
@@ -511,8 +627,7 @@ def promote(payload: str | dict = None, persona: str = None):
 		doc.student_name = name
 		doc.program = target_program
 		doc.academic_year = new_year
-		if new_term:
-			doc.academic_term = new_term
+		doc.academic_term = new_term
 		if new_batch:
 			doc.student_batch_name = new_batch
 		doc.enrollment_date = today()

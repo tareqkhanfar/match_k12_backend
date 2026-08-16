@@ -18,6 +18,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -375,6 +376,7 @@ def register(activity: str, student: str = None, persona: str = None):
 	enrolment.consent_status = "Pending" if doc.requires_consent else "Not Required"
 	enrolment.enrolled_on = now_datetime()
 	enrolment.enrolled_by = frappe.session.user
+	anchor_term(enrolment)
 	enrolment.save(ignore_permissions=True)
 	frappe.db.commit()
 

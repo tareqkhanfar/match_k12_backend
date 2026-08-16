@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -283,6 +284,7 @@ def issue_book(payload: str | dict, persona: str = None):
 			"notes": data.get("notes"),
 		}
 	)
+	anchor_term(doc, doc.get("issue_date"))
 	doc.insert()
 	frappe.db.commit()
 	return {
@@ -522,6 +524,7 @@ def save_transport_assignment(payload: str | dict, persona: str = None):
 		msg_en, msg_ar = "Assignment updated.", "تم تحديث الإسناد."
 	else:
 		doc = frappe.get_doc({"doctype": "MS Transport Assignment", **fields})
+		anchor_term(doc)
 		doc.insert()
 		msg_en, msg_ar = "Student assigned to route.", "تم إسناد الطالب للخط."
 

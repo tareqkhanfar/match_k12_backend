@@ -1,49 +1,252 @@
 {
- "actions": [], "allow_rename": 1, "autoname": "naming_series:",
- "creation": "2026-08-05 00:00:00.000000", "doctype": "DocType",
- "editable_grid": 1, "engine": "InnoDB",
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
  "field_order": [
-  "naming_series", "student", "student_name", "column_break_main",
-  "rule", "rule_name", "trigger", "status",
-  "section_detail", "severity", "level", "measured_value", "threshold",
-  "column_break_detail", "raised_on", "escalated_on", "resolved_on", "resolved_by",
-  "section_message", "title_ar", "message_ar", "emoji",
-  "section_followup", "acknowledged_by_parent", "acknowledged_on", "column_break_follow", "resolution_notes", "blocks_access"
+  "naming_series",
+  "student",
+  "student_name",
+  "column_break_main",
+  "rule",
+  "rule_name",
+  "trigger",
+  "status",
+  "section_detail",
+  "severity",
+  "level",
+  "measured_value",
+  "threshold",
+  "column_break_detail",
+  "raised_on",
+  "academic_year",
+  "academic_term",
+  "escalated_on",
+  "resolved_on",
+  "resolved_by",
+  "section_message",
+  "title_ar",
+  "message_ar",
+  "emoji",
+  "section_followup",
+  "acknowledged_by_parent",
+  "acknowledged_on",
+  "column_break_follow",
+  "resolution_notes",
+  "blocks_access"
  ],
  "fields": [
-  {"default": "MS-ALR-.YYYY.-", "fieldname": "naming_series", "fieldtype": "Select", "label": "Naming Series", "options": "MS-ALR-.YYYY.-", "reqd": 1, "set_only_once": 1},
-  {"fieldname": "student", "fieldtype": "Link", "in_list_view": 1, "label": "Student", "options": "Student", "reqd": 1},
-  {"fetch_from": "student.student_name", "fieldname": "student_name", "fieldtype": "Data", "in_list_view": 1, "label": "Student Name", "read_only": 1},
-  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
-  {"fieldname": "rule", "fieldtype": "Link", "label": "Rule", "options": "MS Alert Rule"},
-  {"fieldname": "rule_name", "fieldtype": "Data", "label": "Rule Name", "read_only": 1},
-  {"fieldname": "trigger", "fieldtype": "Data", "label": "Trigger", "read_only": 1},
-  {"default": "Open", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Open\nAcknowledged\nEscalated\nResolved\nDismissed"},
-  {"fieldname": "section_detail", "fieldtype": "Section Break", "label": "Detail"},
-  {"default": "Warning", "fieldname": "severity", "fieldtype": "Select", "in_list_view": 1, "label": "Severity", "options": "Info\nWarning\nSerious\nCritical"},
-  {"default": "Notify", "fieldname": "level", "fieldtype": "Select", "label": "Level", "options": "Notify\nWarning\nFinal Warning\nBlock Access"},
-  {"fieldname": "measured_value", "fieldtype": "Float", "label": "Measured", "read_only": 1},
-  {"fieldname": "threshold", "fieldtype": "Float", "label": "Threshold", "read_only": 1},
-  {"fieldname": "column_break_detail", "fieldtype": "Column Break"},
-  {"fieldname": "raised_on", "fieldtype": "Datetime", "label": "Raised", "read_only": 1},
-  {"fieldname": "escalated_on", "fieldtype": "Datetime", "label": "Escalated", "read_only": 1},
-  {"fieldname": "resolved_on", "fieldtype": "Datetime", "label": "Resolved", "read_only": 1},
-  {"fieldname": "resolved_by", "fieldtype": "Link", "label": "Resolved By", "options": "User", "read_only": 1},
-  {"fieldname": "section_message", "fieldtype": "Section Break", "label": "Message"},
-  {"fieldname": "title_ar", "fieldtype": "Data", "label": "Title"},
-  {"fieldname": "message_ar", "fieldtype": "Small Text", "label": "Message"},
-  {"fieldname": "emoji", "fieldtype": "Data", "label": "Emoji"},
-  {"fieldname": "section_followup", "fieldtype": "Section Break", "label": "Follow-up"},
-  {"default": "0", "fieldname": "acknowledged_by_parent", "fieldtype": "Check", "label": "Parent Acknowledged"},
-  {"fieldname": "acknowledged_on", "fieldtype": "Datetime", "label": "Acknowledged On", "read_only": 1},
-  {"fieldname": "column_break_follow", "fieldtype": "Column Break"},
-  {"fieldname": "resolution_notes", "fieldtype": "Small Text", "label": "Resolution Notes"},
-  {"default": "0", "fieldname": "blocks_access", "fieldtype": "Check", "label": "Blocks Access", "read_only": 1}
+  {
+   "default": "MS-ALR-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "MS-ALR-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rule",
+   "fieldtype": "Link",
+   "label": "Rule",
+   "options": "MS Alert Rule"
+  },
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "label": "Rule Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "trigger",
+   "fieldtype": "Data",
+   "label": "Trigger",
+   "read_only": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Open\nAcknowledged\nEscalated\nResolved\nDismissed"
+  },
+  {
+   "fieldname": "section_detail",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "default": "Warning",
+   "fieldname": "severity",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Severity",
+   "options": "Info\nWarning\nSerious\nCritical"
+  },
+  {
+   "default": "Notify",
+   "fieldname": "level",
+   "fieldtype": "Select",
+   "label": "Level",
+   "options": "Notify\nWarning\nFinal Warning\nBlock Access"
+  },
+  {
+   "fieldname": "measured_value",
+   "fieldtype": "Float",
+   "label": "Measured",
+   "read_only": 1
+  },
+  {
+   "fieldname": "threshold",
+   "fieldtype": "Float",
+   "label": "Threshold",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_detail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "raised_on",
+   "fieldtype": "Datetime",
+   "label": "Raised",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "read_only": 1
+  },
+  {
+   "fieldname": "escalated_on",
+   "fieldtype": "Datetime",
+   "label": "Escalated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resolved_on",
+   "fieldtype": "Datetime",
+   "label": "Resolved",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resolved_by",
+   "fieldtype": "Link",
+   "label": "Resolved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_message",
+   "fieldtype": "Section Break",
+   "label": "Message"
+  },
+  {
+   "fieldname": "title_ar",
+   "fieldtype": "Data",
+   "label": "Title"
+  },
+  {
+   "fieldname": "message_ar",
+   "fieldtype": "Small Text",
+   "label": "Message"
+  },
+  {
+   "fieldname": "emoji",
+   "fieldtype": "Data",
+   "label": "Emoji"
+  },
+  {
+   "fieldname": "section_followup",
+   "fieldtype": "Section Break",
+   "label": "Follow-up"
+  },
+  {
+   "default": "0",
+   "fieldname": "acknowledged_by_parent",
+   "fieldtype": "Check",
+   "label": "Parent Acknowledged"
+  },
+  {
+   "fieldname": "acknowledged_on",
+   "fieldtype": "Datetime",
+   "label": "Acknowledged On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_follow",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "resolution_notes",
+   "fieldtype": "Small Text",
+   "label": "Resolution Notes"
+  },
+  {
+   "default": "0",
+   "fieldname": "blocks_access",
+   "fieldtype": "Check",
+   "label": "Blocks Access",
+   "read_only": 1
+  }
  ],
- "index_web_pages_for_search": 1, "links": [],
- "modified": "2026-08-05 00:00:00.000000", "modified_by": "Administrator",
- "module": "Match Schools", "name": "MS Student Alert",
- "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
- "permissions": [{"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1}],
- "sort_field": "raised_on", "sort_order": "DESC", "states": [], "track_changes": 1
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Student Alert",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "raised_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
 }

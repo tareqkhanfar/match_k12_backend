@@ -20,6 +20,7 @@ from frappe import _
 from frappe.utils import cint, flt, get_datetime, now_datetime, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -404,6 +405,7 @@ def start_attempt(quiz: str, persona: str = None):
 		attempt.status = "In Progress"
 		attempt.started_on = now_datetime()
 		attempt.total_marks = flt(doc.total_marks)
+		anchor_term(attempt)
 		attempt.insert(ignore_permissions=True)
 		frappe.db.commit()
 

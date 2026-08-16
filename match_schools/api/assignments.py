@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import flt, now_datetime, today
 
 from match_schools.api.utils import (
+	anchor_term,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
@@ -358,6 +359,7 @@ def submit_assignment(
 			}
 		)
 		_replace_files(doc, attachments)
+		anchor_term(doc)
 		doc.insert()
 		msg_en, msg_ar = "Assignment submitted.", "تم تسليم الواجب."
 

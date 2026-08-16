@@ -23,6 +23,8 @@ from match_schools.api.utils import (
 	ROLE_STUDENT,
 	ROLE_TEACHER,
 	fail,
+	get_default_academic_term,
+	get_default_academic_year,
 	ms_endpoint,
 	resolve_scope,
 )
@@ -179,6 +181,16 @@ def save_lesson_plan(payload: str | dict = None, persona: str = None):
 	doc.course = lesson.course
 	doc.instructor = lesson.instructor
 	doc.schedule_date = lesson.schedule_date
+
+	# Every record is anchored to a year and a term. Without them a plan is
+	# unfindable the moment a second year exists: "the preparation for Sunday
+	# period 1" stops being a question anyone can answer, and reports that
+	# filter by term silently miss it.
+	group = frappe.db.get_value(
+		"Student Group", lesson.student_group, ["academic_year", "academic_term"], as_dict=True
+	) or frappe._dict()
+	doc.academic_year = group.get("academic_year") or get_default_academic_year()
+	doc.academic_term = group.get("academic_term") or get_default_academic_term()
 
 	for field in ("title", "objectives", "content", "homework", "resources", "notes"):
 		if field in data:

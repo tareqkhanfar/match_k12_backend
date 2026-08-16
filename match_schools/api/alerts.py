@@ -25,6 +25,7 @@ from match_schools.api.utils import (
 	ROLE_STUDENT,
 	ROLE_TEACHER,
 	fail,
+	get_default_academic_term,
 	get_default_academic_year,
 	ms_endpoint,
 	paginate,
@@ -540,6 +541,11 @@ def evaluate_rule(rule) -> dict:
 		doc.measured_value = flt(value)
 		doc.threshold = flt(rule.threshold)
 		doc.raised_on = now_datetime()
+		# Anchored to the year and term it was raised in. Without them, last
+		# year's warnings are indistinguishable from this year's on a student's
+		# file, and a rule re-run in September reads as still-open history.
+		doc.academic_year = rule.academic_year or get_default_academic_year()
+		doc.academic_term = get_default_academic_term()
 		doc.title_ar = title
 		doc.message_ar = message
 		doc.emoji = rule.emoji or SEVERITY_EMOJI.get(rule.severity, "⚠️")

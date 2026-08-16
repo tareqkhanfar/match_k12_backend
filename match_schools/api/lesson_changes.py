@@ -23,6 +23,7 @@ from frappe.utils import cint, getdate, today
 
 from match_schools.api import scheduling as sched
 from match_schools.api.utils import (
+	anchor_term,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
@@ -424,6 +425,7 @@ def record_change(
 	doc.room = room
 	doc.reason = reason
 	doc.notes = notes
+	anchor_term(doc, doc.get("schedule_date"))
 	doc.insert(ignore_permissions=True)
 	doc.submit()
 	frappe.db.commit()

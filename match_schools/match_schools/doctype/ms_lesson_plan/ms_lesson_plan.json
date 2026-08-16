@@ -15,6 +15,8 @@
   "course",
   "instructor",
   "schedule_date",
+  "academic_year",
+  "academic_term",
   "section_content",
   "objectives",
   "content",
@@ -51,7 +53,10 @@
    "in_list_view": 1,
    "label": "Title"
   },
-  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
   {
    "fieldname": "student_group",
    "fieldtype": "Link",
@@ -79,7 +84,25 @@
    "label": "Date",
    "read_only": 1
   },
-  {"fieldname": "section_content", "fieldtype": "Section Break", "label": "Preparation"},
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_content",
+   "fieldtype": "Section Break",
+   "label": "Preparation"
+  },
   {
    "fieldname": "objectives",
    "fieldtype": "Text Editor",
@@ -95,7 +118,10 @@
    "fieldtype": "Text Editor",
    "label": "Homework"
   },
-  {"fieldname": "section_extra", "fieldtype": "Section Break"},
+  {
+   "fieldname": "section_extra",
+   "fieldtype": "Section Break"
+  },
   {
    "fieldname": "resources",
    "fieldtype": "Small Text",
@@ -107,14 +133,20 @@
    "label": "Teacher notes",
    "description": "Never shown to students or parents."
   },
-  {"fieldname": "section_meta", "fieldtype": "Section Break"},
+  {
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break"
+  },
   {
    "default": "1",
    "fieldname": "is_published",
    "fieldtype": "Check",
    "label": "Visible to students and parents"
   },
-  {"fieldname": "column_break_meta", "fieldtype": "Column Break"},
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
   {
    "fieldname": "prepared_by",
    "fieldtype": "Link",
