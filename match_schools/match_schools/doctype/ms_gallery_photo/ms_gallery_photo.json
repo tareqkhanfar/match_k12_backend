@@ -1,0 +1,27 @@
+{
+ "actions": [],
+ "creation": "2026-08-16 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "istable": 1,
+ "field_order": ["file_url", "caption", "column_break_1", "file_name", "sort_order"],
+ "fields": [
+  {"fieldname": "file_url", "fieldtype": "Attach Image", "in_list_view": 1, "label": "Photo", "reqd": 1},
+  {"fieldname": "caption", "fieldtype": "Data", "in_list_view": 1, "label": "Caption"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "file_name", "fieldtype": "Data", "label": "File name", "read_only": 1},
+  {"fieldname": "sort_order", "fieldtype": "Int", "label": "Order"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Gallery Photo",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

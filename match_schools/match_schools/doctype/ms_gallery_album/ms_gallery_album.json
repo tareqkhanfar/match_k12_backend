@@ -1,0 +1,49 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "title", "student_group", "column_break_main",
+  "event_date", "academic_year", "academic_term",
+  "section_content", "description", "photos",
+  "section_meta", "is_published", "cover_image",
+  "column_break_meta", "created_by_user", "photo_count"
+ ],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "MS-ALB-.YYYY.-"},
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Event title", "reqd": 1},
+  {"fieldname": "student_group", "fieldtype": "Link", "in_list_view": 1, "label": "Class", "options": "Student Group", "reqd": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "event_date", "fieldtype": "Date", "in_list_view": 1, "label": "Event date", "reqd": 1},
+  {"fieldname": "academic_year", "fieldtype": "Link", "label": "Academic Year", "options": "Academic Year", "read_only": 1},
+  {"fieldname": "academic_term", "fieldtype": "Link", "label": "Academic Term", "options": "Academic Term", "read_only": 1},
+  {"fieldname": "section_content", "fieldtype": "Section Break"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+  {"fieldname": "photos", "fieldtype": "Table", "label": "Photos", "options": "MS Gallery Photo"},
+  {"fieldname": "section_meta", "fieldtype": "Section Break"},
+  {"default": "1", "fieldname": "is_published", "fieldtype": "Check", "label": "Visible to students and parents"},
+  {"fieldname": "cover_image", "fieldtype": "Attach Image", "label": "Cover photo"},
+  {"fieldname": "column_break_meta", "fieldtype": "Column Break"},
+  {"fieldname": "created_by_user", "fieldtype": "Link", "label": "Created by", "options": "User", "read_only": 1},
+  {"fieldname": "photo_count", "fieldtype": "Int", "label": "Photos", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Gallery Album",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}
+ ],
+ "sort_field": "event_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
