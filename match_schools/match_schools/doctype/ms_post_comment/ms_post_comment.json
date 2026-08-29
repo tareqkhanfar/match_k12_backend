@@ -1,0 +1,26 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "naming_series:",
+ "creation": "2026-08-29 00:00:00", "doctype": "DocType",
+ "editable_grid": 0, "engine": "InnoDB",
+ "field_order": ["naming_series", "post", "parent_comment", "column_break_1",
+   "author", "author_name", "posted_on", "section_body", "body", "is_hidden", "hidden_reason"],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "MS-CMT-.YYYY.-"},
+  {"fieldname": "post", "fieldtype": "Link", "in_list_view": 1, "label": "Post", "options": "MS Community Post", "reqd": 1},
+  {"fieldname": "parent_comment", "fieldtype": "Link", "label": "Reply to", "options": "MS Post Comment"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "author", "fieldtype": "Link", "label": "Author", "options": "User", "read_only": 1},
+  {"fieldname": "author_name", "fieldtype": "Data", "in_list_view": 1, "label": "Author name", "read_only": 1},
+  {"fieldname": "posted_on", "fieldtype": "Datetime", "label": "Posted on", "read_only": 1},
+  {"fieldname": "section_body", "fieldtype": "Section Break"},
+  {"fieldname": "body", "fieldtype": "Small Text", "in_list_view": 1, "label": "Comment", "reqd": 1},
+  {"fieldname": "is_hidden", "fieldtype": "Check", "label": "Hidden by staff", "default": "0"},
+  {"fieldname": "hidden_reason", "fieldtype": "Data", "label": "Reason"}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-08-29 00:00:00", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Post Comment",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}],
+ "sort_field": "creation", "sort_order": "ASC", "states": [], "track_changes": 1
+}

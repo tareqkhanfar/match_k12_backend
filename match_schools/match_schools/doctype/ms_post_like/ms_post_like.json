@@ -1,0 +1,16 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "hash",
+ "creation": "2026-08-29 00:00:00", "doctype": "DocType",
+ "editable_grid": 0, "engine": "InnoDB",
+ "field_order": ["post", "user", "liked_on"],
+ "fields": [
+  {"fieldname": "post", "fieldtype": "Link", "in_list_view": 1, "label": "Post", "options": "MS Community Post", "reqd": 1},
+  {"fieldname": "user", "fieldtype": "Link", "in_list_view": 1, "label": "User", "options": "User", "reqd": 1},
+  {"fieldname": "liked_on", "fieldtype": "Datetime", "label": "Liked on", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-08-29 00:00:00", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Post Like", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}],
+ "sort_field": "creation", "sort_order": "DESC", "states": []
+}

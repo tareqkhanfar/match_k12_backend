@@ -1,0 +1,13 @@
+{
+ "actions": [], "creation": "2026-08-29 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["file_url", "caption"],
+ "fields": [
+  {"fieldname": "file_url", "fieldtype": "Attach Image", "in_list_view": 1, "label": "Photo", "reqd": 1},
+  {"fieldname": "caption", "fieldtype": "Data", "in_list_view": 1, "label": "Caption"}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-08-29 00:00:00", "modified_by": "Administrator",
+ "module": "Match Schools", "name": "MS Post Photo", "owner": "Administrator",
+ "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

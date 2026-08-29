@@ -1,0 +1,27 @@
+{
+ "actions": [],
+ "creation": "2026-08-29 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "istable": 1,
+ "field_order": ["file_url", "file_name", "column_break_1", "file_size", "pages"],
+ "fields": [
+  {"fieldname": "file_url", "fieldtype": "Attach", "in_list_view": 1, "label": "File", "reqd": 1},
+  {"fieldname": "file_name", "fieldtype": "Data", "in_list_view": 1, "label": "File name"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "file_size", "fieldtype": "Int", "label": "Size (bytes)", "read_only": 1},
+  {"fieldname": "pages", "fieldtype": "Int", "label": "Pages"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-29 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Print Attachment",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
