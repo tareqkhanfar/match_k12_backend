@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-30 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "title", "owner_user", "column_break_main",
+  "parent_folder", "depth", "colour",
+  "sec_period", "academic_year", "academic_term"
+ ],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "K12-DFD-.YYYY.-", "default": "K12-DFD-.YYYY.-"},
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "اسم المجلد", "reqd": 1},
+  {"fieldname": "owner_user", "fieldtype": "Link", "in_standard_filter": 1, "label": "المالك", "options": "User", "reqd": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "parent_folder", "fieldtype": "Link", "label": "المجلد الأب", "options": "MS Drive Folder"},
+  {"fieldname": "depth", "fieldtype": "Int", "label": "العمق", "read_only": 1},
+  {"fieldname": "colour", "fieldtype": "Data", "label": "اللون"},
+  {"fieldname": "sec_period", "fieldtype": "Section Break", "label": "الفترة الدراسية"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "in_standard_filter": 1, "label": "السنة الدراسية", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "in_standard_filter": 1, "label": "الفصل الدراسي", "options": "Academic Term"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Drive Folder",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
