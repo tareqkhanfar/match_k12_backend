@@ -64,12 +64,16 @@ def _display_name(user: str) -> str:
 
 
 def _allowed_recipients(persona: str) -> set[str]:
-	"""The users this caller may write to, from the shared contact list."""
-	from match_schools.api.communication import contacts
+	"""Every user this caller may write to under the school's messaging policy.
 
-	result = contacts(persona=persona)
-	people = result.get("data") if isinstance(result, dict) else result
-	return {c["user"] for c in (people or []) if isinstance(c, dict) and c.get("user")}
+	The policy replaced the flat contact list: a school decides per role which
+	audiences are reachable, and this is the union of them. Checked on send,
+	so an audience the screen no longer offers cannot be reached by a crafted
+	request either.
+	"""
+	from match_schools.api.mail_policy import allowed_users
+
+	return allowed_users(persona)
 
 
 def _visible_recipients(doc, viewer: str) -> list[dict]:
@@ -114,6 +118,17 @@ def _message_row(doc, viewer: str, mine=None, preview_only: bool = True) -> dict
 		"reply_to": doc.reply_to,
 		"about_student": doc.about_student,
 		"recipients": _visible_recipients(doc, viewer),
+		# A message sent to an audience is described by that audience. Printing
+		# two hundred guardian names in a list row is unreadable, and in the
+		# To field it is worse — it turns a class circular into a list nobody
+		# can scan.
+		"audience_key": doc.get("audience_key"),
+		"audience_label": doc.get("audience_label"),
+		"audience_count": (
+			frappe.db.count("MS Message Recipient", {"message": doc.name})
+			if doc.get("audience_key")
+			else 0
+		),
 		"attachments": [
 			{"file_url": f.file_url, "file_name": f.file_name, "file_size": cint(f.file_size)}
 			for f in (doc.files or [])
@@ -327,6 +342,24 @@ def _resolve_recipients(persona: str, data: dict) -> tuple[list[tuple[str, str]]
 	seen: set[str] = set()
 	allowed = _allowed_recipients(persona)
 
+	# An audience is expanded here, not in the browser. The screen sends
+	# "guardians of 4-B", the server decides who that is for this caller, and
+	# a stale or forged audience cannot reach anyone the policy excludes.
+	audience = (data.get("audience") or "").strip()
+	if audience:
+		from match_schools.api.mail_policy import AUDIENCES, resolve_audience
+
+		if audience not in AUDIENCES:
+			return [], "جمهور غير معروف."
+		members = resolve_audience(persona, audience, data.get("audience_groups") or None)
+		if not members:
+			return [], "لا يوجد مستلمون في هذا الجمهور."
+		for user in members:
+			if user in seen or user == frappe.session.user:
+				continue
+			seen.add(user)
+			pairs.append((user, "to"))
+
 	for kind in ("to", "cc", "bcc"):
 		for user in data.get(kind) or []:
 			if not user or user in seen or user == frappe.session.user:
@@ -386,6 +419,24 @@ def save_message(payload: str | dict = None, persona: str = None):
 		)
 	if not as_draft and not subject:
 		return fail(message_en="A subject is required.", message_ar="عنوان الرسالة مطلوب.")
+
+	audience = (data.get("audience") or "").strip()
+	if audience:
+		from match_schools.api.mail_policy import AUDIENCES
+
+		groups = data.get("audience_groups") or []
+		labels = [
+			frappe.db.get_value("Student Group", g, "student_group_name") or g for g in groups
+		]
+		doc.audience_key = audience
+		doc.audience_label = AUDIENCES[audience]["label_ar"] + (
+			f" — {'، '.join(labels)}" if labels else ""
+		)
+		doc.audience_groups = ",".join(groups)
+	else:
+		doc.audience_key = None
+		doc.audience_label = None
+		doc.audience_groups = None
 
 	doc.subject = subject or "(بلا عنوان)"
 	doc.body = body

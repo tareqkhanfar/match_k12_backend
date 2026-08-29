@@ -19,6 +19,9 @@
   "body",
   "attachment",
   "files",
+  "audience_key",
+  "audience_label",
+  "audience_groups",
   "reply_to",
   "is_draft",
   "sender_deleted",
@@ -152,6 +155,24 @@
    "fieldtype": "Link",
    "label": "Academic Term",
    "options": "Academic Term",
+   "read_only": 1
+  },
+  {
+   "fieldname": "audience_key",
+   "fieldtype": "Data",
+   "label": "Audience",
+   "read_only": 1
+  },
+  {
+   "fieldname": "audience_label",
+   "fieldtype": "Data",
+   "label": "Audience label",
+   "read_only": 1
+  },
+  {
+   "fieldname": "audience_groups",
+   "fieldtype": "Small Text",
+   "label": "Audience classes",
    "read_only": 1
   }
  ],
