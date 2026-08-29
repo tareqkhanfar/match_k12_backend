@@ -117,7 +117,8 @@ def list_students(
 		as_dict=True,
 	)
 
-	items = [_student_row(r) for r in rows]
+	ctx = _bulk_context([r["name"] for r in rows])
+	items = [_student_row(r, ctx) for r in rows]
 
 	# Payment status is derived, so filter after enrichment.
 	if payment_status and payment_status != "all":
@@ -161,11 +162,146 @@ def _students_of_instructor(instructor: str | None) -> list[str]:
 	)
 
 
-def _student_row(r: dict) -> dict:
-	"""Shape a student for the directory table."""
-	enrollment = _latest_enrollment(r["name"])
-	guardian = _primary_guardian(r["name"])
-	fees = _fee_totals(r["name"])
+def _bulk_context(names: list[str]) -> dict:
+	"""Everything the directory needs about a page of students, in five queries.
+
+	Each row used to fetch its own enrolment, guardian, fees, attendance and
+	average — five queries per student, so a page of a hundred cost five
+	hundred round trips and took half a second before any rendering. The same
+	answers are gathered here for the whole page at once, which is the same
+	work the database was going to do anyway, asked once instead of a hundred
+	times.
+	"""
+	if not names:
+		return {"enrolment": {}, "guardian": {}, "fees": {}, "attendance": {}, "average": {}}
+
+	enrolment: dict = {}
+	for r in frappe.get_all(
+		"Program Enrollment",
+		filters={"student": ["in", names], "docstatus": ["<", 2]},
+		fields=["student", "program", "student_batch_name", "academic_year", "creation"],
+		order_by="creation desc",
+		limit_page_length=0,
+	):
+		# Newest first, so the first one seen for a student is the current one.
+		enrolment.setdefault(r.student, r)
+
+	guardian: dict = {}
+	for r in frappe.get_all(
+		"Student Guardian",
+		filters={"parent": ["in", names], "parenttype": "Student"},
+		fields=["parent", "guardian", "guardian_name", "idx"],
+		order_by="idx",
+		limit_page_length=0,
+	):
+		guardian.setdefault(r.parent, r)
+	numbers = {}
+	if guardian:
+		ids = list({g.guardian for g in guardian.values() if g.guardian})
+		if ids:
+			numbers = {
+				x.name: x.mobile_number
+				for x in frappe.get_all(
+					"Guardian",
+					filters={"name": ["in", ids]},
+					fields=["name", "mobile_number"],
+					limit_page_length=0,
+				)
+			}
+	for g in guardian.values():
+		g.mobile_number = numbers.get(g.guardian)
+
+	fees = {
+		r.student: r
+		for r in frappe.db.sql(
+			"""
+			SELECT student, SUM(grand_total) AS total, SUM(outstanding_amount) AS outstanding
+			FROM `tabSales Invoice`
+			WHERE student IN %(names)s AND docstatus = 1
+			GROUP BY student
+			""",
+			{"names": names},
+			as_dict=True,
+		)
+	}
+
+	attendance = {
+		r.student: r
+		for r in frappe.db.sql(
+			"""
+			SELECT student, COUNT(*) AS total,
+				SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) AS present
+			FROM `tabStudent Attendance`
+			WHERE student IN %(names)s AND docstatus < 2
+			GROUP BY student
+			""",
+			{"names": names},
+			as_dict=True,
+		)
+	}
+
+	# The same source and expression as _average_score. Reading a different
+	# table here would silently change every average in the directory — which
+	# is exactly what happened when this was first written against the
+	# gradebook instead of Assessment Result.
+	average = {
+		r.student: flt(r.average)
+		for r in frappe.db.sql(
+			"""
+			SELECT student, AVG(total_score / maximum_score * 100) AS average
+			FROM `tabAssessment Result`
+			WHERE student IN %(names)s AND docstatus = 1 AND maximum_score > 0
+			GROUP BY student
+			""",
+			{"names": names},
+			as_dict=True,
+		)
+	}
+
+	return {
+		"enrolment": enrolment,
+		"guardian": guardian,
+		"fees": fees,
+		"attendance": attendance,
+		"average": average,
+	}
+
+
+def _student_row(r: dict, ctx: dict | None = None) -> dict:
+	"""Shape a student for the directory table.
+
+	`ctx` is the whole page's data, fetched once by `_bulk_context`. Without it
+	the row falls back to fetching its own — correct, but five queries deep, so
+	only the callers that shape a single student use that path.
+	"""
+	sid = r["name"]
+	if ctx is not None:
+		enrollment = ctx["enrolment"].get(sid)
+		guardian = ctx["guardian"].get(sid)
+		fee_row = ctx["fees"].get(sid)
+		total = flt(fee_row.total) if fee_row else 0.0
+		outstanding = flt(fee_row.outstanding) if fee_row else 0.0
+		paid = total - outstanding
+		if total <= 0 or outstanding <= 0:
+			status = "paid"
+		elif paid > total * 0.3:
+			status = "partial"
+		else:
+			status = "late"
+		fees = {"total": total, "paid": paid, "outstanding": outstanding, "status": status}
+		att = ctx["attendance"].get(sid)
+		attendance_rate = (
+			round(flt(att.present) / flt(att.total) * 100, 1)
+			if att and flt(att.total)
+			else 0.0
+		)
+		average = round(flt(ctx["average"].get(sid)), 1)
+	else:
+		enrollment = _latest_enrollment(sid)
+		guardian = _primary_guardian(sid)
+		fees = _fee_totals(sid)
+		attendance_rate = _attendance_rate(sid)
+		average = _average_score(sid)
 
 	return {
 		"id": r["name"],
@@ -181,8 +317,8 @@ def _student_row(r: dict) -> dict:
 		"section": enrollment.get("student_batch_name") if enrollment else None,
 		"guardian": guardian.get("guardian_name") if guardian else None,
 		"guardianPhone": guardian.get("mobile_number") if guardian else None,
-		"attendanceRate": _attendance_rate(r["name"]),
-		"average": _average_score(r["name"]),
+		"attendanceRate": attendance_rate,
+		"average": average,
 		"feeTotal": fees["total"],
 		"feePaid": fees["paid"],
 		# `status` is the fee standing and has been since this screen existed;

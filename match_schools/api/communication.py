@@ -347,6 +347,27 @@ def thread(thread: str, persona: str = None):
 	}
 
 
+def _may_write_to(persona: str, recipient: str) -> bool:
+	"""Whether this caller is allowed to message that user.
+
+	The contact list already answers "who may I talk to" — a student sees their
+	own teachers and the office, a teacher sees the guardians of the students
+	they teach. Until now only the screen consulted it, so a request naming any
+	other user went straight through: a student could message any other student
+	in the school, which is unsupervised contact between children and exactly
+	what a school cannot allow.
+
+	Enforced against the same list the screen renders, so the two cannot drift.
+	"""
+	if persona in (ROLE_ADMIN, ROLE_SECRETARY):
+		return True
+	# contacts() returns the list itself; ms_endpoint wraps it in an envelope
+	# when called over HTTP, so both shapes are unwrapped here.
+	result = contacts(persona=persona)
+	people = result.get("data") if isinstance(result, dict) else result
+	return any(c.get("user") == recipient for c in (people or []) if isinstance(c, dict))
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def send_message(
@@ -362,6 +383,12 @@ def send_message(
 			message_en="Recipient and message body are required.",
 			message_ar="المستلم ونص الرسالة مطلوبان.",
 		)
+	if not _may_write_to(persona, recipient):
+		frappe.throw(
+			_("You may only message people on your contact list."),
+			frappe.PermissionError,
+		)
+
 	if not frappe.db.exists("User", recipient):
 		return fail(message_en="Recipient not found.", message_ar="لم يتم العثور على المستلم.")
 
