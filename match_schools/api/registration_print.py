@@ -16,6 +16,7 @@ school's own layout is still what the family receives.
 """
 
 import frappe
+from frappe import _
 from frappe.utils import escape_html
 from frappe.utils.pdf import get_pdf
 
@@ -197,7 +198,7 @@ def _assert_may_print(doctype: str, name: str, persona: str):
 			return
 
 	frappe.throw(
-		"You are not allowed to print this document",
+		_("You are not allowed to print this document"),
 		frappe.PermissionError,
 	)
 

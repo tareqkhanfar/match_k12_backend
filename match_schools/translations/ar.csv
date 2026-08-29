@@ -1,0 +1,101 @@
+A health record already exists for this student.,يوجد ملف صحي لهذا الطالب بالفعل.
+A lesson plan already exists for this lesson.,يوجد تحضير لهذه الحصة بالفعل.
+A scheme needs at least one non-bonus component.,يجب أن تحتوي الخطة على مكوّن واحد على الأقل غير إضافي.
+"Add at least one action, or disable the rule.",أضف إجراءً واحداً على الأقل، أو عطّل القاعدة.
+Add at least one component.,أضف مكوّناً واحداً على الأقل.
+Add at least one question before opening the survey.,أضف سؤالاً واحداً على الأقل قبل فتح الاستبيان.
+Add at least one question before publishing.,أضف سؤالاً واحداً على الأقل قبل النشر.
+Another default scheme already exists for this course and program.,توجد خطة افتراضية أخرى لهذه المادة والبرنامج.
+Applicant not found,لم يتم العثور على مقدّم الطلب
+Attach a file or add a link before publishing.,أرفق ملفاً أو أضف رابطاً قبل النشر.
+Capacity cannot be negative.,لا يمكن أن تكون السعة بالسالب.
+Choose the instructor who is covering.,اختر المعلّم البديل.
+Choose the new room.,اختر القاعة الجديدة.
+Could not allocate a username for {0},تعذّر إنشاء اسم مستخدم لـ {0}
+Customer {0} is not the customer of student {1} ({2}). ,العميل {0} ليس عميل الطالب {1} ({2}). 
+Due Date cannot be before the Assigned On date.,لا يمكن أن يسبق تاريخ التسليم تاريخ الإسناد.
+Due date cannot be before the issue date.,لا يمكن أن يسبق تاريخ الاستحقاق تاريخ الإصدار.
+End date cannot be before the start date.,لا يمكن أن يسبق تاريخ الانتهاء تاريخ البدء.
+Expiry date cannot be before the posting date.,لا يمكن أن يسبق تاريخ الانتهاء تاريخ القيد.
+Height cannot be negative.,لا يمكن أن يكون الطول بالسالب.
+Lesson {0} not found,لم يتم العثور على الحصة {0}
+Marks for this class and subject have already been submitted ({0}).,علامات هذه الشعبة والمادة مُرحّلة بالفعل ({0}).
+Max score must be greater than zero for {0}.,يجب أن تكون العلامة العظمى أكبر من صفر لـ {0}.
+Max score must be greater than zero.,يجب أن تكون العلامة العظمى أكبر من صفر.
+No copies of this book are currently available.,لا توجد نسخ متاحة من هذا الكتاب حالياً.
+No instructor is linked to your account.,لا يوجد معلّم مرتبط بحسابك.
+Official documents are issued by the administration.,الوثائق الرسمية تصدر عن الإدارة.
+Please log in to continue.,الرجاء تسجيل الدخول للمتابعة.
+"Program Enrollment {0} belongs to {1}, not to {2}",التسجيل {0} يخص {1} وليس {2}
+Program Enrollment {0} does not exist,التسجيل {0} غير موجود
+Program Enrollment {0} is cancelled,التسجيل {0} ملغى
+Question {0} needs at least two options.,يحتاج السؤال {0} إلى خيارين على الأقل.
+Registration must close on or before the activity starts.,يجب أن يُغلق التسجيل قبل بدء النشاط أو معه.
+Reopened by the administration.,أُعيد فتحه من قبل الإدارة.
+Return date cannot be before the issue date.,لا يمكن أن يسبق تاريخ الإرجاع تاريخ الإعارة.
+Score cannot be greater than the maximum of {0}.,لا يمكن أن تتجاوز العلامة الحد الأقصى {0}.
+Score cannot be greater than the maximum score ({0}).,لا يمكن أن تتجاوز العلامة العلامة العظمى ({0}).
+Score cannot be negative.,لا يمكن أن تكون العلامة بالسالب.
+Section {0} does not exist.,الشعبة {0} غير موجودة.
+Select a Program for a program-targeted announcement.,اختر البرنامج للإعلان الموجَّه لبرنامج.
+Select a Student Group for a group-targeted announcement.,اختر الشعبة للإعلان الموجَّه لشعبة.
+Select the Program Enrollment this invoice belongs to ({0} available).,اختر التسجيل الذي تنتمي إليه هذه الفاتورة ({0} متاح).
+Sender and recipient cannot be the same user.,لا يمكن أن يكون المرسِل والمستقبِل المستخدم نفسه.
+Student {0} does not exist,الطالب {0} غير موجود
+"Student {0} has no linked Customer, so no receivable can be booked",الطالب {0} غير مرتبط بعميل، فلا يمكن تسجيل ذمة مدينة
+Student {0} has no submitted Program Enrollment. ,الطالب {0} ليس له تسجيل معتمد. 
+The covering instructor is the same as the original.,المعلّم البديل هو المعلّم الأصلي نفسه.
+The end date cannot be before the start date.,لا يمكن أن يسبق تاريخ الانتهاء تاريخ البدء.
+The new room is the same as the original.,القاعة الجديدة هي القاعة الأصلية نفسها.
+The quiz must close after it opens.,يجب أن يُغلق الاختبار بعد فتحه.
+The subjects need {0} periods a week but the timetable only has {1}.,المواد تحتاج {0} حصة أسبوعياً بينما الجدول يتسع لـ {1} فقط.
+The survey must close after it opens.,يجب أن يُغلق الاستبيان بعد فتحه.
+"There are {0} copies on loan, which is more than the total of {1}.",يوجد {0} نسخة معارة، وهو أكثر من الإجمالي {1}.
+These marks have been submitted ({0}) and can no longer be edited.,هذه العلامات مُرحّلة ({0}) ولا يمكن تعديلها.
+This action must be performed from an active browser session.,يجب تنفيذ هذا الإجراء من جلسة متصفح نشطة.
+This activity is not open to you.,هذا النشاط غير متاح لك.
+This album is not published.,هذا الألبوم غير منشور.
+This album is not yours.,هذا الألبوم ليس لك.
+This alert is not yours.,هذا التنبيه ليس لك.
+This assignment is not for your class.,هذا الواجب ليس لشعبتك.
+This class is not yours.,هذه الشعبة ليست لك.
+This is not your attempt.,هذه ليست محاولتك.
+This is not your observation.,هذه ليست ملاحظتك.
+This is not your registration.,هذا ليس تسجيلك.
+This lesson is not yours.,هذه الحصة ليست لك.
+This observation has not been shared with you yet.,لم تتم مشاركة هذه الملاحظة معك بعد.
+This observation has not been shared yet.,لم تتم مشاركة هذه الملاحظة بعد.
+This quiz is not for your class.,هذا الاختبار ليس لشعبتك.
+This route is already at full capacity ({0}).,هذا الخط مكتمل العدد ({0}).
+This student already has a submission for {0}.,لهذا الطالب تسليم بالفعل لـ {0}.
+This student is already assigned to an active route.,هذا الطالب مُسنَد بالفعل إلى خط نشط.
+This student is already registered for the activity.,هذا الطالب مسجَّل بالفعل في النشاط.
+This survey is not aimed at you.,هذا الاستبيان غير موجَّه لك.
+This survey is not open.,هذا الاستبيان غير مفتوح.
+Total copies must be at least 1.,يجب أن يكون إجمالي النسخ ١ على الأقل.
+Unknown dataset: {0},مجموعة بيانات غير معروفة: {0}
+Unknown persona: {0},دور غير معروف: {0}
+User not found,لم يتم العثور على المستخدم
+Weight cannot be negative.,لا يمكن أن يكون الوزن بالسالب.
+Weights for {0} must total {1}. They currently total {2}.,يجب أن يكون مجموع أوزان {0} مساوياً {1}، وهو حالياً {2}.
+You are not allowed to access this resource.,لا تملك صلاحية الوصول إلى هذا المورد.
+You are not allowed to change this field.,لا تملك صلاحية تعديل هذا الحقل.
+You are not allowed to delete these records.,لا تملك صلاحية حذف هذه السجلات.
+You are not allowed to print this document,لا تملك صلاحية طباعة هذه الوثيقة
+You are not allowed to view these fees.,لا تملك صلاحية الاطلاع على هذه الرسوم.
+You are not allowed to view these grades.,لا تملك صلاحية الاطلاع على هذه العلامات.
+You are not allowed to view this guardian.,لا تملك صلاحية الاطلاع على ولي الأمر هذا.
+You are not allowed to view this invoice.,لا تملك صلاحية الاطلاع على هذه الفاتورة.
+You are not allowed to view this student.,لا تملك صلاحية الاطلاع على هذا الطالب.
+You are not allowed to view this teacher.,لا تملك صلاحية الاطلاع على هذا المعلّم.
+You are not allowed to view this.,لا تملك صلاحية الاطلاع على هذا.
+You are not assigned to this group.,أنت غير مُسنَد إلى هذه الشعبة.
+You are not part of this conversation.,أنت لست طرفاً في هذه المحادثة.
+You can only edit your own assignments.,يمكنك تعديل واجباتك أنت فقط.
+You can only give consent for your own children.,يمكنك منح الموافقة لأبنائك فقط.
+You can only register your own children.,يمكنك تسجيل أبنائك فقط.
+You can only schedule exams for your own classes.,يمكنك جدولة الامتحانات لشُعبك فقط.
+You may only message people on your contact list.,يمكنك مراسلة الأشخاص في قائمة جهات اتصالك فقط.
+You only have access to the subjects you teach in this class.,لديك صلاحية على المواد التي تدرّسها في هذه الشعبة فقط.
+You only have access to the subjects you teach.,لديك صلاحية على المواد التي تدرّسها فقط.
+Your account is not linked to a Match Schools role.,حسابك غير مرتبط بأي دور في نظام Match Schools.
