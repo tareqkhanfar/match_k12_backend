@@ -165,6 +165,11 @@ doc_events = {
 # Alert rules run themselves overnight, so a school does not depend on
 # someone remembering to press a button.
 scheduler_events = {
+	# A message scheduled for 07:00 should not arrive at 07:59, so the queue
+	# is checked every ten minutes rather than hourly.
+	"cron": {
+		"*/10 * * * *": ["match_schools.api.mail.deliver_due_messages"],
+	},
 	"daily": [
 		"match_schools.api.alerts.run_rules_scheduled",
 		# Marks and results whose release date has arrived become visible to

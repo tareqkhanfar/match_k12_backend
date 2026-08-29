@@ -20,7 +20,7 @@ governs direct messages, so a student cannot mail another student here either.
 
 import frappe
 from frappe import _
-from frappe.utils import cint, now
+from frappe.utils import add_to_date, cint, get_datetime, now
 
 from match_schools.api.utils import (
 	ROLE_ADMIN,
@@ -29,8 +29,6 @@ from match_schools.api.utils import (
 	ROLE_STUDENT,
 	ROLE_TEACHER,
 	fail,
-	get_default_academic_term,
-	get_default_academic_year,
 	ms_endpoint,
 )
 
@@ -52,6 +50,7 @@ ALLOWED_EXTENSIONS = {
 FOLDER_AR = {
 	"inbox": "الوارد",
 	"sent": "الصادر",
+	"scheduled": "المجدولة",
 	"drafts": "المسودات",
 	"archive": "الأرشيف",
 	"starred": "المميّزة",
@@ -134,6 +133,13 @@ def _message_row(doc, viewer: str, mine=None, preview_only: bool = True) -> dict
 			for f in (doc.files or [])
 		],
 		"outgoing": doc.sender == viewer,
+		# The screen hides the reply button on these; the server refuses the
+		# reply regardless, so this is presentation, not protection.
+		"no_reply": bool(cint(doc.get("no_reply"))),
+		"copy_guardians": bool(cint(doc.get("copy_guardians"))),
+		"scheduled_for": str(doc.get("scheduled_for") or ""),
+		"is_scheduled": bool(cint(doc.get("is_scheduled"))),
+		"send_failed_reason": doc.get("send_failed_reason"),
 	}
 	if preview_only:
 		# The list shows a plain-text snippet: rendering HTML in a row makes
@@ -169,8 +175,13 @@ def _may_read(doc, viewer: str, persona: str) -> bool:
 		return True
 	if doc.sender == viewer:
 		return True
+	# A pending row is a scheduled message that has not been sent. The
+	# recipient must not be able to open it early by guessing its name.
 	return bool(
-		frappe.db.exists("MS Message Recipient", {"message": doc.name, "user": viewer})
+		frappe.db.exists(
+			"MS Message Recipient",
+			{"message": doc.name, "user": viewer, "is_pending": 0},
+		)
 	)
 
 
@@ -179,26 +190,32 @@ def _may_read(doc, viewer: str, persona: str) -> bool:
 def folders(persona: str = None):
 	"""Folder list with unread counts, for the sidebar."""
 	user = frappe.session.user
+	# `is_pending` excludes the copies of a scheduled message, which are
+	# addressed and stored but have not been delivered yet.
 	unread = frappe.db.count(
 		"MS Message Recipient",
-		{"user": user, "is_read": 0, "is_archived": 0, "is_deleted": 0},
+		{"user": user, "is_read": 0, "is_archived": 0, "is_deleted": 0, "is_pending": 0},
 	)
 	counts = {
 		"inbox": frappe.db.count(
 			"MS Message Recipient",
-			{"user": user, "is_archived": 0, "is_deleted": 0},
+			{"user": user, "is_archived": 0, "is_deleted": 0, "is_pending": 0},
 		),
 		"starred": frappe.db.count(
-			"MS Message Recipient", {"user": user, "is_starred": 1, "is_deleted": 0}
+			"MS Message Recipient", {"user": user, "is_starred": 1, "is_deleted": 0, "is_pending": 0}
 		),
 		"archive": frappe.db.count(
-			"MS Message Recipient", {"user": user, "is_archived": 1, "is_deleted": 0}
+			"MS Message Recipient", {"user": user, "is_archived": 1, "is_deleted": 0, "is_pending": 0}
 		),
-		"trash": frappe.db.count("MS Message Recipient", {"user": user, "is_deleted": 1}),
+		"trash": frappe.db.count(
+			"MS Message Recipient", {"user": user, "is_deleted": 1, "is_pending": 0}
+		),
 		"sent": frappe.db.count(
-			"MS Message", {"sender": user, "is_draft": 0, "sender_deleted": 0}
+			"MS Message",
+			{"sender": user, "is_draft": 0, "sender_deleted": 0, "is_scheduled": 0},
 		),
 		"drafts": frappe.db.count("MS Message", {"sender": user, "is_draft": 1}),
+		"scheduled": frappe.db.count("MS Message", {"sender": user, "is_scheduled": 1}),
 	}
 	return {
 		"unread": unread,
@@ -225,22 +242,29 @@ def list_messages(
 	limit = min(max(cint(limit) or 50, 1), 200)
 	rows: list[dict] = []
 
-	if folder in ("sent", "drafts"):
+	if folder in ("sent", "drafts", "scheduled"):
 		filters = {"sender": user, "is_draft": 1 if folder == "drafts" else 0}
 		if folder == "sent":
+			# A message waiting for its send time is not in the outbox yet; it
+			# has its own folder, where it can still be called back.
 			filters["sender_deleted"] = 0
+			filters["is_scheduled"] = 0
+		elif folder == "scheduled":
+			filters["is_scheduled"] = 1
 		names = frappe.get_all(
 			"MS Message",
 			filters=filters,
 			pluck="name",
-			order_by="sent_on desc, creation desc",
+			order_by=(
+				"scheduled_for asc" if folder == "scheduled" else "sent_on desc, creation desc"
+			),
 			limit_page_length=limit,
 		)
 		for n in names:
 			doc = frappe.get_doc("MS Message", n)
 			rows.append(_message_row(doc, user))
 	else:
-		mine_filters: dict = {"user": user}
+		mine_filters: dict = {"user": user, "is_pending": 0}
 		if folder == "inbox":
 			mine_filters.update({"is_archived": 0, "is_deleted": 0})
 		elif folder == "archive":
@@ -371,9 +395,48 @@ def _resolve_recipients(persona: str, data: dict) -> tuple[list[tuple[str, str]]
 			seen.add(user)
 			pairs.append((user, kind))
 
+	# A message to a pupil that the family never sees is how a school ends up
+	# explaining itself later. When asked, every student recipient's guardians
+	# are added as a copy — resolved here, from the student records, rather
+	# than typed in by the sender who would have to know each family.
+	if cint(data.get("copy_guardians")):
+		for user in guardians_of_users([u for u, _kind in pairs]):
+			if user not in seen and user != frappe.session.user:
+				seen.add(user)
+				pairs.append((user, "cc"))
+
 	if len(pairs) > MAX_RECIPIENTS:
 		return [], f"الحد الأقصى {MAX_RECIPIENTS} مستلماً للرسالة الواحدة."
 	return pairs, None
+
+
+def guardians_of_users(users: list[str]) -> list[str]:
+	"""The guardian accounts behind a list of user accounts.
+
+	Anyone in the list who is not a student is ignored, so this can be handed
+	a mixed recipient list without the caller sorting it first.
+	"""
+	if not users:
+		return []
+
+	students = frappe.get_all(
+		"Student", filters={"user": ["in", users], "enabled": 1}, pluck="name"
+	)
+	if not students:
+		return []
+
+	guardians = frappe.get_all(
+		"Student Guardian",
+		filters={"parent": ["in", students], "parenttype": "Student"},
+		pluck="guardian",
+	)
+	if not guardians:
+		return []
+
+	accounts = frappe.get_all(
+		"Guardian", filters={"name": ["in", list(set(guardians))]}, pluck="user"
+	)
+	return sorted({u for u in accounts if u})
 
 
 @frappe.whitelist(methods=["POST"])
@@ -395,6 +458,16 @@ def save_message(payload: str | dict = None, persona: str = None):
 		return fail(
 			message_en="The message is too long.",
 			message_ar="نص الرسالة طويل جداً.",
+		)
+
+	# A reply to a message that forbids them is refused here rather than only
+	# hidden in the screen: the button is gone, but the endpoint is still
+	# reachable by anyone who wants to try.
+	reply_to = data.get("reply_to")
+	if reply_to and cint(frappe.db.get_value("MS Message", reply_to, "no_reply")):
+		return fail(
+			message_en="This message does not accept replies.",
+			message_ar="هذه الرسالة لا تقبل الردود.",
 		)
 
 	if message:
@@ -441,6 +514,21 @@ def save_message(payload: str | dict = None, persona: str = None):
 	doc.subject = subject or "(بلا عنوان)"
 	doc.body = body
 	doc.is_draft = 1 if as_draft else 0
+	doc.no_reply = 1 if cint(data.get("no_reply")) else 0
+	doc.copy_guardians = 1 if cint(data.get("copy_guardians")) else 0
+
+	# A send date in the past is a send now, not an error: the sender meant
+	# "go", and refusing over a minute's clock drift helps nobody.
+	scheduled = (data.get("scheduled_for") or "").strip() or None
+	if scheduled and get_datetime(scheduled) <= get_datetime(now()):
+		scheduled = None
+	if scheduled and get_datetime(scheduled) > add_to_date(get_datetime(now()), years=1):
+		return fail(
+			message_en="A message cannot be scheduled more than a year ahead.",
+			message_ar="لا يمكن جدولة رسالة لأكثر من سنة مقدماً.",
+		)
+	doc.scheduled_for = scheduled if not as_draft else None
+	doc.is_scheduled = 1 if doc.scheduled_for else 0
 	doc.about_student = data.get("about_student")
 	doc.reply_to = data.get("reply_to")
 
@@ -480,12 +568,10 @@ def save_message(payload: str | dict = None, persona: str = None):
 		pairs[0][0] if pairs else None
 	)
 
-	if not as_draft:
+	# A scheduled message has not been sent yet, so it carries no sent time —
+	# that is what keeps it out of the recipients' folders until it is due.
+	if not as_draft and not doc.scheduled_for:
 		doc.sent_on = now()
-	if not doc.ms_academic_year:
-		doc.ms_academic_year = get_default_academic_year()
-	if not doc.ms_academic_term:
-		doc.ms_academic_term = get_default_academic_term()
 
 	doc.save(ignore_permissions=True)
 	if not doc.thread and not doc.reply_to:
@@ -494,25 +580,77 @@ def save_message(payload: str | dict = None, persona: str = None):
 	# The child rows carry the delivery state, so they are (re)created for a
 	# real send. A draft has none: nothing has been delivered.
 	frappe.db.delete("MS Message Recipient", {"message": doc.name})
-	if not as_draft:
-		for user, kind in pairs:
-			frappe.get_doc(
-				{
-					"doctype": "MS Message Recipient",
-					"message": doc.name,
-					"user": user,
-					"kind": kind,
-					"is_read": 0,
-				}
-			).insert(ignore_permissions=True)
+	if not as_draft and not doc.scheduled_for:
+		_deliver(doc, pairs)
+
+	# A scheduled message keeps its resolved recipients so the audience is
+	# fixed at the moment of writing. Re-resolving at send time would let a
+	# class list that changed in between quietly redirect the message.
+	if doc.scheduled_for:
+		_hold(doc, pairs)
 
 	frappe.db.commit()
+
+	if as_draft:
+		return {
+			"success": True,
+			"data": {"id": doc.name, "is_draft": True, "recipients": len(pairs)},
+			"message_en": "Draft saved.",
+			"message_ar": "تم حفظ المسودة.",
+		}
+	if doc.scheduled_for:
+		when = str(doc.scheduled_for)[:16]
+		return {
+			"success": True,
+			"data": {
+				"id": doc.name,
+				"is_draft": False,
+				"scheduled_for": str(doc.scheduled_for),
+				"recipients": len(pairs),
+			},
+			"message_en": f"Scheduled for {when} to {len(pairs)} recipient(s).",
+			"message_ar": f"تمت جدولتها في {when} إلى {len(pairs)} مستلماً.",
+		}
 	return {
 		"success": True,
-		"data": {"id": doc.name, "is_draft": bool(as_draft), "recipients": len(pairs)},
-		"message_en": "Draft saved." if as_draft else f"Sent to {len(pairs)} recipient(s).",
-		"message_ar": "تم حفظ المسودة." if as_draft else f"أُرسلت إلى {len(pairs)} مستلماً.",
+		"data": {"id": doc.name, "is_draft": False, "recipients": len(pairs)},
+		"message_en": f"Sent to {len(pairs)} recipient(s).",
+		"message_ar": f"أُرسلت إلى {len(pairs)} مستلماً.",
 	}
+
+
+def _deliver(doc, pairs: list[tuple[str, str]]) -> None:
+	"""Put one copy in each recipient's mailbox."""
+	for user, kind in pairs:
+		frappe.get_doc(
+			{
+				"doctype": "MS Message Recipient",
+				"message": doc.name,
+				"user": user,
+				"kind": kind,
+				"is_read": 0,
+				"is_pending": 0,
+			}
+		).insert(ignore_permissions=True)
+
+
+def _hold(doc, pairs: list[tuple[str, str]]) -> None:
+	"""Store the resolved recipients of a scheduled message, undelivered.
+
+	The rows are marked pending so every mailbox query skips them: the message
+	exists, addressed and fixed, but has not arrived.
+	"""
+	for user, kind in pairs:
+		frappe.get_doc(
+			{
+				"doctype": "MS Message Recipient",
+				"message": doc.name,
+				"user": user,
+				"kind": kind,
+				"is_read": 0,
+				"is_pending": 1,
+			}
+		).insert(ignore_permissions=True)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -821,3 +959,363 @@ def upload_attachment(persona: str = None):
 		"message_en": "File uploaded.",
 		"message_ar": "تم رفع الملف.",
 	}
+
+
+# ---------------------------------------------------------------------------
+# Scheduled sending
+# ---------------------------------------------------------------------------
+
+
+def deliver_due_messages():
+	"""Release scheduled messages whose time has come.
+
+	Runs on the scheduler. Each message is committed on its own: one bad row
+	must not hold back the rest of the batch, and a message that has already
+	been released must never be released twice — the recipient rows are
+	flipped in one statement and the flag cleared with them.
+	"""
+	due = frappe.get_all(
+		"MS Message",
+		filters={
+			"is_scheduled": 1,
+			"is_draft": 0,
+			"scheduled_for": ["<=", now()],
+		},
+		pluck="name",
+		limit_page_length=200,
+	)
+
+	for name in due:
+		try:
+			doc = frappe.get_doc("MS Message", name)
+			frappe.db.set_value(
+				"MS Message",
+				name,
+				{"is_scheduled": 0, "sent_on": doc.scheduled_for or now(), "send_failed_reason": None},
+				update_modified=False,
+			)
+			frappe.db.sql(
+				"""update `tabMS Message Recipient`
+				      set is_pending = 0
+				    where message = %s and is_pending = 1""",
+				name,
+			)
+			frappe.db.commit()
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(
+				title="تعذّر إرسال رسالة مجدولة", message=f"{name}\n{frappe.get_traceback()}"
+			)
+			frappe.db.set_value(
+				"MS Message",
+				name,
+				"send_failed_reason", "تعذّر الإرسال — يرجى مراجعة الرسالة.",
+				update_modified=False,
+			)
+			frappe.db.commit()
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*ALL_ROLES)
+def cancel_schedule(message: str = None, persona: str = None):
+	"""Pull a scheduled message back before it goes out.
+
+	It returns to drafts rather than vanishing: the sender wrote it, and the
+	usual reason for cancelling is to change something and send it again.
+	"""
+	if not message:
+		return fail(message_en="A message is required.", message_ar="يجب تحديد الرسالة.")
+
+	doc = frappe.get_doc("MS Message", message)
+	if doc.sender != frappe.session.user:
+		frappe.throw(_("This message is not yours."), frappe.PermissionError)
+	if not cint(doc.is_scheduled):
+		return fail(
+			message_en="This message is not scheduled.",
+			message_ar="هذه الرسالة غير مجدولة.",
+		)
+
+	frappe.db.delete("MS Message Recipient", {"message": doc.name})
+	doc.db_set(
+		{"is_scheduled": 0, "scheduled_for": None, "is_draft": 1, "sent_on": None},
+		update_modified=False,
+	)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"id": doc.name},
+		"message_en": "Moved back to drafts.",
+		"message_ar": "أُعيدت إلى المسودات.",
+	}
+
+
+# ---------------------------------------------------------------------------
+# Who will actually receive this
+# ---------------------------------------------------------------------------
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*ALL_ROLES)
+def preview_recipients(payload: str | dict = None, persona: str = None):
+	"""The exact list this message would go to, before it is sent.
+
+	An audience is a promise the sender cannot check by eye — "guardians of my
+	classes" could be nine people or ninety, and the guardian copy adds names
+	nobody typed. Resolved through the same function that the send uses, so
+	what is shown here is what would actually be delivered, not a second
+	implementation that can drift from it.
+	"""
+	data = frappe.parse_json(payload) if isinstance(payload, str) else (payload or {})
+
+	pairs, error = _resolve_recipients(persona, data)
+	if error:
+		return fail(message_en="Recipient not allowed.", message_ar=error)
+
+	users = [u for u, _k in pairs]
+	kinds = dict((u, k) for u, k in pairs)
+	if not users:
+		return {"recipients": [], "total": 0, "groups": []}
+
+	rows = frappe.get_all(
+		"User",
+		filters={"name": ["in", users]},
+		fields=["name", "full_name", "enabled"],
+		limit_page_length=0,
+	)
+	by_name = {r.name: r for r in rows}
+
+	# Which kind of person each account belongs to, so the sender can see
+	# "28 guardians, 3 teachers" rather than a wall of email addresses.
+	students = {
+		r.user: r.student_name
+		for r in frappe.get_all(
+			"Student", filters={"user": ["in", users]}, fields=["user", "student_name"]
+		)
+		if r.user
+	}
+	guardians = {
+		r.user: r.guardian_name
+		for r in frappe.get_all(
+			"Guardian", filters={"user": ["in", users]}, fields=["user", "guardian_name"]
+		)
+		if r.user
+	}
+
+	out = []
+	tally = {"student": 0, "guardian": 0, "staff": 0, "disabled": 0}
+	for user in users:
+		info = by_name.get(user)
+		if user in students:
+			kind, label = "student", students[user]
+		elif user in guardians:
+			kind, label = "guardian", guardians[user]
+		else:
+			kind, label = "staff", (info.full_name if info else user)
+		tally[kind] += 1
+		enabled = bool(info and info.enabled)
+		if not enabled:
+			tally["disabled"] += 1
+		out.append(
+			{
+				"user": user,
+				"name": label or user,
+				"kind": kind,
+				"copy": kinds.get(user, "to"),
+				"enabled": enabled,
+			}
+		)
+
+	out.sort(key=lambda r: (r["kind"], r["name"] or ""))
+	groups = [
+		{"kind": "student", "label": "طلاب", "count": tally["student"]},
+		{"kind": "guardian", "label": "أولياء أمور", "count": tally["guardian"]},
+		{"kind": "staff", "label": "موظفون", "count": tally["staff"]},
+	]
+	return {
+		"recipients": out,
+		"total": len(out),
+		"groups": [g for g in groups if g["count"]],
+		"disabled": tally["disabled"],
+	}
+
+
+# ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+
+# Filled in when a template is applied. Deliberately short and obvious: a
+# teacher types these by hand, so anything longer would not be used.
+PLACEHOLDERS = {
+	"{اسم_الطالب}": "student_name",
+	"{اسم_الصف}": "group_name",
+	"{اسم_المادة}": "course_name",
+	"{اسم_المرسل}": "sender_name",
+	"{التاريخ}": "today",
+}
+
+
+@frappe.whitelist()
+@ms_endpoint(*ALL_ROLES)
+def list_templates(category: str = None, persona: str = None):
+	"""The caller's own templates, plus the ones colleagues have shared."""
+	user = frappe.session.user
+	filters = [["MS Mail Template", "owner_user", "=", user]]
+
+	mine = frappe.get_all(
+		"MS Mail Template",
+		filters={"owner_user": user},
+		fields=["name", "title", "category", "subject", "body", "is_shared", "use_count"],
+		order_by="use_count desc, modified desc",
+		limit_page_length=0,
+	)
+	shared = frappe.get_all(
+		"MS Mail Template",
+		filters={"is_shared": 1, "owner_user": ["!=", user]},
+		fields=[
+			"name", "title", "category", "subject", "body", "is_shared",
+			"use_count", "owner_user",
+		],
+		order_by="use_count desc, modified desc",
+		limit_page_length=0,
+	)
+
+	names = {r.owner_user for r in shared}
+	full = (
+		{
+			r.name: r.full_name
+			for r in frappe.get_all(
+				"User", filters={"name": ["in", list(names)]}, fields=["name", "full_name"]
+			)
+		}
+		if names
+		else {}
+	)
+
+	out = []
+	for r in mine:
+		out.append({**r, "mine": True, "owner_name": None})
+	for r in shared:
+		out.append({**r, "mine": False, "owner_name": full.get(r.owner_user) or r.owner_user})
+
+	if category:
+		out = [r for r in out if r.get("category") == category]
+
+	return {
+		"templates": out,
+		"placeholders": [{"token": k, "field": v} for k, v in PLACEHOLDERS.items()],
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*ALL_ROLES)
+def save_template(payload: str | dict = None, persona: str = None):
+	"""Create or update one of the caller's own templates."""
+	data = frappe.parse_json(payload) if isinstance(payload, str) else (payload or {})
+	title = (data.get("title") or "").strip()
+	if not title:
+		return fail(message_en="A name is required.", message_ar="اسم القالب مطلوب.")
+
+	body = data.get("body") or ""
+	if len(body) > MAX_BODY:
+		return fail(message_en="The template is too long.", message_ar="نص القالب طويل جداً.")
+
+	name = data.get("template")
+	if name:
+		doc = frappe.get_doc("MS Mail Template", name)
+		# Shared means readable, never editable: a colleague's template is
+		# theirs, and a copy is what the reader actually wants.
+		if doc.owner_user != frappe.session.user:
+			frappe.throw(_("This template is not yours."), frappe.PermissionError)
+	else:
+		if frappe.db.count("MS Mail Template", {"owner_user": frappe.session.user}) >= 100:
+			return fail(
+				message_en="You already have 100 templates.",
+				message_ar="لديك 100 قالب بالفعل — احذف واحداً قبل إضافة غيره.",
+			)
+		doc = frappe.new_doc("MS Mail Template")
+		doc.owner_user = frappe.session.user
+
+	doc.title = title[:140]
+	doc.category = data.get("category") or "عام"
+	doc.subject = (data.get("subject") or "").strip()[:MAX_SUBJECT]
+	doc.body = body
+	doc.is_shared = 1 if cint(data.get("is_shared")) else 0
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	return {
+		"success": True,
+		"data": {"id": doc.name},
+		"message_en": "Template saved.",
+		"message_ar": "تم حفظ القالب.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*ALL_ROLES)
+def delete_template(template: str = None, persona: str = None):
+	"""Remove one of the caller's own templates."""
+	if not template:
+		return fail(message_en="A template is required.", message_ar="يجب تحديد القالب.")
+
+	doc = frappe.get_doc("MS Mail Template", template)
+	if doc.owner_user != frappe.session.user:
+		frappe.throw(_("This template is not yours."), frappe.PermissionError)
+
+	frappe.delete_doc("MS Mail Template", template, ignore_permissions=True)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {},
+		"message_en": "Template deleted.",
+		"message_ar": "تم حذف القالب.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*ALL_ROLES)
+def apply_template(
+	template: str = None, student: str = None, student_group: str = None,
+	course: str = None, persona: str = None,
+):
+	"""A template with its placeholders filled in for this context.
+
+	Substitution happens on the server so the tokens have one meaning. Doing
+	it in the browser would leave `{اسم_الطالب}` in the sent copy whenever a
+	screen forgot to run the same replacement.
+	"""
+	if not template:
+		return fail(message_en="A template is required.", message_ar="يجب تحديد القالب.")
+
+	doc = frappe.get_doc("MS Mail Template", template)
+	if doc.owner_user != frappe.session.user and not cint(doc.is_shared):
+		frappe.throw(_("This template is not shared with you."), frappe.PermissionError)
+
+	values = {
+		"{اسم_الطالب}": (
+			frappe.db.get_value("Student", student, "student_name") if student else ""
+		) or "",
+		"{اسم_الصف}": (
+			frappe.db.get_value("Student Group", student_group, "student_group_name")
+			if student_group
+			else ""
+		) or "",
+		"{اسم_المادة}": (
+			frappe.db.get_value("Course", course, "course_name") if course else ""
+		) or "",
+		"{اسم_المرسل}": _display_name(frappe.session.user),
+		"{التاريخ}": frappe.utils.formatdate(frappe.utils.today(), "dd/MM/yyyy"),
+	}
+
+	subject, body = doc.subject or "", doc.body or ""
+	for token, value in values.items():
+		subject = subject.replace(token, value)
+		body = body.replace(token, value)
+
+	frappe.db.set_value(
+		"MS Mail Template", doc.name, "use_count", cint(doc.use_count) + 1,
+		update_modified=False,
+	)
+	frappe.db.commit()
+
+	return {"subject": subject, "body": body, "title": doc.title}

@@ -26,13 +26,18 @@
   "is_draft",
   "sender_deleted",
   "sender_archived",
-  "ms_academic_year",
-  "ms_academic_term",
   "section_context",
   "about_student",
   "sec_period",
   "academic_year",
-  "academic_term"
+  "academic_term",
+  "sec_delivery",
+  "no_reply",
+  "copy_guardians",
+  "column_break_delivery",
+  "scheduled_for",
+  "is_scheduled",
+  "send_failed_reason"
  ],
  "fields": [
   {
@@ -147,20 +152,6 @@
    "label": "Archived by sender"
   },
   {
-   "fieldname": "ms_academic_year",
-   "fieldtype": "Link",
-   "label": "Academic Year",
-   "options": "Academic Year",
-   "read_only": 1
-  },
-  {
-   "fieldname": "ms_academic_term",
-   "fieldtype": "Link",
-   "label": "Academic Term",
-   "options": "Academic Term",
-   "read_only": 1
-  },
-  {
    "fieldname": "audience_key",
    "fieldtype": "Data",
    "label": "Audience",
@@ -196,6 +187,46 @@
    "label": "الفصل الدراسي",
    "options": "Academic Term",
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "sec_delivery",
+   "fieldtype": "Section Break",
+   "label": "الإرسال"
+  },
+  {
+   "fieldname": "no_reply",
+   "fieldtype": "Check",
+   "label": "منع الرد على الرسالة",
+   "default": "0"
+  },
+  {
+   "fieldname": "copy_guardians",
+   "fieldtype": "Check",
+   "label": "إرسال نسخة لأولياء الأمور",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_break_delivery",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "scheduled_for",
+   "fieldtype": "Datetime",
+   "label": "موعد الإرسال",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "is_scheduled",
+   "fieldtype": "Check",
+   "label": "مجدولة",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "send_failed_reason",
+   "fieldtype": "Small Text",
+   "label": "سبب تعذّر الإرسال",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,

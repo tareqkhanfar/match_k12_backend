@@ -18,7 +18,8 @@
   "is_deleted",
   "sec_period",
   "academic_year",
-  "academic_term"
+  "academic_term",
+  "is_pending"
  ],
  "fields": [
   {
@@ -96,6 +97,13 @@
    "fieldtype": "Link",
    "label": "الفصل الدراسي",
    "options": "Academic Term",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "is_pending",
+   "fieldtype": "Check",
+   "label": "لم تُسلَّم بعد",
+   "default": "0",
    "in_standard_filter": 1
   }
  ],
