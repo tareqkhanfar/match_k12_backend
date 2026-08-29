@@ -19,6 +19,12 @@
   "body",
   "attachment",
   "files",
+  "reply_to",
+  "is_draft",
+  "sender_deleted",
+  "sender_archived",
+  "ms_academic_year",
+  "ms_academic_term",
   "section_context",
   "about_student"
  ],
@@ -109,6 +115,44 @@
    "fieldtype": "Table",
    "label": "المرفقات / Attachments",
    "options": "MS Attachment"
+  },
+  {
+   "fieldname": "reply_to",
+   "fieldtype": "Link",
+   "label": "In reply to",
+   "options": "MS Message"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_draft",
+   "fieldtype": "Check",
+   "label": "Draft"
+  },
+  {
+   "default": "0",
+   "fieldname": "sender_deleted",
+   "fieldtype": "Check",
+   "label": "Deleted by sender"
+  },
+  {
+   "default": "0",
+   "fieldname": "sender_archived",
+   "fieldtype": "Check",
+   "label": "Archived by sender"
+  },
+  {
+   "fieldname": "ms_academic_year",
+   "fieldtype": "Link",
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ms_academic_term",
+   "fieldtype": "Link",
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
