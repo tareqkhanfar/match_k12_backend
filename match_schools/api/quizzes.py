@@ -20,6 +20,7 @@ from frappe import _
 from frappe.utils import cint, flt, get_datetime, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -126,6 +127,8 @@ def list_quizzes(
 		filters["course"] = course
 	if status and persona not in (ROLE_STUDENT, ROLE_PARENT):
 		filters["status"] = status
+
+	apply_period(filters, "MS Quiz")
 
 	total = frappe.db.count("MS Quiz", filters)
 	page, page_size, offset = paginate(page, page_size)

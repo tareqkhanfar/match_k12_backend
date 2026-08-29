@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	period_conditions,
 	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -206,6 +207,7 @@ def list_loans(
 		params["search"] = f"%{filters.pop('search')}%"
 
 	conditions += build_conditions(filters, LOAN_FILTERS, params)
+	period_conditions("MS Book Loan", conditions, params)
 	where = " AND ".join(conditions)
 	order_by = build_order_by(sort_field, sort_order, LOAN_FILTERS, "issue_date DESC")
 
@@ -451,6 +453,10 @@ def list_transport_assignments(
 	if filters.get("active") not in (None, ""):
 		conditions.append("active = %(active)s")
 		params["active"] = cint(filters["active"])
+
+	# A bus seat is allocated for a year: the term is not part of the filter,
+	# or a pupil would vanish from the route list halfway through the year.
+	period_conditions("MS Transport Assignment", conditions, params, by_term=False)
 
 	where = " AND ".join(conditions)
 	total = frappe.db.sql(

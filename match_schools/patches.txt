@@ -23,3 +23,4 @@ match_schools.patches.add_instructor_user_link
 match_schools.patches.add_program_promotion
 match_schools.patches.anchor_records_to_term
 match_schools.patches.add_performance_indexes
+match_schools.patches.stamp_existing_periods

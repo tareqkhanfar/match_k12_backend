@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, flt, today
 
 from match_schools.api.utils import (
+	period_conditions,
 	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -254,6 +255,7 @@ def list_behaviour(
 		params["search"] = f"%{filters.pop('search')}%"
 
 	conditions += build_conditions(filters, BEHAVIOUR_FILTERS, params)
+	period_conditions("MS Behaviour Record", conditions, params)
 	where = " AND ".join(conditions)
 
 	order_by = build_order_by(

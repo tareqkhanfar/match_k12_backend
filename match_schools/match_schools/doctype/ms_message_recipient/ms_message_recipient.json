@@ -1,23 +1,121 @@
 {
- "actions": [], "allow_rename": 0, "autoname": "hash",
- "creation": "2026-08-29 00:00:00", "doctype": "DocType",
- "editable_grid": 0, "engine": "InnoDB",
- "field_order": ["message", "user", "kind", "column_break_1",
-   "is_read", "read_on", "is_archived", "is_starred", "is_deleted"],
- "fields": [
-  {"fieldname": "message", "fieldtype": "Link", "in_list_view": 1, "label": "Message", "options": "MS Message", "reqd": 1},
-  {"fieldname": "user", "fieldtype": "Link", "in_list_view": 1, "label": "User", "options": "User", "reqd": 1},
-  {"fieldname": "kind", "fieldtype": "Select", "in_list_view": 1, "label": "Kind", "options": "to\ncc\nbcc", "default": "to", "reqd": 1},
-  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
-  {"default": "0", "fieldname": "is_read", "fieldtype": "Check", "label": "Read"},
-  {"fieldname": "read_on", "fieldtype": "Datetime", "label": "Read on"},
-  {"default": "0", "fieldname": "is_archived", "fieldtype": "Check", "label": "Archived"},
-  {"default": "0", "fieldname": "is_starred", "fieldtype": "Check", "label": "Starred"},
-  {"default": "0", "fieldname": "is_deleted", "fieldtype": "Check", "label": "In trash"}
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-29 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "message",
+  "user",
+  "kind",
+  "column_break_1",
+  "is_read",
+  "read_on",
+  "is_archived",
+  "is_starred",
+  "is_deleted",
+  "sec_period",
+  "academic_year",
+  "academic_term"
  ],
- "index_web_pages_for_search": 0, "links": [],
- "modified": "2026-08-29 00:00:00", "modified_by": "Administrator",
- "module": "Match Schools", "name": "MS Message Recipient", "owner": "Administrator",
- "permissions": [{"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}],
- "sort_field": "creation", "sort_order": "DESC", "states": []
+ "fields": [
+  {
+   "fieldname": "message",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Message",
+   "options": "MS Message",
+   "reqd": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Kind",
+   "options": "to\ncc\nbcc",
+   "default": "to",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_read",
+   "fieldtype": "Check",
+   "label": "Read"
+  },
+  {
+   "fieldname": "read_on",
+   "fieldtype": "Datetime",
+   "label": "Read on"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_archived",
+   "fieldtype": "Check",
+   "label": "Archived"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_starred",
+   "fieldtype": "Check",
+   "label": "Starred"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_deleted",
+   "fieldtype": "Check",
+   "label": "In trash"
+  },
+  {
+   "fieldname": "sec_period",
+   "fieldtype": "Section Break",
+   "label": "الفترة الدراسية"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل الدراسي",
+   "options": "Academic Term",
+   "in_standard_filter": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-29 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Message Recipient",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
 }

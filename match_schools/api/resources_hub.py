@@ -14,6 +14,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -132,6 +133,8 @@ def list_resources(
 		filters["resource_type"] = resource_type
 	if search:
 		filters["title"] = ["like", f"%{search}%"]
+
+	apply_period(filters, "MS Resource")
 
 	rows = frappe.get_all(
 		"MS Resource",

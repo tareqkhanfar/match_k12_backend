@@ -138,6 +138,13 @@ after_migrate = "match_schools.setup.install.after_install"
 # endpoint so it holds for the ERPNext desk and imports too — an accounting
 # rule that only applies on one path is not a rule.
 doc_events = {
+	# Every MS record is stamped with the year and term it belongs to before
+	# it is written. Hooked on "*" rather than on a list of doctypes because a
+	# list is what rots: the next doctype someone adds is stamped too, without
+	# them having to know this file exists.
+	"*": {
+		"before_insert": "match_schools.academic_stamp.stamp",
+	},
 	"Sales Invoice": {
 		"validate": "match_schools.ms_billing.validate_student_invoice",
 	},

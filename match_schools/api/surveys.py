@@ -14,6 +14,7 @@ from frappe import _
 from frappe.utils import cint, flt, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	anchor_term,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -180,6 +181,8 @@ def list_surveys(status: str = None, persona: str = None):
 		filters["status"] = "Open"
 	elif status:
 		filters["status"] = status
+
+	apply_period(filters, "MS Survey")
 
 	rows = frappe.get_all(
 		"MS Survey",

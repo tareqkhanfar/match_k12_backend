@@ -25,7 +25,10 @@
   "column_break_grading",
   "graded_by",
   "graded_on",
-  "feedback"
+  "feedback",
+  "sec_period",
+  "academic_year",
+  "academic_term"
  ],
  "fields": [
   {
@@ -145,6 +148,25 @@
    "fieldtype": "Table",
    "label": "المرفقات / Attachments",
    "options": "MS Attachment"
+  },
+  {
+   "fieldname": "sec_period",
+   "fieldtype": "Section Break",
+   "label": "الفترة الدراسية"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل الدراسي",
+   "options": "Academic Term",
+   "in_standard_filter": 1
   }
  ],
  "index_web_pages_for_search": 1,

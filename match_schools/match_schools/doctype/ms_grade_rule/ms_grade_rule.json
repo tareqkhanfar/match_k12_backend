@@ -18,21 +18,98 @@
   "section_break_1",
   "set_by",
   "set_on",
-  "notes"
+  "notes",
+  "sec_period",
+  "academic_year"
  ],
  "fields": [
-  {"fieldname": "student_group", "fieldtype": "Link", "options": "Student Group", "label": "Class", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "course", "fieldtype": "Link", "options": "Course", "label": "Course", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "academic_term", "fieldtype": "Link", "options": "Academic Term", "label": "Academic Term"},
-  {"fieldname": "quarter", "fieldtype": "Data", "label": "Quarter", "in_list_view": 1},
-  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
-  {"fieldname": "category", "fieldtype": "Data", "label": "Category", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "count_mode", "fieldtype": "Select", "options": "all\nbest\ndrop_lowest", "default": "all", "label": "How to count", "reqd": 1},
-  {"fieldname": "count_n", "fieldtype": "Int", "label": "N", "description": "For 'best N', how many of the assessments count."},
-  {"fieldname": "section_break_1", "fieldtype": "Section Break"},
-  {"fieldname": "set_by", "fieldtype": "Link", "options": "User", "label": "Set by", "read_only": 1},
-  {"fieldname": "set_on", "fieldtype": "Datetime", "label": "Set on", "read_only": 1},
-  {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"}
+  {
+   "fieldname": "student_group",
+   "fieldtype": "Link",
+   "options": "Student Group",
+   "label": "Class",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "options": "Course",
+   "label": "Course",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "options": "Academic Term",
+   "label": "Academic Term"
+  },
+  {
+   "fieldname": "quarter",
+   "fieldtype": "Data",
+   "label": "Quarter",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Data",
+   "label": "Category",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "count_mode",
+   "fieldtype": "Select",
+   "options": "all\nbest\ndrop_lowest",
+   "default": "all",
+   "label": "How to count",
+   "reqd": 1
+  },
+  {
+   "fieldname": "count_n",
+   "fieldtype": "Int",
+   "label": "N",
+   "description": "For 'best N', how many of the assessments count."
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "set_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Set by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "set_on",
+   "fieldtype": "Datetime",
+   "label": "Set on",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "sec_period",
+   "fieldtype": "Section Break",
+   "label": "الفترة الدراسية"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year",
+   "in_standard_filter": 1
+  }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
@@ -42,7 +119,13 @@
  "name": "MS Grade Rule",
  "owner": "Administrator",
  "permissions": [
-  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",

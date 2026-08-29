@@ -22,7 +22,10 @@
   "parent_notified",
   "sec_notes",
   "description",
-  "action_taken"
+  "action_taken",
+  "sec_period",
+  "academic_year",
+  "academic_term"
  ],
  "fields": [
   {
@@ -126,6 +129,25 @@
    "fieldname": "action_taken",
    "fieldtype": "Small Text",
    "label": "Action Taken"
+  },
+  {
+   "fieldname": "sec_period",
+   "fieldtype": "Section Break",
+   "label": "الفترة الدراسية"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل الدراسي",
+   "options": "Academic Term",
+   "in_standard_filter": 1
   }
  ],
  "index_web_pages_for_search": 1,

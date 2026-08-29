@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_STUDENT,
@@ -40,6 +41,7 @@ def list_announcements(limit: int = 25, persona: str = None):
 
 	audiences = AUDIENCE_FOR_PERSONA.get(persona, ["All"])
 	filters = {"published": 1, "audience": ["in", audiences]}
+	apply_period(filters, "MS Announcement")
 
 	rows = frappe.get_all(
 		"MS Announcement",

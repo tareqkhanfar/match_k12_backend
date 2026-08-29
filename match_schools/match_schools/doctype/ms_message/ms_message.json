@@ -29,7 +29,10 @@
   "ms_academic_year",
   "ms_academic_term",
   "section_context",
-  "about_student"
+  "about_student",
+  "sec_period",
+  "academic_year",
+  "academic_term"
  ],
  "fields": [
   {
@@ -174,6 +177,25 @@
    "fieldtype": "Small Text",
    "label": "Audience classes",
    "read_only": 1
+  },
+  {
+   "fieldname": "sec_period",
+   "fieldtype": "Section Break",
+   "label": "الفترة الدراسية"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "السنة الدراسية",
+   "options": "Academic Year",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل الدراسي",
+   "options": "Academic Term",
+   "in_standard_filter": 1
   }
  ],
  "index_web_pages_for_search": 1,

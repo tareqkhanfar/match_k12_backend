@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import flt, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	anchor_term,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -70,6 +71,10 @@ def list_assignments(
 		filters["course"] = course
 	if status:
 		filters["status"] = status
+
+	# Without this every year's homework arrives in one list and the header's
+	# period switcher does nothing on this screen.
+	apply_period(filters, "MS Assignment")
 
 	rows = frappe.get_all(
 		"MS Assignment",

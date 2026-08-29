@@ -549,3 +549,64 @@ def audience_filter(persona: str) -> dict:
 	if persona == ROLE_TEACHER:
 		return {"ms_audience": ["in", ["teachers", "all"]]}
 	return {"ms_audience": "all"}
+
+
+def apply_period(
+	filters: dict,
+	doctype: str,
+	academic_year: str | None = None,
+	academic_term: str | None = None,
+	by_term: bool = True,
+) -> dict:
+	"""Narrow a query to the period the user has selected in the header.
+
+	Screens that skip this show every year's records at once — last year's
+	assignments among this year's, a behaviour count that never resets. The
+	caller may pass an explicit year or term (a report over a chosen term);
+	otherwise the header's selection applies.
+
+	A record whose term is blank is kept: some records belong to a whole year
+	rather than to one term, and dropping them would make a screen emptier
+	than the data actually is.
+	"""
+	meta = frappe.get_meta(doctype)
+
+	if meta.has_field("academic_year"):
+		year = academic_year or get_default_academic_year()
+		if year:
+			filters["academic_year"] = year
+
+	if by_term and meta.has_field("academic_term"):
+		term = academic_term or get_default_academic_term()
+		if term:
+			filters["academic_term"] = ["in", [term, "", None]]
+
+	return filters
+
+
+def period_conditions(
+	doctype: str,
+	conditions: list,
+	params: dict,
+	by_term: bool = True,
+	academic_year: str | None = None,
+	academic_term: str | None = None,
+) -> None:
+	"""`apply_period` for the screens that build their WHERE clause by hand.
+
+	Appends to `conditions` and `params` in place. A blank term is kept for
+	the same reason as in `apply_period`: some records span the whole year.
+	"""
+	meta = frappe.get_meta(doctype)
+
+	if meta.has_field("academic_year"):
+		year = academic_year or get_default_academic_year()
+		if year:
+			conditions.append("academic_year = %(ms_period_year)s")
+			params["ms_period_year"] = year
+
+	if by_term and meta.has_field("academic_term"):
+		term = academic_term or get_default_academic_term()
+		if term:
+			conditions.append("ifnull(academic_term, '') IN (%(ms_period_term)s, '')")
+			params["ms_period_term"] = term

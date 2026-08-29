@@ -18,6 +18,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	anchor_term,
 	hhmm,
 	BACK_OFFICE,
@@ -142,6 +143,8 @@ def list_activities(
 	# Students and parents never see something still being planned.
 	if persona in (ROLE_STUDENT, ROLE_PARENT):
 		filters["status"] = ["in", ["Open", "Closed", "Completed"]]
+
+	apply_period(filters, "MS Activity")
 
 	total = frappe.db.count("MS Activity", filters)
 	page, page_size, offset = paginate(page, page_size)
