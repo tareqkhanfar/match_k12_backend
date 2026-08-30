@@ -207,7 +207,7 @@ def day_slots(student_group: str = None, date: str = None, persona: str = None):
 		groups = _my_groups(persona)
 		if groups is not None:
 			if not groups:
-				return {"date": date, "day": weekday, "slots": []}
+				return {"date": date, "day": weekday, "slots": [], "logged": 0}
 			filters["student_group"] = ["in", groups]
 
 	if persona == ROLE_TEACHER:
@@ -225,8 +225,10 @@ def day_slots(student_group: str = None, date: str = None, persona: str = None):
 		order_by="period_order",
 		limit_page_length=0,
 	)
+	# The same shape whether or not there are lessons: a caller reading
+	# `logged` should not get a number on some days and nothing on others.
 	if not slots:
-		return {"date": date, "day": weekday, "slots": []}
+		return {"date": date, "day": weekday, "slots": [], "logged": 0}
 
 	logged = {
 		r.timetable_slot: r.name
@@ -257,6 +259,12 @@ def day_slots(student_group: str = None, date: str = None, persona: str = None):
 		)
 	}
 
+	# A log written without picking a slot is matched to one lesson only, and
+	# then taken out of the pool. Leaving it in marked every period of that
+	# subject as documented — so a teacher who wrote up one of their three
+	# maths lessons was told all three were done.
+	unclaimed = [x for x in loose if not x.timetable_slot]
+
 	out = []
 	for s in slots:
 		log = logged.get(s.name)
@@ -264,13 +272,13 @@ def day_slots(student_group: str = None, date: str = None, persona: str = None):
 			match = next(
 				(
 					x
-					for x in loose
-					if not x.timetable_slot
-					and x.student_group == s.student_group
-					and x.course == s.course
+					for x in unclaimed
+					if x.student_group == s.student_group and x.course == s.course
 				),
 				None,
 			)
+			if match:
+				unclaimed.remove(match)
 			log = match.name if match else None
 		out.append(
 			{

@@ -88,7 +88,7 @@ def _build_feed(persona: str, limit: int = 30, unread_only: int = 0) -> dict:
 			items += _student_items(student, since)
 	elif persona == ROLE_PARENT:
 		for student in scope.get("students") or []:
-			items += _student_items(student, since, prefix_name=True)
+			items += _student_items(student, since, prefix_name=True, for_guardian=True)
 	elif persona == ROLE_TEACHER:
 		items += _teacher_items(scope, since)
 	elif persona in BACK_OFFICE:
@@ -225,7 +225,9 @@ def _announcement_items(persona: str, since: str) -> list[dict]:
 	return items
 
 
-def _student_items(student: str, since: str, prefix_name: bool = False) -> list[dict]:
+def _student_items(
+	student: str, since: str, prefix_name: bool = False, for_guardian: bool = False
+) -> list[dict]:
 	"""Assignments due, new marks, absences and overdue fees for one student."""
 	items: list[dict] = []
 	name = ""
@@ -245,21 +247,23 @@ def _student_items(student: str, since: str, prefix_name: bool = False) -> list[
 		)
 	]
 	if groups:
+		from match_schools.api.assignments import assignments_for_groups, handed_in_pairs
+
 		horizon = add_days(today(), 7)
-		for a in frappe.get_all(
-			"MS Assignment",
-			filters={
-				"student_group": ["in", groups],
-				"status": "Open",
-				"due_date": ["between", [today(), horizon]],
-			},
-			fields=["name", "title", "course", "due_date"],
-			order_by="due_date",
-			limit=15,
-		):
-			if frappe.db.exists(
-				"MS Assignment Submission", {"assignment": a.name, "student": student}
-			):
+		# Read through the helper: it counts every section a piece of homework
+		# was set for, and leaves out drafts and work still waiting for its
+		# publish time — neither of which has reached this family.
+		upcoming = assignments_for_groups(
+			groups, {"status": "Open", "due_date": ["between", [today(), horizon]]}
+		)
+		upcoming.sort(key=lambda a: str(a.get("due_date") or ""))
+		done = handed_in_pairs([a.name for a in upcoming])
+
+		for a in upcoming[:15]:
+			# "Handed in", not "has a row": a row now exists from the moment
+			# the pupil opens the work, and treating that as done would drop
+			# the reminder for exactly the child who needs it.
+			if (a.name, student) in done:
 				continue
 			days_left = frappe.utils.date_diff(a.due_date, today())
 			items.append(
@@ -275,6 +279,40 @@ def _student_items(student: str, since: str, prefix_name: bool = False) -> list[
 					),
 					"time": str(a.due_date),
 					"tone": "danger" if days_left <= 1 else "warning",
+					"link": "/app/assignments",
+					"ref": a.name,
+				}
+			)
+
+	# Homework set recently, whenever it is due. The reminder above only fires
+	# in the last week before the deadline, so a piece of work set today and
+	# due in three weeks reached nobody — which is the opposite of "it must
+	# reach the pupil and their guardian".
+	if groups:
+		from match_schools.api.assignments import assignments_for_groups, handed_in_pairs
+
+		fresh = [
+			a
+			for a in assignments_for_groups(groups)
+			if str(a.get("assigned_on") or "") >= since
+		]
+		done = handed_in_pairs([a.name for a in fresh])
+		for a in sorted(fresh, key=lambda x: str(x.get("assigned_on") or ""), reverse=True)[:10]:
+			if (a.name, student) in done:
+				continue
+			# The teacher decides whether the family is told as well as the
+			# pupil; the switch on the homework is what says so.
+			if for_guardian and not cint(a.get("notify_guardians")):
+				continue
+			items.append(
+				{
+					"id": f"asgnew:{a.name}:{student}",
+					"category": "assignment",
+					"category_label": "واجب جديد",
+					"title": label(f"واجب جديد: {a.title}"),
+					"body": f"{a.course} — يستحق {a.due_date}",
+					"time": str(a.get("assigned_on") or a.due_date),
+					"tone": "info",
 					"link": "/app/assignments",
 					"ref": a.name,
 				}

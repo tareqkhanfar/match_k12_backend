@@ -1288,3 +1288,88 @@ def publish_due_assignments():
 			frappe.log_error(
 				title="تعذّر نشر واجب مجدول", message=f"{name}\n{frappe.get_traceback()}"
 			)
+
+
+# ---------------------------------------------------------------------------
+# What other modules must ask, rather than guessing
+# ---------------------------------------------------------------------------
+
+# A submission row now exists from the moment a pupil opens the homework, and
+# again when a teacher records a mark for work handed in on paper. So "a row
+# exists" no longer means "the work came in", and every count that meant the
+# second must say so. Getting this wrong is silent: the missing-homework alert
+# simply stops firing for a child who opened the page and did nothing.
+HANDED_IN_STATUSES = ("Submitted", "Late", "Graded", "Returned")
+
+
+def handed_in_pairs(assignments: list[str]) -> set[tuple[str, str]]:
+	"""(assignment, student) for work actually handed in — or marked on paper."""
+	if not assignments:
+		return set()
+	return {
+		(r.assignment, r.student)
+		for r in frappe.get_all(
+			"MS Assignment Submission",
+			filters={
+				"assignment": ["in", assignments],
+				"status": ["in", list(HANDED_IN_STATUSES)],
+			},
+			fields=["assignment", "student"],
+			limit_page_length=0,
+		)
+	}
+
+
+def has_handed_in(assignment: str, student: str) -> bool:
+	return bool(
+		frappe.db.exists(
+			"MS Assignment Submission",
+			{
+				"assignment": assignment,
+				"student": student,
+				"status": ["in", list(HANDED_IN_STATUSES)],
+			},
+		)
+	)
+
+
+def assignments_for_groups(groups: list[str], extra: dict | None = None) -> list[dict]:
+	"""Homework set for any of these classes, counting every section it went to.
+
+	A piece of homework set for three sections stores the first on the parent
+	record and all three in its table. Reading only the parent field hides it
+	from two thirds of the pupils it was actually set for.
+
+	Drafts and scheduled work are excluded: neither has reached anyone yet.
+	"""
+	if not groups:
+		return []
+
+	filters = {"is_published": 1, **(extra or {})}
+
+	direct = frappe.get_all(
+		"MS Assignment",
+		filters={**filters, "student_group": ["in", groups]},
+		fields=[
+			"name", "title", "course", "student_group", "due_date", "status",
+			"assigned_on", "notify_guardians",
+		],
+		limit_page_length=0,
+	)
+	via_table = frappe.get_all(
+		"MS Assignment Group",
+		filters={"student_group": ["in", groups], "parenttype": "MS Assignment"},
+		pluck="parent",
+	)
+	extra_names = set(via_table) - {r.name for r in direct}
+	if extra_names:
+		direct += frappe.get_all(
+			"MS Assignment",
+			filters={**filters, "name": ["in", sorted(extra_names)]},
+			fields=[
+				"name", "title", "course", "student_group", "due_date", "status",
+				"assigned_on", "notify_guardians",
+			],
+			limit_page_length=0,
+		)
+	return direct

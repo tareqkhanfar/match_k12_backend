@@ -427,6 +427,18 @@ def _health(student: str) -> dict:
 	}
 
 
+# The submission states in Arabic — the dossier is read by people, and
+# "Viewed" in an English word tells a head of year nothing.
+STATE_AR = {
+	"Pending": "لم يُسلّم",
+	"Viewed": "اطّلع ولم يُسلّم",
+	"Submitted": "سُلّم",
+	"Late": "سُلّم متأخراً",
+	"Graded": "مُصحّح",
+	"Returned": "أُعيد للطالب",
+}
+
+
 def _assignments(student: str) -> dict:
 	rows = _rows(
 		"MS Assignment Submission",
@@ -437,9 +449,16 @@ def _assignments(student: str) -> dict:
 		],
 		"modified desc",
 	)
-	graded = [r for r in rows if flt(r.maximum_score)]
+	from match_schools.api.assignments import HANDED_IN_STATUSES
+
+	# A row exists as soon as the pupil opens the work. Counting those as
+	# submitted would overstate a child's record in the one place a school
+	# reads when it is deciding something about them.
+	graded = [r for r in rows if flt(r.maximum_score) and r.graded_on]
+	handed_in = [r for r in rows if r.status in HANDED_IN_STATUSES]
 	return {
-		"submitted": sum(1 for r in rows if r.status and r.status.lower() != "pending"),
+		"submitted": len(handed_in),
+		"opened_not_submitted": sum(1 for r in rows if r.status == "Viewed"),
 		"graded": len(graded),
 		"averagePercent": (
 			round(sum(flt(r.score) / flt(r.maximum_score) * 100 for r in graded) / len(graded), 1)
@@ -451,9 +470,10 @@ def _assignments(student: str) -> dict:
 				"id": r.name,
 				"assignment": r.assignment,
 				"title": r.assignment_title,
-				"status": r.status,
+				"status": STATE_AR.get(r.status, r.status),
+				"handedIn": r.status in HANDED_IN_STATUSES,
 				"submittedOn": str(r.submitted_on or ""),
-				"score": flt(r.score),
+				"score": flt(r.score) if r.graded_on else None,
 				"maxScore": flt(r.maximum_score),
 				"feedback": r.feedback,
 			}

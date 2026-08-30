@@ -378,7 +378,14 @@ def _assignment_card(r: dict) -> dict:
 		"Student Group Student",
 		{"parent": r.get("student_group"), "parenttype": "Student Group", "active": 1},
 	)
-	submitted = frappe.db.count("MS Assignment Submission", {"assignment": r.get("name")})
+	# Rows now exist for pupils who only opened the work, so the count has to
+	# name the states that mean it actually came in.
+	from match_schools.api.assignments import HANDED_IN_STATUSES
+
+	submitted = frappe.db.count(
+		"MS Assignment Submission",
+		{"assignment": r.get("name"), "status": ["in", list(HANDED_IN_STATUSES)]},
+	)
 	return {
 		"id": r.get("name"),
 		"title": r.get("title"),
@@ -489,13 +496,11 @@ def _student_pending_assignments_count(student: str) -> int:
 	)
 	if not assignments:
 		return 0
+	from match_schools.api.assignments import handed_in_pairs
+
 	names = [a.name for a in assignments]
-	submitted = frappe.get_all(
-		"MS Assignment Submission",
-		filters={"assignment": ["in", names], "student": student},
-		fields=["assignment"],
-	)
-	return len(names) - len({s.assignment for s in submitted})
+	done = {a for a, s in handed_in_pairs(names) if s == student}
+	return len(names) - len(done)
 
 
 def _student_outstanding_fees(student: str) -> float:
@@ -546,13 +551,30 @@ def _schedule_for_student(student: str, date: str) -> list[dict]:
 	]
 
 
+# The submission states, in the language the screens speak. Kept here rather
+# than left as the doctype's English so a family is not shown "Pending".
+SUBMISSION_STATE_AR = {
+	"Pending": "لم يُسلّم",
+	"Viewed": "اطّلع ولم يُسلّم",
+	"Submitted": "سُلّم",
+	"Late": "سُلّم متأخراً",
+	"Graded": "مُصحّح",
+	"Returned": "أُعيد للطالب",
+}
+
+
 def _assignments_for_student(student: str, limit: int = 6) -> list[dict]:
 	groups = _student_groups(student)
 	if not groups:
 		return []
+	from match_schools.api.assignments import HANDED_IN_STATUSES
+
+	# Every section the work was set for, and nothing still unpublished.
 	rows = frappe.get_all(
 		"MS Assignment",
-		filters={"student_group": ["in", groups]},
+		filters={
+			"name": ["in", [a["name"] for a in _visible_assignments(groups)] or [""]],
+		},
 		fields=["name", "title", "course", "due_date", "status", "maximum_score"],
 		order_by="due_date desc",
 		limit=limit,
@@ -562,9 +584,12 @@ def _assignments_for_student(student: str, limit: int = 6) -> list[dict]:
 		submission = frappe.db.get_value(
 			"MS Assignment Submission",
 			{"assignment": r.name, "student": student},
-			["name", "status", "score"],
+			["name", "status", "score", "submitted_on", "graded_on"],
 			as_dict=True,
 		)
+		# A row exists as soon as the pupil opens the work, so "submitted"
+		# has to read the state rather than the row's existence.
+		handed_in = bool(submission and submission.status in HANDED_IN_STATUSES)
 		out.append(
 			{
 				"id": r.name,
@@ -572,12 +597,24 @@ def _assignments_for_student(student: str, limit: int = 6) -> list[dict]:
 				"subject": r.course,
 				"due": str(r.due_date or ""),
 				"max": flt(r.maximum_score),
-				"submitted": bool(submission),
-				"submission_status": submission.status if submission else "لم يُسلّم",
-				"score": flt(submission.score) if submission and submission.score else None,
+				"submitted": handed_in,
+				"submission_status": (
+					SUBMISSION_STATE_AR.get(submission.status, submission.status)
+					if submission
+					else "لم يُسلّم"
+				),
+				"score": (
+					flt(submission.score) if submission and submission.graded_on else None
+				),
 			}
 		)
 	return out
+
+
+def _visible_assignments(groups: list[str]) -> list[dict]:
+	from match_schools.api.assignments import assignments_for_groups
+
+	return assignments_for_groups(groups)
 
 
 def _student_grades(student: str, limit: int = 8) -> list[dict]:

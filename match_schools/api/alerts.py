@@ -309,32 +309,39 @@ def _measure_missing_assignments(students: list[str], rule) -> dict[str, float]:
 	if not groups:
 		return {}
 
-	filters = {"student_group": ["in", list(set(groups.values()))], "due_date": ["<", today()]}
-	if cint(rule.within_days):
-		filters["due_date"] = ["between", [add_days(today(), -cint(rule.within_days)), today()]]
+	from match_schools.api.assignments import assignments_for_groups, handed_in_pairs
 
-	assignments = frappe.get_all(
-		"MS Assignment", filters=filters, fields=["name", "student_group"], limit=2000
-	)
+	due = {"due_date": ["<", today()]}
+	if cint(rule.within_days):
+		due = {"due_date": ["between", [add_days(today(), -cint(rule.within_days)), today()]]}
+
+	assignments = assignments_for_groups(list(set(groups.values())), due)
 	if not assignments:
 		return {}
 
-	submitted = {
-		(s.assignment, s.student)
-		for s in frappe.get_all(
-			"MS Assignment Submission",
-			filters={"assignment": ["in", [a.name for a in assignments]]},
-			fields=["assignment", "student"],
-			limit=20000,
-		)
-	}
+	# Every class each piece of homework was set for, so a pupil in the second
+	# section is measured against it too.
+	reach: dict[str, set[str]] = {}
+	for row in frappe.get_all(
+		"MS Assignment Group",
+		filters={"parent": ["in", [a.name for a in assignments]], "parenttype": "MS Assignment"},
+		fields=["parent", "student_group"],
+		limit_page_length=0,
+	):
+		reach.setdefault(row.parent, set()).add(row.student_group)
+	for a in assignments:
+		reach.setdefault(a.name, set()).add(a.student_group)
+
+	# "Handed in", not "has a row": a row exists from the moment the pupil
+	# opens the work, and counting those would quietly silence this alert.
+	submitted = handed_in_pairs([a.name for a in assignments])
 
 	out: dict[str, float] = {}
 	for student, group in groups.items():
 		missing = sum(
 			1
 			for a in assignments
-			if a.student_group == group and (a.name, student) not in submitted
+			if group in reach.get(a.name, set()) and (a.name, student) not in submitted
 		)
 		if missing:
 			out[student] = missing

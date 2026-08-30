@@ -246,7 +246,11 @@ def ms_endpoint(*allowed_personas: str):
 				frappe.db.rollback()
 				message = _clean_message(e)
 				frappe.clear_messages()
-				return fail(message, message)
+				# The envelope promises both languages. Reading the session's
+				# language for both would hand an Arabic reader an English
+				# sentence whenever their account is set to English — which
+				# most accounts are, because that is Frappe's default.
+				return fail(*_both_languages(message))
 			except frappe.PermissionError:
 				raise
 			except Exception:
@@ -267,6 +271,42 @@ def ms_endpoint(*allowed_personas: str):
 		return wrapper
 
 	return decorator
+
+
+
+@functools.lru_cache(maxsize=1)
+def _ar_dictionary() -> dict:
+	"""The app's Arabic translations, English source → Arabic.
+
+	Cached: it is read on the error path, and re-reading a translation file to
+	explain a validation failure would make failures the slow case.
+	"""
+	try:
+		from frappe.translate import get_all_translations
+
+		return dict(get_all_translations("ar") or {})
+	except Exception:
+		return {}
+
+
+def _both_languages(message: str) -> tuple[str, str]:
+	"""One validation message rendered in English and in Arabic.
+
+	The text arrives already translated into whatever the session speaks, so
+	the other language is recovered by looking the pair up rather than by
+	translating again.
+	"""
+	table = _ar_dictionary()
+	if message in table:
+		return message, table[message]
+
+	reverse = {v: k for k, v in table.items()}
+	if message in reverse:
+		return reverse[message], message
+
+	# Untranslated: the same sentence twice is honest, and better than an
+	# empty field the screen would render as a blank error.
+	return message, message
 
 
 def _clean_message(exc: Exception) -> str:
