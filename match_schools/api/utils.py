@@ -9,6 +9,7 @@ Every endpoint returns a flat envelope so the frontend can rely on one shape:
 """
 
 import functools
+import time
 from typing import Any
 
 import frappe
@@ -223,6 +224,37 @@ def require_persona(*allowed: str) -> str:
 	return persona
 
 
+
+# A call slower than this is worth knowing about before a user reports it.
+# Chosen from what the screens actually do: a mark sheet for thirty pupils is
+# the heaviest ordinary read, and it should not take a second.
+SLOW_CALL_SECONDS = 1.0
+
+
+def _log_call(label: str, started: float, persona: str, failed: bool = False) -> None:
+	"""Record how long an endpoint took, and every failure.
+
+	Written to the app's own log rather than to a doctype: this fires on every
+	request, and a table that grows a row per call becomes the slow thing it
+	was meant to measure. Reads `logs/ms_api.log` under the bench.
+	"""
+	try:
+		elapsed = time.monotonic() - started
+		if not failed and elapsed < SLOW_CALL_SECONDS:
+			return
+		logger = frappe.logger("ms_api", allow_site=True, max_size=5_000_000)
+		queries = len(getattr(frappe.local, "sql_log", []) or [])
+		line = (
+			f"{'FAIL ' if failed else 'SLOW '}{label} "
+			f"{elapsed * 1000:.0f}ms persona={persona} user={frappe.session.user}"
+			+ (f" queries={queries}" if queries else "")
+		)
+		(logger.warning if failed else logger.info)(line)
+	except Exception:
+		# Logging must never be the reason a request fails.
+		pass
+
+
 def ms_endpoint(*allowed_personas: str):
 	"""Wrap an endpoint: enforce persona access and return the flat envelope.
 
@@ -235,6 +267,8 @@ def ms_endpoint(*allowed_personas: str):
 		def wrapper(*args, **kwargs):
 			persona = require_persona(*allowed_personas)
 			kwargs.pop("persona", None)
+			started = time.monotonic()
+			label = f"{fn.__module__.rsplit('.', 1)[-1]}.{fn.__name__}"
 			try:
 				data = fn(*args, persona=persona, **kwargs)
 			except frappe.ValidationError as e:
@@ -257,11 +291,14 @@ def ms_endpoint(*allowed_personas: str):
 				# Anything else is a bug rather than user error: log it with a
 				# traceback and keep the details out of the response.
 				frappe.db.rollback()
+				_log_call(label, started, persona, failed=True)
 				frappe.log_error(frappe.get_traceback(), f"{fn.__module__}.{fn.__name__} failed")
 				return fail(
 					"Something went wrong. The error has been logged.",
 					"حدث خطأ غير متوقع. تم تسجيل الخطأ لمراجعته.",
 				)
+
+			_log_call(label, started, persona)
 
 			# Endpoints may return a finished envelope themselves.
 			if isinstance(data, dict) and "success" in data:

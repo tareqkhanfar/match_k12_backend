@@ -939,7 +939,10 @@ def teacher_dossier(instructor: str, persona: str = None):
 	observations = _rows(
 		"MS Teacher Observation",
 		{"instructor": instructor},
-		["name", "observation_date", "observer", "overall_rating", "summary", "status"],
+		# The doctype calls these `rating` and `overall_percent`; asking for a
+		# column that does not exist made the whole teacher file fail to load.
+		["name", "observation_date", "observer", "rating", "overall_percent",
+		 "strengths", "status"],
 		"observation_date desc",
 	)
 
@@ -1006,8 +1009,9 @@ def teacher_dossier(instructor: str, persona: str = None):
 				"id": r.name,
 				"date": str(r.observation_date or ""),
 				"observer": r.observer,
-				"rating": r.overall_rating,
-				"summary": r.summary,
+				"rating": r.rating,
+				"percent": flt(r.overall_percent),
+				"summary": r.strengths,
 				"status": r.status,
 			}
 			for r in observations
