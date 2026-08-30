@@ -152,6 +152,18 @@ CONNECTIONS = [
 		"action": True,
 	},
 	{
+		"key": "evaluations", "label": "نماذج التقييم", "icon": "ClipboardList",
+		"route": "/app/evaluations", "group": "العلامات",
+		"doctype": "MS Evaluation Entry", "field": "student_group", "roles": STAFF,
+		"action": True,
+	},
+	{
+		"key": "class-log", "label": "دفتر الحصص", "icon": "BookOpen",
+		"route": "/app/class-log", "group": "التدريس",
+		"doctype": "MS Class Log", "field": "student_group", "roles": ALL_ROLES,
+		"action": True,
+	},
+	{
 		"key": "activities", "label": "الأنشطة والرحلات", "icon": "Ticket",
 		"route": "/app/activities", "group": "المتابعة اليومية",
 		"doctype": "MS Activity", "field": "student_group", "roles": ALL_ROLES,
