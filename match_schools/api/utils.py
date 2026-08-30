@@ -9,6 +9,7 @@ Every endpoint returns a flat envelope so the frontend can rely on one shape:
 """
 
 import functools
+import logging
 import time
 from typing import Any
 
@@ -243,6 +244,12 @@ def _log_call(label: str, started: float, persona: str, failed: bool = False) ->
 		if not failed and elapsed < SLOW_CALL_SECONDS:
 			return
 		logger = frappe.logger("ms_api", allow_site=True, max_size=5_000_000)
+		# Frappe hands back a logger set to ERROR, so anything short of an
+		# exception is written nowhere. This log exists to record calls that
+		# did not raise, so the level is set to match what it is for.
+		if logger.level > logging.INFO:
+			logger.setLevel(logging.INFO)
+
 		queries = len(getattr(frappe.local, "sql_log", []) or [])
 		line = (
 			f"{'FAIL ' if failed else 'SLOW '}{label} "
