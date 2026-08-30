@@ -1,0 +1,15 @@
+{
+ "actions": [], "creation": "2026-08-30 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["label", "score", "column_break_1", "tone", "sort_order"],
+ "fields": [
+  {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "الخيار", "reqd": 1},
+  {"fieldname": "score", "fieldtype": "Float", "in_list_view": 1, "label": "القيمة"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "tone", "fieldtype": "Select", "in_list_view": 1, "label": "اللون", "options": "muted\nsuccess\nwarning\ndanger\ninfo\nprimary", "default": "muted"},
+  {"fieldname": "sort_order", "fieldtype": "Int", "label": "الترتيب"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Evaluation Scale Option",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

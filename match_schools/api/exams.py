@@ -374,14 +374,26 @@ def save_exam(payload: str | dict, persona: str = None):
 
 	from_time = data.get("from_time")
 	to_time = data.get("to_time")
+
+	# ERPNext makes both times mandatory on an Assessment Plan, but a teacher
+	# setting a paper from the mark sheet has a date in mind and not a clock.
+	# The class's own lesson that weekday is the honest default — that is when
+	# the teacher has them — and it stays editable.
+	if not (from_time and to_time):
+		slot = _lesson_slot(data["student_group"], data.get("course"), data["schedule_date"])
+		from_time = from_time or slot[0]
+		to_time = to_time or slot[1]
+
 	if from_time and to_time and str(to_time) <= str(from_time):
 		return fail(
 			message_en="The end time must be after the start time.",
 			message_ar="وقت الانتهاء يجب أن يكون بعد وقت البدء.",
 		)
 
-	# Two exams cannot share a room at the same moment, and a class cannot sit
-	# two exams at once.
+	# A room cannot hold two sittings at once — that is physics, so it is
+	# refused. A pupil sitting two exams on one day is a judgement, so it is
+	# reported instead: the conflicts come back as a table the teacher reads
+	# and then either changes the date or confirms anyway.
 	clash = _find_clash(
 		data.get("id"),
 		data["student_group"],
@@ -390,8 +402,29 @@ def save_exam(payload: str | dict, persona: str = None):
 		from_time,
 		to_time,
 	)
-	if clash:
+	if clash and clash.get("hard"):
 		return fail(message_en=clash["en"], message_ar=clash["ar"])
+
+	if not cint(data.get("acknowledge_conflicts")):
+		conflicts = student_conflicts(
+			data["student_group"],
+			data["schedule_date"],
+			data.get("id"),
+			from_time,
+			to_time,
+		)
+		if conflicts["total"]:
+			return {
+				"success": False,
+				"data": {"conflicts": conflicts, "needs_confirmation": True},
+				"message_en": (
+					f"{conflicts['total']} pupil(s) already sit something that day."
+				),
+				"message_ar": (
+					f"لدى {conflicts['total']} طالباً امتحانات أخرى في هذا اليوم — "
+					"راجع الجدول أدناه، ويمكنك المتابعة رغم ذلك."
+				),
+			}
 
 	group = frappe.db.get_value(
 		"Student Group",
@@ -506,6 +539,90 @@ def _default_criterion() -> str | None:
 	return doc.name
 
 
+
+# The school day starts here when nothing better is known.
+DEFAULT_SITTING = ("08:00:00", "09:00:00")
+
+
+def _mins(value) -> int:
+	"""A time as minutes past midnight.
+
+	Frappe hands back a Time column as a timedelta, and str() on that drops the
+	leading zero — "8:00:00". Comparing those as strings puts 09:00 before
+	08:00, which is how a slot picker ends up handing out an hour that is
+	already taken.
+	"""
+	if value is None:
+		return 0
+	if hasattr(value, "total_seconds"):
+		return int(value.total_seconds() // 60)
+	parts = str(value).split(":")
+	return int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
+
+
+def _lesson_slot(student_group: str, course: str | None, date: str) -> tuple[str, str]:
+	"""When this class is taught on that weekday, or the default hour.
+
+	Uses the subject's own lesson where there is one, then any lesson the class
+	has that day, then the start of the school day.
+	"""
+	weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+		getdate(date).weekday()
+	]
+
+	candidates: list[tuple[str, str]] = []
+	for filters in (
+		{"student_group": student_group, "course": course, "day": weekday, "active": 1},
+		{"student_group": student_group, "day": weekday, "active": 1},
+	):
+		if "course" in filters and not filters["course"]:
+			continue
+		for row in frappe.get_all(
+			"MS Timetable Slot",
+			filters={k: v for k, v in filters.items() if v},
+			fields=["from_time", "to_time"],
+			order_by="period_order",
+			limit_page_length=0,
+		):
+			if row.from_time and row.to_time:
+				pair = (str(row.from_time), str(row.to_time))
+				if pair not in candidates:
+					candidates.append(pair)
+	candidates.append(DEFAULT_SITTING)
+
+	# A class cannot sit two papers in the same hour, and ERPNext refuses it.
+	# Setting a second paper for the same day from the mark sheet is a normal
+	# thing to want, so the first free lesson is chosen rather than the first
+	# lesson — otherwise date-only scheduling collides with itself.
+	taken = [
+		(_mins(r.from_time), _mins(r.to_time))
+		for r in frappe.get_all(
+			"Assessment Plan",
+			filters={
+				"student_group": student_group,
+				"schedule_date": date,
+				"docstatus": ["<", 2],
+			},
+			fields=["from_time", "to_time"],
+			limit_page_length=0,
+		)
+		if r.from_time and r.to_time
+	]
+
+	def free(pair: tuple[str, str]) -> bool:
+		start, end = _mins(pair[0]), _mins(pair[1])
+		return not any(not (end <= t_start or start >= t_end) for t_start, t_end in taken)
+
+	for pair in candidates:
+		if free(pair):
+			return pair
+
+	# Every lesson that day is spoken for: step past the last sitting.
+	last = max((end for _start, end in taken), default=_mins(DEFAULT_SITTING[1]))
+	hour = min(last // 60, 22)
+	return f"{hour:02d}:00:00", f"{hour + 1:02d}:00:00"
+
+
 def _find_clash(
 	exam_id: str | None,
 	student_group: str,
@@ -534,13 +651,9 @@ def _find_clash(
 		if str(c.to_time) <= str(from_time) or str(c.from_time) >= str(to_time):
 			continue
 
-		if c.student_group == student_group:
-			return {
-				"en": f"This class already sits {c.course} at that time.",
-				"ar": f"لدى هذه الشعبة امتحان {c.course} في نفس الوقت.",
-			}
 		if room and c.room == room:
 			return {
+				"hard": True,
 				"en": f"That room is taken by {c.course} at that time.",
 				"ar": f"القاعة محجوزة لامتحان {c.course} في نفس الوقت.",
 			}
@@ -576,3 +689,162 @@ def delete_exam(exam: str, persona: str = None):
 		"message_en": "Exam removed.",
 		"message_ar": "تم حذف الامتحان من الجدول.",
 	}
+
+
+# ---------------------------------------------------------------------------
+# Who else is sitting something that day
+# ---------------------------------------------------------------------------
+
+
+def _students_of(student_group: str) -> list[str]:
+	return frappe.get_all(
+		"Student Group Student",
+		filters={"parent": student_group, "active": 1},
+		pluck="student",
+	)
+
+
+def student_conflicts(
+	student_group: str,
+	date: str,
+	exam_id: str | None = None,
+	from_time=None,
+	to_time=None,
+) -> dict:
+	"""Pupils in this class who already have something else that day.
+
+	Per pupil rather than per class, because a class is not the unit that sits
+	an exam — a pupil is. Someone in an elective section carries that section's
+	exams into this class's day, and a check that only compared class to class
+	would never see it.
+
+	Returned as data, never as a refusal. Two exams on one day is a judgement
+	a teacher makes with the timetable in front of them; the system's job is to
+	put it in front of them.
+	"""
+	students = _students_of(student_group)
+	if not students or not date:
+		return {"students": [], "total": 0, "exams": 0}
+
+	# Every class these pupils belong to, not just the one being scheduled.
+	memberships = frappe.get_all(
+		"Student Group Student",
+		filters={"student": ["in", students], "active": 1},
+		fields=["student", "parent"],
+		limit_page_length=0,
+	)
+	groups = {m.parent for m in memberships}
+	if not groups:
+		return {"students": [], "total": 0, "exams": 0}
+
+	sittings = frappe.get_all(
+		"Assessment Plan",
+		filters={
+			"schedule_date": date,
+			"student_group": ["in", list(groups)],
+			"docstatus": ["<", 2],
+		},
+		fields=[
+			"name", "assessment_name", "course", "student_group", "from_time",
+			"to_time", "room", "maximum_assessment_score",
+		],
+		limit_page_length=0,
+	)
+	sittings = [s for s in sittings if not exam_id or s.name != exam_id]
+	if not sittings:
+		return {"students": [], "total": 0, "exams": 0}
+
+	by_group: dict[str, list] = {}
+	for s in sittings:
+		by_group.setdefault(s.student_group, []).append(s)
+
+	names = {
+		r.name: r.student_name
+		for r in frappe.get_all(
+			"Student", filters={"name": ["in", students]}, fields=["name", "student_name"]
+		)
+	}
+	group_names = {
+		r.name: r.student_group_name
+		for r in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list(groups)]},
+			fields=["name", "student_group_name"],
+		)
+	}
+	course_names = {
+		r.name: r.course_name
+		for r in frappe.get_all(
+			"Course",
+			filters={"name": ["in", list({s.course for s in sittings if s.course})] or [""]},
+			fields=["name", "course_name"],
+		)
+	}
+
+	mine: dict[str, list[str]] = {}
+	for m in memberships:
+		mine.setdefault(m.student, []).append(m.parent)
+
+	rows = []
+	for student in students:
+		clashes = []
+		for group in mine.get(student, []):
+			for s in by_group.get(group, []):
+				overlapping = bool(
+					from_time and to_time and s.from_time and s.to_time
+					and not (str(s.to_time) <= str(from_time) or str(s.from_time) >= str(to_time))
+				)
+				clashes.append(
+					{
+						"exam": s.name,
+						"title": s.assessment_name,
+						"course": course_names.get(s.course) or s.course,
+						"student_group": group_names.get(group) or group,
+						"from_time": hhmm(s.from_time) if s.from_time else "",
+						"to_time": hhmm(s.to_time) if s.to_time else "",
+						"room": s.room,
+						# A same-day clash is worth knowing; an overlapping one
+						# means the pupil would have to be in two places.
+						"overlapping": overlapping,
+					}
+				)
+		if clashes:
+			rows.append(
+				{
+					"student": student,
+					"name": names.get(student) or student,
+					"conflicts": sorted(clashes, key=lambda c: c["from_time"]),
+					"overlapping": any(c["overlapping"] for c in clashes),
+				}
+			)
+
+	rows.sort(key=lambda r: (not r["overlapping"], r["name"]))
+	return {
+		"students": rows,
+		"total": len(rows),
+		"exams": len({c["exam"] for r in rows for c in r["conflicts"]}),
+		"overlapping": sum(1 for r in rows if r["overlapping"]),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def check_conflicts(
+	student_group: str = None,
+	schedule_date: str = None,
+	from_time: str = None,
+	to_time: str = None,
+	exam: str = None,
+	persona: str = None,
+):
+	"""What a teacher should see before committing to a date."""
+	if not (student_group and schedule_date):
+		return fail(
+			message_en="A class and a date are required.",
+			message_ar="يجب تحديد الشعبة والتاريخ.",
+		)
+
+	holiday = ctx.holiday_reason(schedule_date)
+	result = student_conflicts(student_group, schedule_date, exam, from_time, to_time)
+	result["holiday"] = holiday
+	return result

@@ -1,0 +1,17 @@
+{
+ "actions": [], "creation": "2026-08-30 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["category", "item", "column_break_1", "max_score", "weight", "sort_order", "help_text"],
+ "fields": [
+  {"fieldname": "category", "fieldtype": "Data", "in_list_view": 1, "label": "المجال"},
+  {"fieldname": "item", "fieldtype": "Small Text", "in_list_view": 1, "label": "البند", "reqd": 1},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "max_score", "fieldtype": "Float", "in_list_view": 1, "label": "العلامة العظمى"},
+  {"fieldname": "weight", "fieldtype": "Float", "label": "الوزن"},
+  {"fieldname": "sort_order", "fieldtype": "Int", "label": "الترتيب"},
+  {"fieldname": "help_text", "fieldtype": "Small Text", "label": "توضيح"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Evaluation Criterion",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

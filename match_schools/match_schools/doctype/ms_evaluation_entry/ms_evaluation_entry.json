@@ -1,0 +1,41 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "naming_series:",
+ "creation": "2026-08-30 00:00:00", "doctype": "DocType", "editable_grid": 0, "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "form", "form_title", "column_break_main",
+  "student", "student_name", "student_group", "course",
+  "section_result", "total_score", "max_score", "percent", "column_break_result",
+  "evaluated_by", "evaluated_on", "is_published", "notes",
+  "section_answers", "answers",
+  "sec_period", "academic_year", "academic_term"
+ ],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "K12-EVE-.YYYY.-", "default": "K12-EVE-.YYYY.-"},
+  {"fieldname": "form", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "النموذج", "options": "MS Evaluation Form", "reqd": 1},
+  {"fieldname": "form_title", "fieldtype": "Data", "label": "اسم النموذج", "read_only": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "student", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "الطالب", "options": "Student", "reqd": 1},
+  {"fieldname": "student_name", "fieldtype": "Data", "label": "اسم الطالب", "read_only": 1},
+  {"fieldname": "student_group", "fieldtype": "Link", "in_standard_filter": 1, "label": "الشعبة", "options": "Student Group"},
+  {"fieldname": "course", "fieldtype": "Link", "label": "المادة", "options": "Course"},
+  {"fieldname": "section_result", "fieldtype": "Section Break", "label": "النتيجة"},
+  {"fieldname": "total_score", "fieldtype": "Float", "in_list_view": 1, "label": "المجموع", "read_only": 1},
+  {"fieldname": "max_score", "fieldtype": "Float", "label": "من", "read_only": 1},
+  {"fieldname": "percent", "fieldtype": "Percent", "label": "النسبة", "read_only": 1},
+  {"fieldname": "column_break_result", "fieldtype": "Column Break"},
+  {"fieldname": "evaluated_by", "fieldtype": "Link", "label": "قيّمه", "options": "User", "read_only": 1},
+  {"fieldname": "evaluated_on", "fieldtype": "Datetime", "label": "تاريخ التقييم"},
+  {"fieldname": "is_published", "fieldtype": "Check", "label": "ظاهر للطالب وولي الأمر", "default": "0"},
+  {"fieldname": "notes", "fieldtype": "Small Text", "label": "ملاحظات عامة"},
+  {"fieldname": "section_answers", "fieldtype": "Section Break", "label": "الإجابات"},
+  {"fieldname": "answers", "fieldtype": "Table", "label": "الإجابات", "options": "MS Evaluation Answer"},
+  {"fieldname": "sec_period", "fieldtype": "Section Break", "label": "الفترة الدراسية"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "in_standard_filter": 1, "label": "السنة الدراسية", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "in_standard_filter": 1, "label": "الفصل الدراسي", "options": "Academic Term"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Evaluation Entry",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 1
+}

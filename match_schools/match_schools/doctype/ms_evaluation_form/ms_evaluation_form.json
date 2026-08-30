@@ -1,0 +1,41 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "naming_series:",
+ "creation": "2026-08-30 00:00:00", "doctype": "DocType", "editable_grid": 0, "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "title", "form_type", "column_break_main",
+  "scale_type", "is_active", "allow_notes",
+  "section_scope", "program", "student_group", "course", "column_break_scope",
+  "created_by_user", "description",
+  "section_scale", "scale",
+  "section_criteria", "criteria",
+  "sec_period", "academic_year", "academic_term"
+ ],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "K12-EVF-.YYYY.-", "default": "K12-EVF-.YYYY.-"},
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "اسم النموذج", "reqd": 1},
+  {"fieldname": "form_type", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "نوع النموذج", "options": "سلوك\nمهارات\nروضة\nتقرير تقدم\nمشاركة صفية\nأخرى", "default": "سلوك", "reqd": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "scale_type", "fieldtype": "Select", "in_list_view": 1, "label": "آلية التقييم", "options": "مقياس\nعلامة رقمية\nنعم/لا\nنص", "default": "مقياس", "reqd": 1},
+  {"fieldname": "is_active", "fieldtype": "Check", "label": "مفعّل", "default": "1"},
+  {"fieldname": "allow_notes", "fieldtype": "Check", "label": "السماح بملاحظة لكل بند", "default": "1"},
+  {"fieldname": "section_scope", "fieldtype": "Section Break", "label": "النطاق"},
+  {"fieldname": "program", "fieldtype": "Link", "label": "الصف", "options": "Program"},
+  {"fieldname": "student_group", "fieldtype": "Link", "label": "الشعبة", "options": "Student Group"},
+  {"fieldname": "course", "fieldtype": "Link", "label": "المادة", "options": "Course"},
+  {"fieldname": "column_break_scope", "fieldtype": "Column Break"},
+  {"fieldname": "created_by_user", "fieldtype": "Link", "label": "أنشأه", "options": "User"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "الوصف"},
+  {"fieldname": "section_scale", "fieldtype": "Section Break", "label": "خيارات المقياس"},
+  {"fieldname": "scale", "fieldtype": "Table", "label": "الخيارات", "options": "MS Evaluation Scale Option"},
+  {"fieldname": "section_criteria", "fieldtype": "Section Break", "label": "البنود"},
+  {"fieldname": "criteria", "fieldtype": "Table", "label": "البنود", "options": "MS Evaluation Criterion"},
+  {"fieldname": "sec_period", "fieldtype": "Section Break", "label": "الفترة الدراسية"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "in_standard_filter": 1, "label": "السنة الدراسية", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "in_standard_filter": 1, "label": "الفصل الدراسي", "options": "Academic Term"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Evaluation Form",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 1
+}

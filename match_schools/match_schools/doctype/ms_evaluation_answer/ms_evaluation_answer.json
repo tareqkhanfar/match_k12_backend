@@ -1,0 +1,17 @@
+{
+ "actions": [], "creation": "2026-08-30 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["criterion_key", "category", "item", "column_break_1", "value_label", "score", "note"],
+ "fields": [
+  {"fieldname": "criterion_key", "fieldtype": "Data", "label": "معرّف البند"},
+  {"fieldname": "category", "fieldtype": "Data", "label": "المجال"},
+  {"fieldname": "item", "fieldtype": "Small Text", "in_list_view": 1, "label": "البند"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "value_label", "fieldtype": "Data", "in_list_view": 1, "label": "التقييم"},
+  {"fieldname": "score", "fieldtype": "Float", "in_list_view": 1, "label": "القيمة"},
+  {"fieldname": "note", "fieldtype": "Small Text", "label": "ملاحظة"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Evaluation Answer",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

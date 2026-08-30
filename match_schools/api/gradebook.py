@@ -22,6 +22,7 @@ from match_schools.api.utils import (
 	ROLE_TEACHER,
 	fail,
 	get_default_academic_term,
+	hhmm,
 	get_default_academic_year,
 	ms_endpoint,
 	parse_json_arg,
@@ -2151,4 +2152,48 @@ def class_standing(student: str, academic_term: str = None, persona: str = None)
 		"topPercent": round(rank / len(averages) * 100),
 		"group": group,
 		"academicTerm": academic_term,
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def column_exams(student_group: str = None, course: str = None, persona: str = None):
+	"""Which mark columns already have a sitting on the calendar.
+
+	The entry sheet knows what is being marked; the exam calendar knows when it
+	is sat. They are the same thing to a teacher, so the sheet shows the date
+	on the column and offers to set one where there is none — matched by the
+	column's own name, which is what a teacher typed in both places.
+	"""
+	if not (student_group and course):
+		return {"exams": {}}
+
+	rows = frappe.get_all(
+		"Assessment Plan",
+		filters={
+			"student_group": student_group,
+			"course": course,
+			"docstatus": ["<", 2],
+		},
+		fields=[
+			"name", "assessment_name", "schedule_date", "from_time", "to_time",
+			"room", "maximum_assessment_score",
+		],
+		limit_page_length=0,
+	)
+
+	return {
+		"exams": {
+			(r.assessment_name or "").strip(): {
+				"id": r.name,
+				"title": r.assessment_name,
+				"date": str(r.schedule_date or ""),
+				"from_time": hhmm(r.from_time) if r.from_time else "",
+				"to_time": hhmm(r.to_time) if r.to_time else "",
+				"room": r.room,
+				"max_score": flt(r.maximum_assessment_score),
+			}
+			for r in rows
+			if r.assessment_name
+		}
 	}
