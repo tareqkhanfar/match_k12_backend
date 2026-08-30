@@ -15,7 +15,22 @@ class MSAssignmentSubmission(Document):
 		self.set_late_status()
 
 	def set_submitted_on(self):
-		if not self.submitted_on:
+		"""Stamp a submission time only when something was actually handed in.
+
+		A row now exists before any work does: it is created when the pupil
+		first opens the homework, and when a teacher records a mark for work
+		handed in on paper. Stamping those would report a submission that
+		never happened, and "لم يُسلّم" is the most important state on the
+		marking sheet.
+		"""
+		if self.submitted_on:
+			return
+		handed_in = (
+			bool((self.content or "").strip())
+			or bool(self.get("files"))
+			or self.status in ("Submitted", "Late")
+		)
+		if handed_in:
 			self.submitted_on = now_datetime()
 
 	def validate_unique_submission(self):

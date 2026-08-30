@@ -1,0 +1,12 @@
+{
+ "actions": [], "creation": "2026-08-30 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["student_group", "student_group_name"],
+ "fields": [
+  {"fieldname": "student_group", "fieldtype": "Link", "in_list_view": 1, "label": "الشعبة", "options": "Student Group", "reqd": 1},
+  {"fieldname": "student_group_name", "fieldtype": "Data", "in_list_view": 1, "label": "الاسم", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Assignment Group",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

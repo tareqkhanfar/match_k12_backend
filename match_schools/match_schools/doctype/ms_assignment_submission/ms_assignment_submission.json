@@ -28,7 +28,13 @@
   "feedback",
   "sec_period",
   "academic_year",
-  "academic_term"
+  "academic_term",
+  "sec_tracking",
+  "viewed_on",
+  "guardian_viewed_on",
+  "col_tracking",
+  "is_late",
+  "teacher_note"
  ],
  "fields": [
   {
@@ -76,12 +82,12 @@
    "read_only": 1
   },
   {
-   "default": "Submitted",
+   "default": "Pending",
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Submitted\nGraded\nReturned\nLate"
+   "options": "Pending\nViewed\nSubmitted\nGraded\nReturned\nLate"
   },
   {
    "fieldname": "section_submission",
@@ -167,6 +173,38 @@
    "label": "الفصل الدراسي",
    "options": "Academic Term",
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "sec_tracking",
+   "fieldtype": "Section Break",
+   "label": "المتابعة"
+  },
+  {
+   "fieldname": "viewed_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ الاطلاع",
+   "read_only": 1
+  },
+  {
+   "fieldname": "guardian_viewed_on",
+   "fieldtype": "Datetime",
+   "label": "اطلاع ولي الأمر",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_tracking",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_late",
+   "fieldtype": "Check",
+   "label": "متأخر",
+   "read_only": 1
+  },
+  {
+   "fieldname": "teacher_note",
+   "fieldtype": "Small Text",
+   "label": "ملاحظة المعلم للطالب"
   }
  ],
  "index_web_pages_for_search": 1,

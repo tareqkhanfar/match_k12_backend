@@ -1,0 +1,36 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "naming_series:",
+ "creation": "2026-08-30 00:00:00", "doctype": "DocType", "editable_grid": 0, "engine": "InnoDB",
+ "field_order": [
+  "naming_series", "assignment", "assignment_title", "column_break_main",
+  "student", "student_name", "asked_by", "asked_on", "is_public",
+  "section_q", "body",
+  "section_a", "answer", "answered_by", "answered_on",
+  "sec_period", "academic_year", "academic_term"
+ ],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "K12-AQN-.YYYY.-", "default": "K12-AQN-.YYYY.-"},
+  {"fieldname": "assignment", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "الواجب", "options": "MS Assignment", "reqd": 1},
+  {"fieldname": "assignment_title", "fieldtype": "Data", "label": "عنوان الواجب", "read_only": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "student", "fieldtype": "Link", "in_list_view": 1, "label": "الطالب", "options": "Student"},
+  {"fieldname": "student_name", "fieldtype": "Data", "label": "اسم الطالب", "read_only": 1},
+  {"fieldname": "asked_by", "fieldtype": "Link", "label": "السائل", "options": "User", "read_only": 1},
+  {"fieldname": "asked_on", "fieldtype": "Datetime", "label": "تاريخ السؤال", "read_only": 1},
+  {"fieldname": "is_public", "fieldtype": "Check", "label": "ظاهر لبقية الطلاب", "default": "0"},
+  {"fieldname": "section_q", "fieldtype": "Section Break", "label": "الاستفسار"},
+  {"fieldname": "body", "fieldtype": "Small Text", "label": "نص الاستفسار", "reqd": 1},
+  {"fieldname": "section_a", "fieldtype": "Section Break", "label": "الرد"},
+  {"fieldname": "answer", "fieldtype": "Small Text", "label": "رد المعلم"},
+  {"fieldname": "answered_by", "fieldtype": "Link", "label": "أجاب", "options": "User", "read_only": 1},
+  {"fieldname": "answered_on", "fieldtype": "Datetime", "label": "تاريخ الرد", "read_only": 1},
+  {"fieldname": "sec_period", "fieldtype": "Section Break", "label": "الفترة الدراسية"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "in_standard_filter": 1, "label": "السنة الدراسية", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "in_standard_filter": 1, "label": "الفصل الدراسي", "options": "Academic Term"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-08-30 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Assignment Question",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 0
+}

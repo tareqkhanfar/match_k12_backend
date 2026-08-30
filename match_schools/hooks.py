@@ -168,7 +168,10 @@ scheduler_events = {
 	# A message scheduled for 07:00 should not arrive at 07:59, so the queue
 	# is checked every ten minutes rather than hourly.
 	"cron": {
-		"*/10 * * * *": ["match_schools.api.mail.deliver_due_messages"],
+		"*/10 * * * *": [
+			"match_schools.api.mail.deliver_due_messages",
+			"match_schools.api.assignments.publish_due_assignments",
+		],
 	},
 	"daily": [
 		"match_schools.api.alerts.run_rules_scheduled",

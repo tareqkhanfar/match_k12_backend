@@ -25,7 +25,29 @@
   "section_content",
   "description",
   "attachment",
-  "files"
+  "files",
+  "sec_detail",
+  "objectives",
+  "requirements",
+  "col_detail",
+  "submission_type",
+  "allow_late",
+  "allow_questions",
+  "sec_targets",
+  "groups",
+  "links",
+  "sec_publish",
+  "is_draft",
+  "publish_at",
+  "is_published",
+  "col_publish",
+  "published_on",
+  "notify_guardians",
+  "sec_solution",
+  "solution_body",
+  "solution_files",
+  "solution_published",
+  "solution_published_on"
  ],
  "fields": [
   {
@@ -149,6 +171,127 @@
    "fieldtype": "Table",
    "label": "المرفقات / Attachments",
    "options": "MS Attachment"
+  },
+  {
+   "fieldname": "sec_detail",
+   "fieldtype": "Section Break",
+   "label": "تفاصيل الواجب"
+  },
+  {
+   "fieldname": "objectives",
+   "fieldtype": "Text Editor",
+   "label": "الأهداف"
+  },
+  {
+   "fieldname": "requirements",
+   "fieldtype": "Text Editor",
+   "label": "المتطلبات"
+  },
+  {
+   "fieldname": "col_detail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "submission_type",
+   "fieldtype": "Select",
+   "label": "طريقة التسليم",
+   "options": "في الصف\nرفع ملف\nنص مكتوب\nبدون تسليم",
+   "default": "رفع ملف"
+  },
+  {
+   "fieldname": "allow_late",
+   "fieldtype": "Check",
+   "label": "يسمح بالتسليم المتأخر",
+   "default": "1"
+  },
+  {
+   "fieldname": "allow_questions",
+   "fieldtype": "Check",
+   "label": "يسمح باستفسارات الطلاب",
+   "default": "1"
+  },
+  {
+   "fieldname": "sec_targets",
+   "fieldtype": "Section Break",
+   "label": "الشُعب المستهدفة"
+  },
+  {
+   "fieldname": "groups",
+   "fieldtype": "Table",
+   "label": "الشُعب",
+   "options": "MS Assignment Group"
+  },
+  {
+   "fieldname": "links",
+   "fieldtype": "Table",
+   "label": "روابط ومرفقات خارجية",
+   "options": "MS Assignment Link"
+  },
+  {
+   "fieldname": "sec_publish",
+   "fieldtype": "Section Break",
+   "label": "النشر"
+  },
+  {
+   "fieldname": "is_draft",
+   "fieldtype": "Check",
+   "label": "مسودة",
+   "default": "0"
+  },
+  {
+   "fieldname": "publish_at",
+   "fieldtype": "Datetime",
+   "label": "موعد النشر"
+  },
+  {
+   "fieldname": "is_published",
+   "fieldtype": "Check",
+   "label": "منشور",
+   "default": "1"
+  },
+  {
+   "fieldname": "col_publish",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "published_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ النشر",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notify_guardians",
+   "fieldtype": "Check",
+   "label": "إشعار أولياء الأمور",
+   "default": "1"
+  },
+  {
+   "fieldname": "sec_solution",
+   "fieldtype": "Section Break",
+   "label": "حلول الواجب"
+  },
+  {
+   "fieldname": "solution_body",
+   "fieldtype": "Text Editor",
+   "label": "الحل النموذجي"
+  },
+  {
+   "fieldname": "solution_files",
+   "fieldtype": "Table",
+   "label": "ملفات الحل",
+   "options": "MS Attachment"
+  },
+  {
+   "fieldname": "solution_published",
+   "fieldtype": "Check",
+   "label": "إظهار الحل للطلاب",
+   "default": "0"
+  },
+  {
+   "fieldname": "solution_published_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ إظهار الحل",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
