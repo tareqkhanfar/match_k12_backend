@@ -181,57 +181,153 @@ def mark_attendance(student_group: str, date: str, entries: str | list, persona:
 			message_ar=f"{len(not_in_group)} طالب غير مسجّل في هذه الشعبة.",
 		)
 
-	saved, updated = 0, 0
+	saved, updated, unchanged = 0, 0, 0
 
 	for row in rows:
 		student = row.get("student")
 		status = row.get("status")
 		if not student or status not in STATUS_AR:
 			continue
-
-		existing = frappe.db.get_value(
-			"Student Attendance",
-			{"student": student, "student_group": student_group, "date": date, "docstatus": ["<", 2]},
-			["name", "docstatus"],
-			as_dict=True,
-		)
-
-		if existing:
-			doc = frappe.get_doc("Student Attendance", existing.name)
-			if doc.docstatus == 1:
-				# Submitted records are immutable — cancel and replace.
-				doc.cancel()
-				doc = frappe.new_doc("Student Attendance")
-				doc.update(
-					{
-						"student": student,
-						"student_group": student_group,
-						"date": date,
-						"status": status,
-					}
-				)
-				doc.insert()
-				doc.submit()
-			else:
-				doc.status = status
-				doc.save()
-				doc.submit()
+		result = _write_one(student, student_group, date, status)
+		if result == "created":
+			saved += 1
+		elif result == "updated":
 			updated += 1
 		else:
+			unchanged += 1
+
+	frappe.db.commit()
+	touched = saved + updated
+	return {
+		"success": True,
+		"data": {"created": saved, "updated": updated, "unchanged": unchanged},
+		"message_en": f"Attendance saved for {touched} student(s).",
+		"message_ar": (
+			f"تم حفظ الحضور لـ {touched} طالباً."
+			if touched
+			else "لا تغييرات — الحضور محفوظ كما هو."
+		),
+	}
+
+
+def _write_one(student: str, student_group: str, date, status: str) -> str:
+	"""Record one pupil's attendance. Returns created / updated / unchanged.
+
+	A record whose status already matches is left completely alone. This
+	matters more than it sounds: an attendance record is submitted, so
+	changing one means cancelling it and writing a new one. Rewriting the
+	whole class to correct a single pupil left a cancelled document behind for
+	every child in the room, every time — thirty cancellations to fix one.
+	"""
+	existing = frappe.db.get_value(
+		"Student Attendance",
+		{"student": student, "student_group": student_group, "date": date, "docstatus": ["<", 2]},
+		["name", "docstatus", "status"],
+		as_dict=True,
+	)
+
+	if existing and existing.status == status:
+		return "unchanged"
+
+	if existing:
+		doc = frappe.get_doc("Student Attendance", existing.name)
+		if doc.docstatus == 1:
+			# A submitted record cannot be edited. Cancelling and replacing is
+			# ERPNext's own correction path, and the cancelled document is the
+			# audit trail of what the register said before.
+			doc.cancel()
 			doc = frappe.new_doc("Student Attendance")
 			doc.update(
-				{"student": student, "student_group": student_group, "date": date, "status": status}
+				{
+					"student": student,
+					"student_group": student_group,
+					"date": date,
+					"status": status,
+				}
 			)
 			doc.insert()
 			doc.submit()
-			saved += 1
+		else:
+			doc.status = status
+			doc.save()
+			doc.submit()
+		return "updated"
 
+	doc = frappe.new_doc("Student Attendance")
+	doc.update(
+		{"student": student, "student_group": student_group, "date": date, "status": status}
+	)
+	doc.insert()
+	doc.submit()
+	return "created"
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def mark_one(
+	student: str = None,
+	student_group: str = None,
+	date: str = None,
+	status: str = None,
+	persona: str = None,
+):
+	"""Correct one pupil, without rewriting the register for the whole class.
+
+	Marking a class is a batch; fixing a mistake is not. Sending the whole
+	sheet to change one child cancelled and re-created every other record in
+	it, which is both slow and a lie about what happened.
+	"""
+	if not (student and student_group and status):
+		return fail(
+			message_en="A student, a class and a status are required.",
+			message_ar="يجب تحديد الطالب والشعبة والحالة.",
+		)
+	if status not in STATUS_AR:
+		return fail(message_en="Unknown status.", message_ar="حالة غير معروفة.")
+
+	_assert_group_access(student_group, persona)
+	date = getdate(date or today())
+
+	# The same three refusals the batch makes, for the same reasons.
+	if date > getdate(today()):
+		return fail(
+			message_en="Attendance cannot be recorded for a future date.",
+			message_ar="لا يمكن تسجيل الحضور لتاريخ مستقبلي.",
+		)
+	reason = ctx.holiday_reason(date)
+	if reason:
+		return fail(
+			message_en=f"The school is closed on this date ({reason}).",
+			message_ar=f"المدرسة مغلقة في هذا التاريخ — {reason}.",
+		)
+	if not ctx.can_write(persona, None, _term_of(date)):
+		return fail(
+			message_en="This academic term is closed.",
+			message_ar="الفصل الدراسي مغلق ولا يمكن التعديل عليه.",
+		)
+
+	if not frappe.db.exists(
+		"Student Group Student",
+		{"parent": student_group, "parenttype": "Student Group", "student": student},
+	):
+		return fail(
+			message_en="That student is not in this section.",
+			message_ar="هذا الطالب غير مسجّل في هذه الشعبة.",
+		)
+
+	result = _write_one(student, student_group, date, status)
 	frappe.db.commit()
+
+	name = frappe.db.get_value("Student", student, "student_name") or student
 	return {
 		"success": True,
-		"data": {"created": saved, "updated": updated},
-		"message_en": f"Attendance saved for {saved + updated} students.",
-		"message_ar": f"تم حفظ الحضور لـ {saved + updated} طالباً.",
+		"data": {"student": student, "status": status, "result": result},
+		"message_en": f"{name}: {status}.",
+		"message_ar": (
+			f"{name}: {STATUS_AR[status]}"
+			if result != "unchanged"
+			else f"{name}: لا تغيير"
+		),
 	}
 
 
