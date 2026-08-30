@@ -2197,3 +2197,169 @@ def column_exams(student_group: str = None, course: str = None, persona: str = N
 			if r.assessment_name
 		}
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def plan_components(student_group: str = None, course: str = None, persona: str = None):
+	"""The assessment plan's own line items, for a class and subject.
+
+	Offered when carrying homework marks across, so they land on the line the
+	plan already has — "الواجبات" out of ten — rather than creating a new
+	column named after the homework and quietly leaving the plan's own line
+	empty.
+	"""
+	if not (student_group and course):
+		return fail(
+			message_en="A class and a subject are required.",
+			message_ar="يجب تحديد الشعبة والمادة.",
+		)
+
+	program = frappe.db.get_value("Student Group", student_group, "program")
+	scheme = resolve_scheme(course, program)
+	if not scheme:
+		return {"components": [], "scheme": None}
+
+	names = [c["component_name"] for c in scheme["components"]]
+	# Which lines already have marks, so a teacher can see what they would be
+	# writing over before they do it.
+	filled: dict[str, int] = {}
+	if names:
+		for row in frappe.db.sql(
+			"""select component_name, count(*) as n from `tabMS Gradebook Entry`
+			    where student_group = %(g)s and course = %(c)s
+			      and component_name in %(names)s
+			    group by component_name""",
+			{"g": student_group, "c": course, "names": names},
+			as_dict=True,
+		):
+			filled[row.component_name] = row.n
+
+	return {
+		"scheme": scheme["scheme_name"],
+		"components": [
+			{
+				"component_name": c["component_name"],
+				"component_type": c["component_type"],
+				"category": c.get("category"),
+				"max_score": flt(c["max_score"]),
+				"weight": flt(c["weight"]),
+				"quarter": c.get("quarter"),
+				"marked": filled.get(c["component_name"], 0),
+			}
+			for c in scheme["components"]
+		],
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def transfer_assignment_marks(
+	assignment: str = None,
+	component_name: str = None,
+	rescale: int = 1,
+	persona: str = None,
+):
+	"""Carry a piece of homework's marks onto a line of the assessment plan.
+
+	The two are almost never out of the same total: homework marked out of
+	twenty against a plan line worth ten. Rescaling proportionally is the
+	only honest default — writing 18 into a column that stops at 10 would
+	either be refused or silently clipped, and both are worse than converting.
+	The response says what it did, because a mark that changed on its way
+	across is something the teacher should be told about rather than discover.
+	"""
+	from match_schools.api.gradeflow import assert_teacher_owns_course
+
+	if not (assignment and component_name):
+		return fail(
+			message_en="An assignment and a plan line are required.",
+			message_ar="يجب تحديد الواجب وبند خطة التقييم.",
+		)
+
+	doc = frappe.db.get_value(
+		"MS Assignment",
+		assignment,
+		["name", "title", "course", "student_group", "maximum_score"],
+		as_dict=True,
+	)
+	if not doc:
+		return fail(message_en="Assignment not found.", message_ar="لم يتم العثور على الواجب.")
+	assert_teacher_owns_course(persona, doc.course)
+
+	program = frappe.db.get_value("Student Group", doc.student_group, "program")
+	scheme = resolve_scheme(doc.course, program)
+	target = next(
+		(c for c in (scheme or {}).get("components", []) if c["component_name"] == component_name),
+		None,
+	)
+	if not target:
+		return fail(
+			message_en="That line is not in the assessment plan.",
+			message_ar="هذا البند غير موجود في خطة التقييم لهذه المادة.",
+		)
+
+	results = frappe.get_all(
+		"MS Assignment Submission",
+		filters={"assignment": assignment, "status": ["in", ["Graded", "Returned"]]},
+		fields=["student", "score"],
+		limit_page_length=0,
+	)
+	# A pupil the teacher has not marked yet is skipped, not scored zero: a
+	# missing mark and a zero are different facts about a child.
+	results = [r for r in results if r.score is not None]
+	if not results:
+		return fail(
+			message_en="No graded submissions to carry across yet.",
+			message_ar="لا توجد تسليمات مُصححة لترحيلها بعد.",
+		)
+
+	source_max = flt(doc.maximum_score) or 100
+	target_max = flt(target["max_score"]) or source_max
+	converting = cint(rescale) and abs(source_max - target_max) > 0.001
+
+	marks = []
+	for r in results:
+		score = flt(r.score)
+		if converting:
+			score = round(score * target_max / source_max, 2)
+		# Even without rescaling, a mark cannot exceed the line it lands on.
+		marks.append({"student": r.student, "score": min(score, target_max)})
+
+	group = frappe.db.get_value(
+		"Student Group", doc.student_group, ["academic_year", "academic_term"], as_dict=True
+	)
+	res = save_marks(
+		payload={
+			"student_group": doc.student_group,
+			"course": doc.course,
+			"academic_year": group.academic_year if group else None,
+			"academic_term": group.academic_term if group else None,
+			"component_name": component_name,
+			"component_type": target["component_type"] or "Homework",
+			"max_score": target_max,
+			"weight": flt(target["weight"]),
+			"marks": marks,
+		},
+		persona=persona,
+	)
+	if isinstance(res, dict) and res.get("success") is False:
+		return res
+
+	note = (
+		f" (حُوّلت من {source_max:g} إلى {target_max:g})"
+		if converting
+		else ""
+	)
+	return {
+		"success": True,
+		"data": {
+			"count": len(marks),
+			"component": component_name,
+			"source_max": source_max,
+			"target_max": target_max,
+			"rescaled": bool(converting),
+		},
+		"message_en": f"Carried {len(marks)} mark(s) into {component_name}.",
+		"message_ar": f"تم ترحيل علامات {len(marks)} طالباً إلى «{component_name}»{note}.",
+	}
