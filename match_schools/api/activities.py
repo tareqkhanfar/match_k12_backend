@@ -120,6 +120,7 @@ def list_activities(
 	activity_type: str = None,
 	status: str = None,
 	search: str = None,
+	student_group: str = None,
 	page: int = 1,
 	page_size: int = 20,
 	persona: str = None,
@@ -139,6 +140,11 @@ def list_activities(
 		filters["status"] = status
 	if search:
 		filters["title"] = ["like", f"%{search}%"]
+	# Opened from a class: its own activities, plus the school-wide ones every
+	# class is part of — filtering those out would hide the trip the whole
+	# school is going on.
+	if student_group:
+		filters["student_group"] = ["in", [student_group, "", None]]
 
 	# Students and parents never see something still being planned.
 	if persona in (ROLE_STUDENT, ROLE_PARENT):

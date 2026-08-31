@@ -31,6 +31,7 @@ def list_students(
 	search: str = None,
 	program: str = None,
 	batch: str = None,
+	student_group: str = None,
 	payment_status: str = None,
 	enrolment_status: str = None,
 	page: int = 1,
@@ -67,6 +68,20 @@ def list_students(
 	if search:
 		conditions.append("(s.student_name LIKE %(search)s OR s.name LIKE %(search)s)")
 		params["search"] = f"%{search}%"
+
+	# Narrowed to one section. Screens reached from a class ask for that
+	# class's pupils, and searching the whole school for one of them is a step
+	# backwards from where the user just was.
+	if student_group:
+		conditions.append(
+			"""s.name IN (
+				SELECT sgs.student FROM `tabStudent Group Student` sgs
+				 WHERE sgs.parent = %(student_group)s
+				   AND sgs.parenttype = 'Student Group'
+				   AND sgs.active = 1
+			)"""
+		)
+		params["student_group"] = student_group
 
 	# Program / batch live on Program Enrollment, so join through it.
 	joins = ""
