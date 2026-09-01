@@ -38,6 +38,10 @@ from match_schools.api.utils import (
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
+
+# The channel that holds everything not tied to a subject: school notices,
+# trips, results. Named rather than empty so the client can ask for it.
+GENERAL_CHANNEL = "__general__"
 STAFF = (ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 
 ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "heic"}
@@ -167,6 +171,12 @@ def _post_row(doc, persona: str, liked: set[str] | None = None) -> dict:
 		"audience": doc.audience,
 		"audience_label": AUDIENCE_AR.get(doc.audience, doc.audience),
 		"student_group": doc.student_group,
+		"course": doc.get("course"),
+		"course_name": (
+			frappe.db.get_value("Course", doc.get("course"), "course_name")
+			if doc.get("course")
+			else None
+		),
 		"class_name": (
 			frappe.db.get_value("Student Group", doc.student_group, "student_group_name")
 			if doc.student_group
@@ -193,13 +203,29 @@ def _post_row(doc, persona: str, liked: set[str] | None = None) -> dict:
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
-def feed(student_group: str = None, limit: int = 30, persona: str = None):
-	"""The posts this caller may see, pinned first, then newest."""
+def feed(
+	student_group: str = None,
+	course: str = None,
+	limit: int = 30,
+	persona: str = None,
+):
+	"""The posts this caller may see, pinned first, then newest.
+
+	`course` narrows the feed to one subject. A pupil takes eight subjects and
+	each has its own stream of work and notices; one undifferentiated wall
+	means the maths post scrolls past while they are looking for it. Passing
+	`__general__` asks for the posts that belong to no subject — school
+	notices, trips, results — which is the other half of the same problem.
+	"""
 	filters: dict = {}
 	if persona not in BACK_OFFICE:
 		filters["is_published"] = 1
 	if student_group:
 		filters["student_group"] = student_group
+	if course == GENERAL_CHANNEL:
+		filters["course"] = ["in", ["", None]]
+	elif course:
+		filters["course"] = course
 
 	or_filters = _visible_filter(persona)
 	names = frappe.get_all(
@@ -307,7 +333,7 @@ def save_post(payload: str | dict = None, persona: str = None):
 		doc.posted_on = now()
 
 	for field in ("title", "body", "post_type", "audience",
-	              "student_group", "student", "program"):
+	              "student_group", "student", "program", "course"):
 		if field in data:
 			doc.set(field, data.get(field))
 	for flag in ("is_published", "allow_comments", "pinned"):
@@ -592,3 +618,93 @@ def upload_photo(persona: str = None):
 		"message_en": "Photo uploaded.",
 		"message_ar": "تم رفع الصورة.",
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def channels(persona: str = None):
+	"""The subjects this caller's feed divides into, with how many posts each holds.
+
+	A pupil takes eight subjects; a parent of three children may see twenty.
+	One wall means the maths post scrolls past while they are looking for it,
+	so the feed is offered as channels — all, the general school one, and a
+	channel per subject they actually study or teach.
+
+	Counted, because a channel with nothing in it is a tab that wastes a tap.
+	"""
+	scope = resolve_scope(persona)
+	groups = _my_groups(persona)
+
+	# Which subjects belong to this caller. A family's subjects are their
+	# children's; a teacher's are what they teach; the office sees everything.
+	if persona in BACK_OFFICE:
+		course_names = None
+	else:
+		rows = frappe.get_all(
+			"MS Timetable Slot",
+			filters={"student_group": ["in", groups or [""]], "active": 1},
+			fields=["course"],
+			limit_page_length=0,
+		)
+		course_names = sorted({r.course for r in rows if r.course})
+
+	visible: dict = {}
+	if persona not in BACK_OFFICE:
+		visible["is_published"] = 1
+
+	# One query for one column. Frappe refuses a COUNT in the field list when
+	# or_filters are in play, and the visibility rules need those — so the
+	# course column is plucked and tallied here rather than by the database.
+	# One column across a school's posts is cheap; the alternative was a query
+	# per subject.
+	counts: dict[str, int] = {}
+	general = 0
+	for value in frappe.get_all(
+		"MS Community Post",
+		filters=visible,
+		or_filters=_visible_filter(persona),
+		pluck="course",
+		limit_page_length=0,
+	):
+		if value:
+			counts[value] = counts.get(value, 0) + 1
+		else:
+			general += 1
+
+	if course_names is None:
+		course_names = sorted(counts)
+
+	labels = {
+		r.name: r.course_name
+		for r in frappe.get_all(
+			"Course",
+			filters={"name": ["in", course_names or [""]]},
+			fields=["name", "course_name"],
+		)
+	}
+
+	out = [
+		{
+			"key": "",
+			"label": "الكل",
+			"count": sum(counts.values()) + general,
+			"kind": "all",
+		},
+		{
+			"key": GENERAL_CHANNEL,
+			"label": "عام المدرسة",
+			"count": general,
+			"kind": "general",
+		},
+	]
+	for name in course_names:
+		out.append(
+			{
+				"key": name,
+				"label": labels.get(name) or name,
+				"count": counts.get(name, 0),
+				"kind": "course",
+			}
+		)
+
+	return {"channels": out}
