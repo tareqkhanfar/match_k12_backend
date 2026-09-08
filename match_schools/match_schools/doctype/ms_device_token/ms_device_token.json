@@ -1,0 +1,19 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "hash",
+ "creation": "2026-09-01 00:00:00", "doctype": "DocType", "editable_grid": 0, "engine": "InnoDB",
+ "field_order": ["user", "token", "platform", "column_break_1", "is_active", "last_seen", "failures"],
+ "fields": [
+  {"fieldname": "user", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "المستخدم", "options": "User", "reqd": 1},
+  {"fieldname": "token", "fieldtype": "Small Text", "label": "رمز الجهاز", "reqd": 1},
+  {"fieldname": "platform", "fieldtype": "Select", "in_list_view": 1, "label": "النظام", "options": "android\nios\nweb", "default": "android"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "is_active", "fieldtype": "Check", "in_list_view": 1, "label": "فعّال", "default": "1"},
+  {"fieldname": "last_seen", "fieldtype": "Datetime", "label": "آخر ظهور"},
+  {"fieldname": "failures", "fieldtype": "Int", "label": "مرات الفشل المتتالية", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-09-01 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Device Token",
+ "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 0
+}

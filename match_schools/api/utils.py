@@ -635,6 +635,171 @@ def audience_filter(persona: str) -> dict:
 	return {"ms_audience": "all"}
 
 
+def sync_group_instructors(student_group: str | None) -> int:
+	"""Register on the section every teacher its timetable names.
+
+	Building a timetable said who teaches what, but wrote that nowhere on the
+	section itself — so «شعبي» and «طلابي» came up empty for teachers whose
+	only link was the schedule, and the subject's own teacher field stayed
+	blank. This closes the loop: whoever is named on a lesson or a weekly slot
+	becomes an instructor of record on the class.
+
+	Additive on purpose. It never removes a teacher a human put there: a
+	co-teacher or a substitute is not on the timetable and must not be dropped
+	because a week was regenerated.
+
+	Returns how many were newly added.
+	"""
+	if not student_group or not frappe.db.exists("Student Group", student_group):
+		return 0
+
+	named: set[str] = {
+		i
+		for i in frappe.get_all(
+			"Course Schedule",
+			filters={"student_group": student_group, "docstatus": ["<", 2]},
+			pluck="instructor",
+			limit_page_length=0,
+		)
+		if i
+	}
+	if frappe.db.table_exists("MS Timetable Slot"):
+		named |= {
+			i
+			for i in frappe.get_all(
+				"MS Timetable Slot",
+				filters={"student_group": student_group, "active": 1},
+				pluck="instructor",
+				limit_page_length=0,
+			)
+			if i
+		}
+	if not named:
+		return 0
+
+	existing = set(
+		frappe.get_all(
+			"Student Group Instructor",
+			filters={"parent": student_group, "parenttype": "Student Group"},
+			pluck="instructor",
+			limit_page_length=0,
+		)
+	)
+	missing = sorted(named - existing)
+	if not missing:
+		return 0
+
+	doc = frappe.get_doc("Student Group", student_group)
+	for instructor in missing:
+		if not frappe.db.exists("Instructor", instructor):
+			continue
+		doc.append(
+			"instructors",
+			{
+				"instructor": instructor,
+				"instructor_name": frappe.db.get_value(
+					"Instructor", instructor, "instructor_name"
+				),
+			},
+		)
+	doc.save(ignore_permissions=True)
+	return len(missing)
+
+
+def instructor_user(instructor: str | None) -> str | None:
+	"""الحساب الذي يخصّ معلّماً — عكس `get_linked_instructor` بمساراته الثلاثة.
+
+	كان يُقرأ بمسارين فقط (Employee ثم `ms_user`)، فمعلّمٌ له حساب ولم يُربط
+	سجلّه به يبقى مجهولاً للنظام: يسجّل ساعاته المكتبية فلا تظهر لأحد، لأن
+	الطالب يصل إليه عبر سجلّ المعلّم لا عبر حسابه. المطابقة بالاسم هي المسار
+	الثالث نفسه الذي يعتمده الاتجاه المعاكس، فيجب أن يكونا متناظرين وإلا
+	ظهر المعلّم في اتجاه واحد دون الآخر.
+	"""
+	if not instructor:
+		return None
+
+	employee = frappe.db.get_value("Instructor", instructor, "employee")
+	if employee:
+		user = frappe.db.get_value("Employee", employee, "user_id")
+		if user:
+			return user
+
+	direct = frappe.db.get_value("Instructor", instructor, "ms_user")
+	if direct:
+		return direct
+
+	name = frappe.db.get_value("Instructor", instructor, "instructor_name")
+	if name:
+		return frappe.db.get_value("User", {"full_name": name, "enabled": 1}, "name")
+	return None
+
+
+def instructor_groups(
+	instructor: str | None, *, period: bool = True, active_only: bool = True
+) -> list[str]:
+	"""The sections a teacher actually teaches, this period.
+
+	One answer to one question. The app used to answer it six different ways —
+	attendance read the section roster, the lesson log read timetable slots,
+	the community read the roster plus Course Schedule — so the same teacher
+	saw different classes on different screens, and «شعبي» came up empty for
+	someone whose sections were only ever linked through the timetable.
+
+	All three links count, because each is written by a different flow:
+
+	* `Student Group Instructor` — set by hand when the section is created.
+	* `Course Schedule` — written when a timetable is generated into lessons.
+	* `MS Timetable Slot` — the weekly pattern behind those lessons.
+
+	The union is then narrowed to the selected year and term: a teacher who
+	taught a class last year is not teaching it now, and listing it invites
+	them to mark attendance on a section that no longer exists.
+	"""
+	if not instructor:
+		return []
+
+	groups: set[str] = set(
+		frappe.get_all(
+			"Student Group Instructor",
+			filters={"instructor": instructor, "parenttype": "Student Group"},
+			pluck="parent",
+			limit_page_length=0,
+		)
+	)
+
+	groups |= {
+		g
+		for g in frappe.get_all(
+			"Course Schedule",
+			filters={"instructor": instructor, "docstatus": ["<", 2]},
+			pluck="student_group",
+			limit_page_length=0,
+		)
+		if g
+	}
+
+	if frappe.db.table_exists("MS Timetable Slot"):
+		slot_filters: dict = {"instructor": instructor}
+		if active_only:
+			slot_filters["active"] = 1
+		groups |= {
+			g
+			for g in frappe.get_all(
+				"MS Timetable Slot", filters=slot_filters, pluck="student_group",
+				limit_page_length=0,
+			)
+			if g
+		}
+
+	if not groups:
+		return []
+
+	filters: dict = {"name": ["in", sorted(groups)], "disabled": 0}
+	if period:
+		apply_period(filters, "Student Group")
+	return frappe.get_all("Student Group", filters=filters, pluck="name", limit_page_length=0)
+
+
 def apply_period(
 	filters: dict,
 	doctype: str,
