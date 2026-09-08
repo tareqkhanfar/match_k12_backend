@@ -130,3 +130,77 @@ You cannot book this person.,لا يمكنك حجز موعد مع هذا الم�
 You cannot record assessments.,لا تملك صلاحية تسجيل التقييمات.
 You cannot write in the class book.,لا تملك صلاحية الكتابة في دفتر الحصص.
 the plan,الخطة
+Batch,الشعبة
+Billed,المفوتر
+Closing Balance,الرصيد الختامي
+Closing Balance (Due),الرصيد النهائي (المستحق)
+Collected,المُحصَّل
+Collection %,نسبة التحصيل
+Daily Collection Report,تقرير التحصيل اليومي
+Due Date,تاريخ الاستحقاق
+Due From,الاستحقاق من
+Due To,الاستحقاق إلى
+Earliest Due,أقدم استحقاق
+Education Accounting,محاسبة التعليم
+Enhanced Student Fees Collection,تحصيل رسوم الطلاب (تفصيلي)
+Entries,عدد الحركات
+Exclude Students Marked as Left,استثناء الطلاب المغادرين
+Fee Schedule,جدول الرسوم
+From Posting Date,من تاريخ الترحيل
+Fully Paid,مدفوع بالكامل
+Grand Total,الإجمالي
+Group By,التجميع حسب
+Guardian Fees Statement,كشف رسوم ولي الأمر
+Guardian Mobile,جوال ولي الأمر
+Guardian Name,اسم ولي الأمر
+ID Number,رقم الهوية
+Invoice,الفاتورة
+Invoices,عدد الفواتير
+Last Payment Amount,مبلغ آخر دفعة
+Last Payment Date,تاريخ آخر دفعة
+Last Payment Voucher,سند آخر دفعة
+Latest Posting,آخر ترحيل
+Left On,تاريخ المغادرة
+Marked as Left,مسجلون كمغادرين
+New Academic Year,العام الدراسي الجديد
+No Fees,بدون رسوم
+Of Which Student Fees,منها رسوم طلاب
+Only Rows With Outstanding,الصفوف التي عليها متأخرات فقط
+Only Students With Outstanding,الطلاب الذين عليهم متأخرات فقط
+Opening Balance,الرصيد الافتتاحي
+Outstanding,المتبقي
+Outstanding Amount,المتبقي
+Paid,المدفوع
+Paid Amount,المدفوع
+Paid Out,المدفوع
+Partially Paid,مدفوع جزئياً
+Payment Status,حالة الدفع
+Posting Date,تاريخ الترحيل
+Prev. Year Fees,رسوم السنة السابقة
+Prev. Year Outstanding,متبقي السنة السابقة
+Prev. Year Paid,المدفوع للسنة السابقة
+Previous Academic Year,العام الدراسي السابق
+Previous Batch,الشعبة السابقة
+Previous Program,الصف السابق
+Program Enrollment,التسجيل الدراسي
+Reason For Leaving,سبب المغادرة
+Received,المقبوض
+School Collections Only,تحصيلات المدرسة فقط
+Student (legacy fee),الطالب (رسوم سابقة)
+Student Batch,الشعبة
+Student Fee Collection Advanced,تحصيل الرسوم (مجمّع)
+Student Mobile,جوال الطالب
+Student Statement of Account,كشف حساب الطالب
+Student Status,حالة الطالب
+Students By Guardian Fees Summary,ملخص رسوم أبناء ولي الأمر
+To Posting Date,إلى تاريخ الترحيل
+Total Credit,إجمالي الدائن
+Total Debit,إجمالي المدين
+Total Outstanding,إجمالي المتأخرات
+Total Outstanding (All Years),إجمالي المتأخرات (كل السنوات)
+Unenrolled Students Next Academic Year,الطلاب غير المسجلين للعام الجديد
+Unpaid,غير مدفوع
+Unpaid Invoices,فواتير غير مسددة
+Voucher No,رقم المستند
+Voucher Type,نوع المستند
+With Outstanding,عليهم متأخرات

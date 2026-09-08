@@ -1,0 +1,566 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Guardian Fees Statement") }}{% endblock %}
+
+{% block head_include %}
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap");
+
+:root {
+	--ink:       #0d1117;
+	--ink-soft:  #4a5568;
+	--rule:      #d0d7de;
+	--rule-dark: #0d1117;
+	--accent:    #0550ae;
+	--accent-bg: #dbeafe;
+	--row-alt:   #f6f8fa;
+	--white:     #ffffff;
+	--red:       #b91c1c;
+	--green:     #15803d;
+	--amber:     #b45309;
+	--debit-bg:  #fff7ed;
+	--credit-bg: #f0fdf4;
+	--sans:      "Cairo", sans-serif;
+	--mono:      "IBM Plex Mono", monospace;
+}
+
+body { background: #eef1f6; }
+.soa-page { max-width: 1180px; margin: 0 auto; padding: 24px 16px 70px; }
+
+/* ---------- Filter toolbar (screen only) ---------- */
+.soa-toolbar {
+	background: var(--white); border: 1px solid var(--rule); border-radius: 8px;
+	padding: 16px; margin-bottom: 20px; direction: rtl; text-align: right;
+	font-family: var(--sans); display: grid; gap: 12px;
+	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: end;
+	box-shadow: 0 2px 8px -3px rgba(13,17,23,.12);
+}
+.soa-fld { display: flex; flex-direction: column; }
+.soa-fld label { font-size: 8.5pt; font-weight: 700; color: var(--ink-soft); margin-bottom: 5px; }
+.soa-ctl {
+	width: 100%; border: 1.5px solid var(--rule); border-radius: 6px; padding: 9px 11px;
+	font-size: 10pt; font-family: var(--sans); background: var(--white); color: var(--ink);
+	appearance: none; transition: border-color .15s, box-shadow .15s;
+}
+select.soa-ctl {
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a5568' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+	background-repeat: no-repeat; background-position: left 11px center; padding-left: 36px;
+}
+.soa-ctl:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(5,80,174,.14); }
+
+/* ---------- Searchable combobox ---------- */
+.soa-combo { position: relative; }
+.soa-combo .soa-ctl { cursor: text; padding-left: 34px; background-image:
+	url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%234a5568' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+	background-repeat: no-repeat; background-position: left 11px center; }
+.soa-combo-panel {
+	position: absolute; z-index: 50; top: calc(100% + 4px); left: 0; right: 0;
+	background: #fff; border: 1.5px solid var(--rule); border-radius: 8px;
+	box-shadow: 0 12px 28px -10px rgba(13,17,23,.3); max-height: 260px; overflow-y: auto;
+	display: none; font-family: var(--sans); font-size: 9.5pt;
+}
+.soa-combo.open .soa-combo-panel { display: block; }
+.soa-combo-opt { padding: 8px 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.soa-combo-opt:hover, .soa-combo-opt.active { background: var(--accent-bg); color: var(--accent); }
+.soa-combo-opt.selected { font-weight: 700; }
+.soa-combo-empty { padding: 10px 11px; color: var(--ink-soft); font-size: 9pt; }
+.soa-combo-clear {
+	position: absolute; top: 50%; left: auto; right: 9px; transform: translateY(-50%);
+	border: none; background: transparent; color: var(--ink-soft); cursor: pointer;
+	font-size: 13pt; line-height: 1; padding: 0 4px; display: none;
+}
+.soa-combo.has-value .soa-combo-clear { display: block; }
+.soa-tb-actions { display: flex; gap: 8px; }
+.soa-btn {
+	border: none; border-radius: 6px; padding: 10px 18px; font-weight: 700; font-size: 10pt;
+	cursor: pointer; font-family: var(--sans); transition: background .15s, transform .08s;
+}
+.soa-btn:active { transform: translateY(1px); }
+.soa-btn-primary { background: var(--accent); color: #fff; }
+.soa-btn-primary:hover { background: #043e87; }
+.soa-btn-ghost { background: #eef1f8; color: #334155; }
+.soa-btn-ghost:hover { background: #e1e7f3; }
+
+/* ---------- Document sheet ---------- */
+.soa-sheet {
+	background: var(--white); border: 1px solid var(--rule); border-radius: 6px;
+	padding: 26px 28px; box-shadow: 0 4px 16px -8px rgba(13,17,23,.25);
+}
+.soa-wrap { font-family: var(--sans); font-size: 9pt; color: var(--ink); direction: rtl; text-align: right; }
+
+/* HEADER */
+.soa-header {
+	display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+	border-bottom: 2.5px solid var(--rule-dark); padding-bottom: 10px; margin-bottom: 12px; gap: 12px;
+}
+.soa-logo { max-height: 64px; max-width: 160px; object-fit: contain; }
+.soa-report-name { font-size: 14pt; font-weight: 700; color: var(--accent); letter-spacing: .3px; }
+.soa-period      { font-size: 8pt; color: var(--ink-soft); margin-top: 3px; }
+.soa-printed-by  { font-size: 7pt; color: var(--ink-soft); font-family: var(--mono); margin-top: 2px; direction: ltr; text-align: left; }
+.soa-title-block { text-align: left; direction: ltr; }
+.soa-company-name { font-size: 15pt; font-weight: 700; color: var(--ink); }
+.soa-currency-badge {
+	display: inline-block; background: var(--accent-bg); color: var(--accent);
+	font-family: var(--mono); font-size: 7pt; font-weight: 600;
+	padding: 1px 6px; border-radius: 3px; margin-right: 5px; direction: ltr;
+}
+
+/* FILTERS STRIP */
+.soa-filters {
+	display: flex; flex-wrap: wrap; gap: 6px 16px;
+	background: var(--row-alt); border: 1px solid var(--rule);
+	border-radius: 5px; padding: 7px 12px; margin-bottom: 16px; font-size: 8pt;
+}
+.soa-filter-lbl { color: var(--ink-soft); font-weight: 600; font-size: 7pt; margin-left: 4px; }
+.soa-filter-val { color: var(--ink); font-weight: 600; }
+
+/* STUDENT BLOCK */
+.soa-student { margin-bottom: 22px; }
+.soa-student-head {
+	display: flex; align-items: center; justify-content: space-between;
+	background: var(--accent-bg); border: 1px solid #bfdbfe; border-radius: 5px;
+	padding: 8px 12px; margin-bottom: 8px;
+}
+.soa-student-name { font-size: 11pt; font-weight: 700; color: var(--accent); }
+.soa-student-id { font-family: var(--mono); font-size: 7.5pt; color: var(--ink-soft); direction: ltr; }
+.soa-student-chips { display: flex; gap: 8px; }
+.soa-chip { font-size: 7.5pt; font-weight: 700; padding: 3px 9px; border-radius: 3px; white-space: nowrap; direction: ltr; }
+.soa-chip-dr { background: var(--debit-bg); color: var(--red); }
+.soa-chip-cr { background: var(--credit-bg); color: var(--green); }
+.soa-chip-tot { background: var(--accent-bg); color: var(--accent); }
+
+.soa-year-label { font-size: 8.5pt; font-weight: 700; color: var(--ink); margin: 10px 2px 4px; }
+
+/* TABLE */
+.soa-table { width: 100%; border-collapse: collapse; border: 1px solid var(--rule); font-size: 8.5pt; margin-bottom: 4px; }
+.soa-table > thead > tr { background: var(--accent); color: var(--white); }
+.soa-table > thead > tr > th {
+	padding: 6px 7px; text-align: center; font-size: 7.5pt; font-weight: 700;
+	color: var(--white); letter-spacing: .3px; white-space: nowrap;
+	border-left: 1px solid rgba(255,255,255,.2);
+}
+.soa-table > thead > tr > th:last-child { border-left: none; }
+.soa-table > tbody > tr:nth-child(even) { background: var(--row-alt); }
+.soa-table > tbody > tr > td {
+	padding: 4px 7px; border-bottom: 1px solid var(--rule);
+	border-left: 1px solid var(--rule); vertical-align: middle; text-align: center;
+}
+.soa-table > tbody > tr > td:last-child { border-left: none; }
+.soa-table .txt { text-align: right; }
+.soa-table .num { text-align: left; font-family: var(--mono); font-size: 8pt; white-space: nowrap; direction: ltr; }
+.soa-table .dt  { font-family: var(--mono); font-size: 7.5pt; color: var(--ink-soft); white-space: nowrap; direction: ltr; }
+.soa-table .vc  { font-family: var(--mono); font-size: 7.5pt; color: var(--accent); font-weight: 600; direction: ltr; }
+.soa-table .dr-cell { background: var(--debit-bg); color: var(--red); }
+.soa-table .cr-cell { background: var(--credit-bg); color: var(--green); }
+
+.soa-row-term td {
+	background: #eff6ff !important; font-weight: 700; color: #1e40af; font-size: 8.5pt;
+	border-top: 1.5px solid #bfdbfe !important; border-bottom: 1.5px solid #bfdbfe !important;
+}
+
+.soa-status { font-size: 7.5pt; font-weight: 700; padding: 2px 8px; border-radius: 3px; white-space: nowrap; }
+.soa-st-paid { background: var(--credit-bg); color: var(--green); }
+.soa-st-partial { background: #fef3c7; color: var(--amber); }
+.soa-st-unpaid { background: var(--debit-bg); color: var(--red); }
+
+/* GRAND TOTALS */
+.soa-grand { margin-top: 22px; display: flex; justify-content: space-between; align-items: flex-end; flex-direction: row-reverse; }
+.soa-totals-box { border: 1.5px solid var(--accent); border-radius: 5px; overflow: hidden; min-width: 380px; }
+.soa-totals-head { background: var(--accent); color: var(--white); padding: 5px 12px; font-size: 8pt; font-weight: 700; text-align: center; }
+.soa-totals-grid { display: flex; }
+.soa-tc { flex: 1; padding: 8px 12px; border-right: 1px solid var(--rule); text-align: center; }
+.soa-tc:last-child { border-right: none; }
+.soa-tc-lbl { font-size: 7pt; color: var(--ink-soft); font-weight: 600; margin-bottom: 3px; }
+.soa-tc-val { font-family: var(--mono); font-size: 10pt; font-weight: 700; color: var(--ink); direction: ltr; }
+.soa-tc-val.dr { color: var(--red); }
+.soa-tc-val.cr { color: var(--green); }
+
+/* SIGNATURES */
+.soa-sigs { display: flex; gap: 28px; }
+.soa-sig  { text-align: center; min-width: 110px; }
+.soa-sig-line { border-top: 1px solid var(--ink); padding-top: 4px; font-size: 7.5pt; color: var(--ink-soft); margin-top: 32px; }
+
+/* FOOTER */
+.soa-footer { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 7pt; color: var(--ink-soft); }
+.soa-footer-brand { font-weight: 700; color: var(--accent); }
+
+/* STATES */
+.soa-empty, .soa-loading { text-align: center; color: var(--ink-soft); padding: 50px 0; font-family: var(--sans); }
+.soa-spinner { width: 30px; height: 30px; border-radius: 50%; margin: 0 auto 12px; border: 3px solid #e2e8f0; border-top-color: var(--accent); animation: soa-spin .8s linear infinite; }
+.soa-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 14px; font-family: var(--sans); font-weight: 600; direction: rtl; }
+@keyframes soa-spin { to { transform: rotate(360deg); } }
+
+@media print {
+	body { background: #fff; }
+	.soa-toolbar { display: none !important; }
+	.soa-sheet { box-shadow: none; border: none; padding: 0; }
+	.soa-table thead { display: table-header-group; }
+	tr { page-break-inside: avoid; }
+	.soa-student { page-break-inside: avoid; }
+}
+</style>
+{% endblock %}
+
+{% block page_content %}
+<div class="soa-page">
+
+	<!-- Filters (hidden on print) -->
+	<div class="soa-toolbar">
+		<div class="soa-fld">
+			<label>ولي الأمر / {{ _("Guardian") }} *</label>
+			<div class="soa-combo" id="combo-guardian">
+				<input type="text" class="soa-ctl" autocomplete="off" placeholder="{{ _('Search guardian...') }}">
+				<button type="button" class="soa-combo-clear" title="{{ _('Clear') }}">&times;</button>
+				<input type="hidden" id="f-guardian">
+				<div class="soa-combo-panel"></div>
+			</div>
+		</div>
+		<div class="soa-fld">
+			<label>السنة الدراسية / {{ _("Academic Year") }}</label>
+			<div class="soa-combo" id="combo-academic_year">
+				<input type="text" class="soa-ctl" autocomplete="off" placeholder="{{ _('All') }}">
+				<button type="button" class="soa-combo-clear" title="{{ _('Clear') }}">&times;</button>
+				<input type="hidden" id="f-academic_year">
+				<div class="soa-combo-panel"></div>
+			</div>
+		</div>
+		<div class="soa-fld">
+			<label>الفصل الدراسي / {{ _("Academic Term") }}</label>
+			<div class="soa-combo" id="combo-academic_term">
+				<input type="text" class="soa-ctl" autocomplete="off" placeholder="{{ _('All') }}">
+				<button type="button" class="soa-combo-clear" title="{{ _('Clear') }}">&times;</button>
+				<input type="hidden" id="f-academic_term">
+				<div class="soa-combo-panel"></div>
+			</div>
+		</div>
+		<div class="soa-fld">
+			<label>البرنامج / {{ _("Program") }}</label>
+			<div class="soa-combo" id="combo-program">
+				<input type="text" class="soa-ctl" autocomplete="off" placeholder="{{ _('All') }}">
+				<button type="button" class="soa-combo-clear" title="{{ _('Clear') }}">&times;</button>
+				<input type="hidden" id="f-program">
+				<div class="soa-combo-panel"></div>
+			</div>
+		</div>
+		<div class="soa-fld">
+			<label>من تاريخ / {{ _("From Date") }}</label>
+			<input id="f-from_date" type="date" class="soa-ctl">
+		</div>
+		<div class="soa-fld">
+			<label>إلى تاريخ / {{ _("To Date") }}</label>
+			<input id="f-to_date" type="date" class="soa-ctl">
+		</div>
+		<div class="soa-fld">
+			<label>الحالة / {{ _("Status") }}</label>
+			<select id="f-status" class="soa-ctl">
+				<option value="All">{{ _("All") }}</option>
+				<option value="Fully Paid">مدفوع بالكامل</option>
+				<option value="Partially Paid">مدفوع جزئياً</option>
+				<option value="Unpaid">غير مدفوع</option>
+			</select>
+		</div>
+		<div class="soa-tb-actions">
+			<button class="soa-btn soa-btn-primary" id="btn-run">عرض الكشف</button>
+			<button class="soa-btn soa-btn-ghost" id="btn-print">طباعة</button>
+		</div>
+	</div>
+
+	<div id="soa-out"></div>
+</div>
+
+<script>
+frappe.ready(function () {
+	const $ = (id) => document.getElementById(id);
+	const esc = (s) => frappe.utils.escape_html(s == null ? "" : String(s));
+	const defCur = {{ (default_currency or "") | tojson }};
+	const company = {{ (default_company or "") | tojson }};
+	let cur = defCur;
+	const fmt = (v) => format_currency(Number(v || 0), cur);
+	const fmtDate = (d) => d ? frappe.datetime.str_to_user(d) : "";
+	const nowStr = frappe.datetime.now_datetime ? frappe.datetime.now_datetime() : "";
+
+	// Searchable combobox bound to a hidden input (#<valueId>). Loads options
+	// from a doctype and lets the user type to filter. Returns a small API.
+	async function makeCombo(comboId, valueId, doctype, opts) {
+		opts = opts || {};
+		const root = $(comboId);
+		const input = root.querySelector(".soa-ctl");
+		const panel = root.querySelector(".soa-combo-panel");
+		const clearBtn = root.querySelector(".soa-combo-clear");
+		const hidden = $(valueId);
+		let items = [];        // [{value, label}]
+		let activeIdx = -1;
+
+		try {
+			const r = await frappe.call({
+				method: "frappe.client.get_list",
+				args: { doctype, fields: opts.fields || ["name"], filters: opts.filters || [],
+					limit_page_length: 0, order_by: opts.order_by || "name asc" },
+			});
+			items = (r.message || []).map(d => ({
+				value: d.name,
+				label: opts.label ? opts.label(d) : d.name,
+			}));
+		} catch (e) {}
+
+		function render(filter) {
+			const q = (filter || "").toLowerCase();
+			const matches = items.filter(it => !q || it.label.toLowerCase().includes(q));
+			activeIdx = -1;
+			if (!matches.length) {
+				panel.innerHTML = `<div class="soa-combo-empty">${__("No results")}</div>`;
+				return;
+			}
+			panel.innerHTML = matches.slice(0, 100).map(it =>
+				`<div class="soa-combo-opt${it.value === hidden.value ? " selected" : ""}" data-value="${esc(it.value)}">${esc(it.label)}</div>`
+			).join("");
+		}
+
+		function open() { render(""); root.classList.add("open"); }
+		function close() { root.classList.remove("open"); }
+
+		function setValue(value, label) {
+			hidden.value = value || "";
+			input.value = label || "";
+			root.classList.toggle("has-value", !!value);
+		}
+
+		input.addEventListener("focus", open);
+		input.addEventListener("input", () => {
+			// typing means the previous selection no longer matches verbatim
+			hidden.value = "";
+			root.classList.toggle("has-value", !!input.value);
+			render(input.value);
+			root.classList.add("open");
+		});
+		input.addEventListener("keydown", (e) => {
+			const optsEls = [...panel.querySelectorAll(".soa-combo-opt")];
+			if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, optsEls.length - 1); }
+			else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
+			else if (e.key === "Enter") {
+				if (activeIdx >= 0 && optsEls[activeIdx]) { e.preventDefault(); optsEls[activeIdx].click(); }
+				return;
+			} else if (e.key === "Escape") { close(); return; }
+			optsEls.forEach((el, i) => el.classList.toggle("active", i === activeIdx));
+			if (optsEls[activeIdx]) optsEls[activeIdx].scrollIntoView({ block: "nearest" });
+		});
+		panel.addEventListener("mousedown", (e) => {
+			const opt = e.target.closest(".soa-combo-opt");
+			if (!opt) return;
+			e.preventDefault();
+			const it = items.find(x => x.value === opt.dataset.value);
+			setValue(opt.dataset.value, it ? it.label : opt.dataset.value);
+			close();
+			if (opts.onChange) opts.onChange(hidden.value);
+		});
+		clearBtn.addEventListener("click", () => {
+			setValue("", "");
+			render("");
+			if (opts.onChange) opts.onChange("");
+		});
+		document.addEventListener("click", (e) => { if (!root.contains(e.target)) close(); });
+
+		return {
+			get value() { return hidden.value; },
+			set value(v) {
+				const it = items.find(x => x.value === v);
+				setValue(v || "", it ? it.label : (v || ""));
+			},
+		};
+	}
+
+	function statusPill(s) {
+		let cls = "soa-st-partial", txt = "مدفوع جزئياً";
+		if (s === "Fully Paid") { cls = "soa-st-paid"; txt = "مدفوع بالكامل"; }
+		else if (s === "Unpaid") { cls = "soa-st-unpaid"; txt = "غير مدفوع"; }
+		return `<span class="soa-status ${cls}">${txt}</span>`;
+	}
+
+	function termRows(term) {
+		let body = "";
+		term.invoices.forEach(f => {
+			const drCls = (f.paid_amount > 0) ? "dr-cell" : "";
+			const crCls = (f.outstanding_amount > 0) ? "cr-cell" : "";
+			body += `<tr>
+				<td class="dt">${fmtDate(f.posting_date)}</td>
+				<td class="dt">${fmtDate(f.due_date)}</td>
+				<td class="vc">${esc(f.invoice)}</td>
+				<td class="txt">${esc(f.fee_schedule)}</td>
+				<td class="txt">${esc(f.program)}</td>
+				<td>${esc(f.student_batch_name)}</td>
+				<td>${esc(f.student_category)}</td>
+				<td class="num ${drCls}">${fmt(f.paid_amount)}</td>
+				<td class="num ${crCls}">${fmt(f.outstanding_amount)}</td>
+				<td class="num">${fmt(f.grand_total)}</td>
+				<td>${statusPill(f.status)}</td>
+			</tr>`;
+		});
+		const t = term.totals;
+		body += `<tr class="soa-row-term">
+			<td colspan="7">إجمالي الفصل: ${esc(term.academic_term || "—")}</td>
+			<td class="num">${fmt(t.paid)}</td>
+			<td class="num">${fmt(t.outstanding)}</td>
+			<td class="num">${fmt(t.grand_total)}</td>
+			<td></td>
+		</tr>`;
+		return body;
+	}
+
+	function tableHead() {
+		return `<thead><tr>
+			<th style="width:9%">تاريخ الترحيل</th>
+			<th style="width:9%">تاريخ الاستحقاق</th>
+			<th style="width:11%">رقم الفاتورة</th>
+			<th style="width:13%">جدول الرسوم</th>
+			<th style="width:11%">البرنامج</th>
+			<th style="width:8%">الدفعة</th>
+			<th style="width:9%">الفئة</th>
+			<th style="width:9%">المدفوع</th>
+			<th style="width:9%">المتبقي</th>
+			<th style="width:9%">الإجمالي</th>
+			<th style="width:8%">الحالة</th>
+		</tr></thead>`;
+	}
+
+	function studentBlock(st) {
+		let years = "";
+		st.years.forEach(yr => {
+			let rows = "";
+			yr.terms.forEach(tm => { rows += termRows(tm); });
+			years += `<div class="soa-year-label">السنة الدراسية: ${esc(yr.academic_year || "—")} — الإجمالي: ${fmt(yr.totals.grand_total)}</div>
+				<table class="soa-table">${tableHead()}<tbody>${rows}</tbody></table>`;
+		});
+		const t = st.totals;
+		return `<div class="soa-student">
+			<div class="soa-student-head">
+				<div>
+					<div class="soa-student-name">${esc(st.student_name || st.student)}</div>
+					<div class="soa-student-id">${esc(st.student)}</div>
+				</div>
+				<div class="soa-student-chips">
+					<span class="soa-chip soa-chip-dr">المدفوع: ${fmt(t.paid)}</span>
+					<span class="soa-chip soa-chip-cr">المتبقي: ${fmt(t.outstanding)}</span>
+					<span class="soa-chip soa-chip-tot">الإجمالي: ${fmt(t.grand_total)}</span>
+				</div>
+			</div>
+			${years}
+		</div>`;
+	}
+
+	function renderSheet(res) {
+		const g = res.guardian || {};
+		const t = res.totals;
+		const fy = $("f-academic_year").value || "الكل";
+		const ft = $("f-academic_term").value || "الكل";
+
+		const head = `<div class="soa-header">
+			<div></div>
+			<div>
+				<div class="soa-report-name">كشف الرسوم الدراسية <span class="soa-currency-badge">${esc(cur)}</span></div>
+				<div class="soa-period">ولي الأمر: <strong>${esc(g.guardian_name || g.name || "")}</strong></div>
+				<div class="soa-printed-by">Printed: ${esc(nowStr)}</div>
+			</div>
+			<div class="soa-title-block">
+				<div class="soa-company-name">${esc(company)}</div>
+			</div>
+		</div>`;
+
+		const strip = `<div class="soa-filters">
+			<span><span class="soa-filter-lbl">ولي الأمر</span><span class="soa-filter-val">${esc(g.guardian_name || g.name || "")}</span></span>
+			<span><span class="soa-filter-lbl">السنة الدراسية</span><span class="soa-filter-val">${esc(fy)}</span></span>
+			<span><span class="soa-filter-lbl">الفصل الدراسي</span><span class="soa-filter-val">${esc(ft)}</span></span>
+			<span><span class="soa-filter-lbl">الحالة</span><span class="soa-filter-val">${esc($("f-status").options[$("f-status").selectedIndex].text)}</span></span>
+		</div>`;
+
+		const students = res.students.map(studentBlock).join("");
+
+		const grand = `<div class="soa-grand">
+			<div class="soa-totals-box">
+				<div class="soa-totals-head">ملخص الرسوم</div>
+				<div class="soa-totals-grid">
+					<div class="soa-tc"><div class="soa-tc-lbl">إجمالي المدفوع</div><div class="soa-tc-val cr">${fmt(t.paid)}</div></div>
+					<div class="soa-tc"><div class="soa-tc-lbl">إجمالي المتبقي</div><div class="soa-tc-val dr">${fmt(t.outstanding)}</div></div>
+					<div class="soa-tc"><div class="soa-tc-lbl">الإجمالي الكلي</div><div class="soa-tc-val">${fmt(t.grand_total)}</div></div>
+				</div>
+			</div>
+			<div class="soa-sigs">
+				<div class="soa-sig"><div class="soa-sig-line">المحاسب</div></div>
+				<div class="soa-sig"><div class="soa-sig-line">المدير المالي</div></div>
+			</div>
+		</div>`;
+
+		const footer = `<div class="soa-footer">
+			<span>${esc(company)} — كشف رسوم سري</span>
+			<span class="soa-footer-brand">Powered by Match Systems — شركة ماتش سيستمز لحلول الأنظمة التكنولوجية</span>
+			<span>Printed: ${esc(nowStr)}</span>
+		</div>`;
+
+		$("soa-out").innerHTML = `<div class="soa-sheet"><div class="soa-wrap">
+			${head}${strip}${students}${grand}${footer}
+		</div></div>`;
+	}
+
+	async function run() {
+		const guardian = $("f-guardian").value;
+		if (!guardian) {
+			$("soa-out").innerHTML = `<div class="soa-error">الرجاء اختيار ولي الأمر.</div>`;
+			return;
+		}
+		$("soa-out").innerHTML = `<div class="soa-loading"><div class="soa-spinner"></div>جارٍ تحميل الكشف...</div>`;
+		try {
+			const r = await frappe.call({
+				method: "match_schools.api.fee_reports.guardian_fees_statement",
+				args: {
+					guardian: guardian,
+					academic_year: $("f-academic_year").value || null,
+					academic_term: $("f-academic_term").value || null,
+					program: $("f-program").value || null,
+					from_date: $("f-from_date").value || null,
+					to_date: $("f-to_date").value || null,
+					status: $("f-status").value || "All",
+				},
+			});
+			const res = r.message;
+			if (!res || !res.students || !res.students.length) {
+				$("soa-out").innerHTML = `<div class="soa-empty">لا توجد رسوم لولي الأمر / الفلاتر المحددة.</div>`;
+				return;
+			}
+			cur = res.currency || defCur;
+			renderSheet(res);
+		} catch (e) {
+			$("soa-out").innerHTML = `<div class="soa-error">${esc((e && e.message) || "حدث خطأ غير متوقع.")}</div>`;
+		}
+	}
+
+	$("btn-run").addEventListener("click", run);
+	$("btn-print").addEventListener("click", () => window.print());
+
+	(async function init() {
+		const combos = {};
+		combos.guardian = await makeCombo("combo-guardian", "f-guardian", "Guardian", {
+			fields: ["name", "guardian_name"], order_by: "guardian_name asc",
+			label: (d) => d.guardian_name ? `${d.guardian_name} (${d.name})` : d.name,
+			onChange: run,            // auto-run when a guardian is picked
+		});
+		combos.academic_year = await makeCombo("combo-academic_year", "f-academic_year", "Academic Year", { order_by: "name desc" });
+		combos.academic_term = await makeCombo("combo-academic_term", "f-academic_term", "Academic Term", { order_by: "name desc" });
+		combos.program = await makeCombo("combo-program", "f-program", "Program", { order_by: "name asc" });
+
+		// Prefill from URL query params and auto-run.
+		const params = new URLSearchParams(window.location.search);
+		if (params.toString()) {
+			["academic_year","academic_term","program"].forEach(k => {
+				if (params.get(k) && combos[k]) combos[k].value = params.get(k);
+			});
+			if (params.get("from_date")) $("f-from_date").value = params.get("from_date");
+			if (params.get("to_date")) $("f-to_date").value = params.get("to_date");
+			if (params.get("status")) $("f-status").value = params.get("status");
+			if (params.get("guardian")) {
+				combos.guardian.value = params.get("guardian");
+				run();
+			}
+		}
+	})();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2026-09-08 00:00:00.000000",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letterhead": null,
+ "modified": "2026-09-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "Unenrolled Students Next Academic Year",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Program Enrollment",
+ "report_name": "Unenrolled Students Next Academic Year",
+ "report_type": "Script Report",
+ "roles": [
+  {"role": "Academics User"},
+  {"role": "Accounts User"},
+  {"role": "Accounts Manager"},
+  {"role": "System Manager"}
+ ],
+ "timeout": 0
+}
