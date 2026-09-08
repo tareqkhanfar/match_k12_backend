@@ -21,6 +21,7 @@ Ordinary sales invoices — no student — are left completely alone.
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 
 def validate_student_invoice(doc, method=None):
@@ -144,3 +145,198 @@ def _copy_enrollment_context(doc):
 	doc.ms_program = row.program
 	doc.ms_academic_year = row.academic_year
 	doc.ms_academic_term = row.academic_term
+
+
+# ---------------------------------------------------------------------------
+# ما تحتاجه شاشة الفاتورة لتملأ نفسها
+#
+# القواعد أعلاه تحرس الفاتورة عند الحفظ، وهذه تُعينها قبله. الفارق مقصود:
+# الحارس يرفض الخطأ، وهذه تجعل ارتكابه غير وارد أصلاً — فمن يفتح فاتورة من
+# ملف طالب يجد العميل وتسجيله وبنوده جاهزة بدل أن يبحث عنها ثم يُخطئ فيها.
+# ---------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def student_context(student: str) -> dict:
+	"""عميل الطالب والسياق الدراسي الحالي، لتعبئة رأس الفاتورة.
+
+	العميل يُنشأ عند الحاجة: طالبٌ سُجّل ولم يُفتح له حساب عميل بعد يجب أن
+	تُفتح له فاتورة لا أن تُرفض — وهذا ما تفعله `set_missing_customer_details`
+	في Education نفسها.
+	"""
+	if not student or not frappe.db.exists("Student", student):
+		return {}
+
+	customer = frappe.db.get_value("Student", student, "customer")
+	if not customer:
+		doc = frappe.get_doc("Student", student)
+		doc.set_missing_customer_details()
+		customer = frappe.db.get_value("Student", student, "customer")
+
+	return {
+		"customer": customer,
+		"student_name": frappe.db.get_value("Student", student, "student_name"),
+		"academic_year": frappe.db.get_single_value(
+			"Education Settings", "current_academic_year"
+		),
+		"academic_term": frappe.db.get_single_value(
+			"Education Settings", "current_academic_term"
+		),
+	}
+
+
+def _fee_structure_for(enrollment: dict) -> str | None:
+	"""خطة الرسوم التي تنطبق على تسجيل بعينه.
+
+	تُجرَّب من الأخصّ إلى الأعمّ: خطة تطابق الفئة والفصل معاً هي الأدق، ثم
+	ما يهمل الفئة، ثم ما يهمل الفصل. بلا هذا التدرّج تعود مدرسةٌ لا تستعمل
+	فئات الطلاب بلا خطة أصلاً، ويُفتح لها إيصال فارغ.
+	"""
+	base = {"program": enrollment.get("program"), "docstatus": ["<", 2]}
+
+	attempts = [
+		{
+			**base,
+			"academic_year": enrollment.get("academic_year"),
+			"academic_term": enrollment.get("academic_term"),
+			"student_category": enrollment.get("student_category"),
+		},
+		{
+			**base,
+			"academic_year": enrollment.get("academic_year"),
+			"academic_term": enrollment.get("academic_term"),
+		},
+		{**base, "academic_year": enrollment.get("academic_year")},
+	]
+
+	for filters in attempts:
+		clean = {k: v for k, v in filters.items() if v}
+		if "program" not in clean:
+			continue
+		found = frappe.get_all(
+			"Fee Structure", filters=clean, pluck="name", order_by="modified desc", limit=1
+		)
+		if found:
+			return found[0]
+	return None
+
+
+@frappe.whitelist()
+def enrollment_items(program_enrollment: str) -> dict:
+	"""بنود الفاتورة المستمدّة من خطة رسوم هذا التسجيل.
+
+	كل مكوّن رسوم يحمل صنفاً ونسبة خصم، فيتحوّل صفّاً في الفاتورة كما هو —
+	لا إعادة إدخال يدوي ولا فرصة لخطأ في مبلغ.
+	"""
+	if not program_enrollment:
+		return {"items": []}
+
+	enrollment = frappe.db.get_value(
+		"Program Enrollment",
+		program_enrollment,
+		["student", "program", "academic_year", "academic_term", "student_category"],
+		as_dict=True,
+	)
+	if not enrollment:
+		return {"items": []}
+
+	structure = _fee_structure_for(enrollment)
+	if not structure:
+		return {
+			"items": [],
+			"message": _("No fee structure found for programme {0}").format(
+				enrollment.get("program")
+			),
+		}
+
+	items = []
+	for row in frappe.get_all(
+		"Fee Component",
+		filters={"parent": structure, "parenttype": "Fee Structure"},
+		fields=["fees_category", "description", "amount", "item", "discount"],
+		order_by="idx asc",
+	):
+		# مكوّن بلا صنف لا يصلح بنداً في فاتورة، فنتخطّاه ونسمّيه في التحذير
+		# بدل أن نضع صفّاً لا يُحفظ.
+		if not row.item:
+			continue
+		gross = flt(row.amount)
+		discount = flt(row.discount)
+		# الصافي يُحسب هنا لا يُترك لـERPNext: هي لا تعيد حساب `rate` متى
+		# كان مضبوطاً — والسعر يجب أن يُضبط وإلا استُبدل بسعر قائمة الأسعار.
+		# فنرسل الثلاثة متّسقة: الإجمالي، والنسبة، والصافي بينهما.
+		net = flt(gross * (1 - discount / 100.0), 2) if discount else gross
+		items.append(
+			{
+				"item_code": row.item,
+				"description": row.description or row.fees_category,
+				"qty": 1,
+				"price_list_rate": gross,
+				"discount_percentage": discount,
+				"rate": net,
+			}
+		)
+
+	skipped = [
+		r.fees_category
+		for r in frappe.get_all(
+			"Fee Component",
+			filters={"parent": structure, "parenttype": "Fee Structure", "item": ["is", "not set"]},
+			fields=["fees_category"],
+		)
+	]
+
+	return {
+		"items": items,
+		"fee_structure": structure,
+		"program": enrollment.get("program"),
+		"academic_year": enrollment.get("academic_year"),
+		"academic_term": enrollment.get("academic_term"),
+		"skipped": skipped,
+	}
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def enrollment_query(doctype, txt, searchfield, start, page_len, filters):
+	"""قائمة التسجيلات المعروضة في حقل الفاتورة.
+
+	الطالب شرطٌ لا يسقط: اختيار تسجيل طالب آخر يرفضه الخادم بعد أن يكون
+	المستخدم ملأ الفاتورة كلها. أما السنة والفصل فيضيّقان القائمة ولا
+	يفرغانها — فإن لم يطابقهما شيء عُرضت تسجيلات الطالب كلها.
+
+	السبب من الواقع لا من الاحتياط: مدرسةٌ فتحت سنة جديدة وطلابها ما زالوا
+	مسجَّلين في شُعب السنة الماضية، فالتصفية بالفصل الحالي وحدها تُخلي
+	القائمة ولا يفهم المستخدم لماذا لا يجد تسجيل طالبٍ يراه أمامه.
+	"""
+	filters = filters or {}
+	student = filters.get("student")
+	if not student:
+		return []
+
+	base = {"student": student, "docstatus": 1}
+	if txt:
+		base["name"] = ["like", f"%{txt}%"]
+
+	narrow = dict(base)
+	for key in ("academic_year", "academic_term", "program"):
+		if filters.get(key):
+			narrow[key] = filters[key]
+
+	def fetch(where):
+		return frappe.get_all(
+			"Program Enrollment",
+			filters=where,
+			fields=["name", "program", "academic_year", "academic_term"],
+			order_by="academic_year desc, modified desc",
+			start=start,
+			page_length=page_len,
+		)
+
+	rows = fetch(narrow) if narrow != base else []
+	if not rows:
+		rows = fetch(base)
+
+	return [
+		[r.name, r.program or "", r.academic_term or r.academic_year or ""] for r in rows
+	]

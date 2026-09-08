@@ -43,6 +43,10 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
+# سكربت شاشة فاتورة المبيعات: يملأ العميل من الطالب، ويصفّي التسجيلات،
+# ويجلب بنود خطة الرسوم. القواعد الخادمية في `ms_billing.py` تبقى الحارس.
+doctype_js = {"Sales Invoice": "public/js/sales_invoice.js"}
+
 # doctype_js = {"doctype" : "public/js/doctype.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
