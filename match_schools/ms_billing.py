@@ -242,12 +242,31 @@ def enrollment_items(program_enrollment: str) -> dict:
 
 	structure = _fee_structure_for(enrollment)
 	if not structure:
-		return {
-			"items": [],
-			"message": _("No fee structure found for programme {0}").format(
-				enrollment.get("program")
-			),
-		}
+		# رسالةٌ تسمّي الفترة المطلوبة وما هو موجود لغيرها.
+		#
+		# «لا توجد خطة رسوم لهذا البرنامج» تُربك من يرى الخطة أمامه في
+		# القائمة: هي موجودة فعلاً لكن لسنة أخرى. ولا نستعملها — فوترة سنة
+		# بأسعار سنة ماضية خطأ في المال لا في العرض، ويمرّ صامتاً.
+		others = frappe.get_all(
+			"Fee Structure",
+			filters={"program": enrollment.get("program"), "docstatus": ["<", 2]},
+			fields=["name", "academic_year", "academic_term"],
+			limit_page_length=5,
+		)
+		wanted = enrollment.get("academic_term") or enrollment.get("academic_year") or ""
+		if others:
+			have = "، ".join(
+				f"{o.academic_term or o.academic_year}" for o in others if o.academic_year
+			)
+			message = _(
+				"No fee structure for programme {0} in {1}. "
+				"One exists for: {2} — create one for this period, or change the enrolment."
+			).format(enrollment.get("program"), wanted, have)
+		else:
+			message = _("No fee structure found for programme {0} in {1}").format(
+				enrollment.get("program"), wanted
+			)
+		return {"items": [], "message": message}
 
 	items = []
 	for row in frappe.get_all(
