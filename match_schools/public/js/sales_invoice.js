@@ -102,19 +102,37 @@ function fetch_fee_items(frm) {
 	});
 }
 
-function apply_items(frm, d) {
+async function apply_items(frm, d) {
 	frm.clear_table("items");
-	(d.items || []).forEach((row) => {
+
+	// `item_code` يُضبط عبر `set_value` لا بإسناد مباشر: هو ما يُشغّل جلب
+	// بيانات الصنف من الخادم — الاسم ووحدة القياس وحساب الإيراد. الإسناد
+	// المباشر يترك هذه الثلاثة فارغة، فترفض الشاشة الحفظ بـ«حقول مطلوبة»
+	// قبل أن تصل الفاتورة إلى الخادم أصلاً.
+	//
+	// وتسلسلياً لا متوازياً: الصفوف تتشارك جدولاً واحداً، وإطلاق الجلب
+	// لأربعة صفوف معاً يجعل ترتيب وصول الردود يقرّر أي صفّ يحمل أي سعر.
+	for (const row of d.items || []) {
 		const child = frm.add_child("items");
-		child.item_code = row.item_code;
-		child.description = row.description;
-		// إسناد مباشر لا عبر `set_value`: الأخير يُشغّل جلب بيانات الصنف
-		// فيستبدل السعر بسعر قائمة الأسعار ويضيع مبلغ خطة الرسوم.
-		child.qty = row.qty;
-		child.price_list_rate = row.price_list_rate;
-		child.discount_percentage = row.discount_percentage;
-		child.rate = row.rate;
-	});
+		await frappe.model.set_value(child.doctype, child.name, "item_code", row.item_code);
+
+		// بعد الجلب لا قبله: جلب الصنف يُحضر سعره من قائمة الأسعار ويدهس
+		// ما نضعه. ومبلغ خطة الرسوم هو المرجع لا قائمة الأسعار.
+		await frappe.model.set_value(child.doctype, child.name, {
+			qty: row.qty,
+			price_list_rate: row.price_list_rate,
+			discount_percentage: row.discount_percentage,
+			rate: row.rate,
+		});
+		if (row.description) {
+			await frappe.model.set_value(
+				child.doctype,
+				child.name,
+				"description",
+				row.description,
+			);
+		}
+	}
 	frm.refresh_field("items");
 
 	if (d.skipped && d.skipped.length) {
