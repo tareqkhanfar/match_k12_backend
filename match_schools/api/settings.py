@@ -8,16 +8,17 @@ import frappe.defaults
 from frappe import _
 
 from match_schools.api.utils import (
+	fail,
 	FRAPPE_ROLE_BY_PERSONA,
+	instructor_groups,
+	ms_endpoint,
 	PERSONA_LABELS_AR,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	ms_endpoint,
-	resolve_scope,
 )
 
 
@@ -240,11 +241,9 @@ def my_profile(persona: str = None):
 			"Instructor", scope["instructor"], ["name", "instructor_name", "department"], as_dict=True
 		)
 		if i:
-			groups = frappe.get_all(
-				"Student Group Instructor",
-				filters={"instructor": i.name, "parenttype": "Student Group"},
-				pluck="parent",
-			)
+			# شُعب هذا الفصل وحدها — بالمصدر الموحَّد نفسه الذي تقرأ منه
+			# «شعبي» و«طلابي»، فلا يختلف العدد بين شاشة وأخرى.
+			groups = instructor_groups(i.name)
 			profile["linked"] = {
 				"type": "instructor",
 				"id": i.name,

@@ -21,16 +21,17 @@ from frappe import _
 from frappe.utils import add_to_date, cint, get_datetime, getdate, now, nowdate
 
 from match_schools.api.utils import (
+	apply_period,
+	fail,
+	hhmm,
+	instructor_user,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	apply_period,
-	fail,
-	hhmm,
-	ms_endpoint,
-	resolve_scope,
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
@@ -104,16 +105,8 @@ def _overlaps(a_from: int, a_to: int, b_from: int, b_to: int) -> bool:
 
 
 def _instructor_user(instructor: str) -> str | None:
-	"""The account behind an Instructor record.
-
-	Two links, because the school's data has both: an Employee with a user, or
-	the explicit `ms_user` added when a teacher has no Employee record.
-	"""
-	if not instructor:
-		return None
-	employee = frappe.db.get_value("Instructor", instructor, "employee")
-	user = frappe.db.get_value("Employee", employee, "user_id") if employee else None
-	return user or frappe.db.get_value("Instructor", instructor, "ms_user")
+	"""موحَّد مع بقية النظام — انظر `instructor_user`."""
+	return instructor_user(instructor)
 
 
 def _office_users() -> list[str]:
@@ -152,6 +145,13 @@ def bookable_staff(persona: str) -> list[str] | None:
 			filters={"student": ["in", students or [""]], "active": 1},
 			pluck="parent",
 		)
+		# شُعب الفصل المختار وحدها: معلّم العام الماضي لا تُحجز عنده مواعيد.
+		if groups:
+			groups = frappe.get_all(
+				"Student Group",
+				filters=apply_period({"name": ["in", groups]}, "Student Group"),
+				pluck="name",
+			)
 		instructors = set(
 			frappe.get_all(
 				"Student Group Instructor",
@@ -168,6 +168,18 @@ def bookable_staff(persona: str) -> list[str] | None:
 				limit_page_length=0,
 			)
 			if r.instructor
+		}
+		# والحصص المولَّدة مصدرٌ ثالث: معلّمٌ يظهر في جدول الطالب يجب أن
+		# يكون قابلاً للحجز عنده، مهما كانت طريقة ربطه بالشعبة.
+		instructors |= {
+			i
+			for i in frappe.get_all(
+				"Course Schedule",
+				filters={"student_group": ["in", groups or [""]], "docstatus": ["<", 2]},
+				pluck="instructor",
+				limit_page_length=0,
+			)
+			if i
 		}
 		for i in instructors:
 			user = _instructor_user(i)

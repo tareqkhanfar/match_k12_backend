@@ -16,18 +16,19 @@ import frappe
 from frappe.utils import cint, flt, getdate, nowdate
 
 from match_schools.api.utils import (
-	hhmm,
+	apply_period,
 	BACK_OFFICE,
-	ROLE_PARENT,
-	ROLE_STUDENT,
-	ROLE_TEACHER,
 	fail,
 	get_guardian_students,
 	get_linked_guardian,
 	get_linked_instructor,
 	get_linked_student,
+	hhmm,
 	ms_endpoint,
 	resolve_scope,
+	ROLE_PARENT,
+	ROLE_STUDENT,
+	ROLE_TEACHER,
 )
 
 # How many rows each history section carries. Enough to show a pattern
@@ -874,9 +875,11 @@ def teacher_dossier(instructor: str, persona: str = None):
 	group_detail = []
 	student_total = 0
 	if group_names:
+		# شُعب هذا الفصل وحدها: من درّس صفّاً العام الماضي لم يعد يدرّسه،
+		# وعرضه في ملفه يضخّم نصابه ويوحي بأنه مسؤول عن طلاب ليسوا عنده.
 		for g in frappe.get_all(
 			"Student Group",
-			filters={"name": ["in", group_names]},
+			filters=apply_period({"name": ["in", group_names]}, "Student Group"),
 			fields=["name", "student_group_name", "program", "batch", "academic_year", "disabled"],
 			limit=60,
 		):
@@ -894,9 +897,25 @@ def teacher_dossier(instructor: str, persona: str = None):
 				}
 			)
 
+	# كل تبويب في ملف المعلّم يتبع الفترة المختارة. حصصُ العام الماضي
+	# ومشاهداتُه وواجباتُه تخصّ ملفّه في ذلك العام لا في هذا، وخلطها يضخّم
+	# نصابه ويجعل تقييمه يُقرأ على عملٍ لم يعد يؤدّيه.
+	#
+	# `Course Schedule` لا يحمل سنةً ولا فصلاً، فيُنسب زمنياً عبر شعبته.
+	term_groups = frappe.get_all(
+		"Student Group",
+		filters=apply_period({}, "Student Group"),
+		pluck="name",
+		limit_page_length=0,
+	)
+
 	lessons = _rows(
 		"Course Schedule",
-		{"instructor": instructor, "docstatus": ["<", 2]},
+		{
+			"instructor": instructor,
+			"docstatus": ["<", 2],
+			"student_group": ["in", term_groups or [""]],
+		},
 		["name", "course", "schedule_date", "from_time", "to_time", "room", "student_group"],
 		"schedule_date desc, from_time asc",
 		limit=60,
@@ -920,7 +939,9 @@ def teacher_dossier(instructor: str, persona: str = None):
 	if load_rows:
 		for plan in frappe.get_all(
 			"MS Timetable Plan",
-			filters={"name": ["in", list({r.parent for r in load_rows})]},
+			filters=apply_period(
+				{"name": ["in", list({r.parent for r in load_rows})]}, "MS Timetable Plan"
+			),
 			fields=["name", "plan_name", "student_group", "status", "modified"],
 		):
 			plans[plan.name] = plan
@@ -938,7 +959,7 @@ def teacher_dossier(instructor: str, persona: str = None):
 
 	observations = _rows(
 		"MS Teacher Observation",
-		{"instructor": instructor},
+		apply_period({"instructor": instructor}, "MS Teacher Observation"),
 		# The doctype calls these `rating` and `overall_percent`; asking for a
 		# column that does not exist made the whole teacher file fail to load.
 		["name", "observation_date", "observer", "rating", "overall_percent",
@@ -948,7 +969,9 @@ def teacher_dossier(instructor: str, persona: str = None):
 
 	assignments = _rows(
 		"MS Assignment",
-		{"owner": employee.get("user_id") or "__none__"},
+		apply_period(
+			{"owner": employee.get("user_id") or "__none__"}, "MS Assignment"
+		),
 		["name", "title", "course", "due_date", "status"],
 		"creation desc",
 		limit=20,

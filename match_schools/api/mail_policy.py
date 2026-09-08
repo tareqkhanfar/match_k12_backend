@@ -17,13 +17,14 @@ families, families can reach staff, and children cannot reach each other.
 
 import frappe
 from match_schools.api.utils import (
+	apply_period,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	ms_endpoint,
-	resolve_scope,
 )
 
 POLICY_KEY = "ms_mail_policy"
@@ -299,7 +300,11 @@ def my_audiences(persona: str = None):
 		ids = (
 			_my_group_ids(persona)
 			if persona not in (ROLE_ADMIN, ROLE_SECRETARY)
-			else frappe.get_all("Student Group", filters={"disabled": 0}, pluck="name")
+			else frappe.get_all(
+				"Student Group",
+				filters=apply_period({"disabled": 0}, "Student Group"),
+				pluck="name",
+			)
 		)
 		groups = [
 			{

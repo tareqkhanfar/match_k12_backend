@@ -20,6 +20,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, getdate, now_datetime, today
 
+from match_schools.api.scheduling import overlaps
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -538,9 +539,13 @@ class Solver:
 	teacher booked with another class is respected too.
 	"""
 
-	def __init__(self, days, slots, subjects, busy_teacher, busy_room, seed=None):
+	def __init__(
+		self, days, slots, subjects, busy_teacher, busy_room, seed=None, slot_times=None
+	):
 		self.days = days
 		self.slots = slots
+		# الحصة تُعرف بوقت بدئها في الشبكة، لكن التعارض يُقاس بفترتها كاملة.
+		self.slot_times = slot_times or {s: (s, s) for s in slots}
 		self.subjects = subjects
 		self.busy_teacher = busy_teacher
 		self.busy_room = busy_room
@@ -561,32 +566,39 @@ class Solver:
 		if self.per_day[day].get(course, 0) >= subject["max_per_day"]:
 			return False
 
-		key = (day, slot)
-		teacher = subject.get("instructor")
-		if teacher and key in self.busy_teacher.get(teacher, set()):
+		frm, to = self.slot_times[slot]
+		if _clashes(self.busy_teacher, subject.get("instructor"), day, frm, to):
 			return False
-		room = subject.get("preferred_room")
-		if room and key in self.busy_room.get(room, set()):
+		if _clashes(self.busy_room, subject.get("preferred_room"), day, frm, to):
 			return False
 		return True
 
 	def _place(self, subject, day, slot):
 		self.grid[day][slot] = subject
 		self.per_day[day][subject["course"]] = self.per_day[day].get(subject["course"], 0) + 1
-		key = (day, slot)
+		span = self.slot_times[slot]
 		if subject.get("instructor"):
-			self.busy_teacher.setdefault(subject["instructor"], set()).add(key)
+			self.busy_teacher.setdefault(subject["instructor"], {}).setdefault(
+				day, []
+			).append(span)
 		if subject.get("preferred_room"):
-			self.busy_room.setdefault(subject["preferred_room"], set()).add(key)
+			self.busy_room.setdefault(subject["preferred_room"], {}).setdefault(
+				day, []
+			).append(span)
 
 	def _unplace(self, subject, day, slot):
 		del self.grid[day][slot]
 		self.per_day[day][subject["course"]] -= 1
-		key = (day, slot)
-		if subject.get("instructor"):
-			self.busy_teacher.get(subject["instructor"], set()).discard(key)
-		if subject.get("preferred_room"):
-			self.busy_room.get(subject["preferred_room"], set()).discard(key)
+		span = self.slot_times[slot]
+		for store, who in (
+			(self.busy_teacher, subject.get("instructor")),
+			(self.busy_room, subject.get("preferred_room")),
+		):
+			if not who:
+				continue
+			spans = store.get(who, {}).get(day)
+			if spans and span in spans:
+				spans.remove(span)
 
 	def solve(self) -> tuple[dict, list]:
 		"""Return (grid, unplaced). Hardest subjects first, then backtrack."""
@@ -665,43 +677,85 @@ class Solver:
 
 
 def _existing_bookings(exclude_group: str, academic_term: str | None):
-	"""Teacher and room bookings from the rest of the school's timetable."""
-	busy_teacher: dict[str, set] = {}
-	busy_room: dict[str, set] = {}
+	"""Teacher and room bookings from the rest of the school's timetable.
+
+	Stored as intervals per weekday — `{who: {day: [(from, to), …]}}` — not as
+	start times.
+
+	Keying by start time was the bug that made "build automatically" produce a
+	week the validator then rejected: a school whose other sections run hourly
+	from 09:00 shares no start time with a plan of 45-minute periods from
+	08:00, so every existing booking looked free to the solver while the
+	validator — which compares intervals — saw all of them overlap. The two
+	must answer the same question the same way.
+	"""
+	busy_teacher: dict[str, dict[str, list]] = {}
+	busy_room: dict[str, dict[str, list]] = {}
+
+	def add(store, who, day, frm, to):
+		if not (who and day and frm and to):
+			return
+		store.setdefault(who, {}).setdefault(day, []).append((frm, to))
+
+	filters: dict = {"docstatus": ["<", 2]}
+	if exclude_group:
+		filters["student_group"] = ["!=", exclude_group]
+	# Same scope the validator uses: a plan for this term must not be blocked
+	# by last year's timetable, which is still on the calendar.
+	if academic_term:
+		# شعبةٌ بلا فصل تبقى ضمن الحساب: إسقاطها يجعل الحلّال يضع حصةً على
+		# معلّم مشغول عندها دون أن يدري.
+		groups = [
+			g
+			for g in frappe.get_all(
+				"Student Group",
+				filters={"academic_term": ["in", [academic_term, "", None]]},
+				pluck="name",
+			)
+			if g != exclude_group
+		]
+		filters["student_group"] = ["in", groups or [""]]
 
 	rows = frappe.get_all(
 		"Course Schedule",
-		filters={"student_group": ["!=", exclude_group]},
-		fields=["instructor", "room", "schedule_date", "from_time"],
-		limit=5000,
+		filters=filters,
+		fields=["instructor", "room", "schedule_date", "from_time", "to_time"],
+		limit_page_length=0,
 	)
 	for r in rows:
 		if not r.schedule_date:
 			continue
 		day = _weekday_name(r.schedule_date)
-		key = (day, _hhmmss(r.from_time))
-		if r.instructor:
-			busy_teacher.setdefault(r.instructor, set()).add(key)
-		if r.room:
-			busy_room.setdefault(r.room, set()).add(key)
+		frm, to = _hhmmss(r.from_time), _hhmmss(r.to_time)
+		add(busy_teacher, r.instructor, day, frm, to)
+		add(busy_room, r.room, day, frm, to)
 
 	# Education validates a lesson's room against Assessment Plan too, so an
 	# exam booking blocks the room just as another lesson would.
 	for r in frappe.get_all(
 		"Assessment Plan",
 		filters={"docstatus": ["<", 2]},
-		fields=["room", "supervisor", "schedule_date", "from_time"],
-		limit=2000,
+		fields=["room", "supervisor", "schedule_date", "from_time", "to_time"],
+		limit_page_length=0,
 	):
 		if not r.schedule_date:
 			continue
-		key = (_weekday_name(r.schedule_date), _hhmmss(r.from_time))
-		if r.room:
-			busy_room.setdefault(r.room, set()).add(key)
-		if r.supervisor:
-			busy_teacher.setdefault(r.supervisor, set()).add(key)
+		day = _weekday_name(r.schedule_date)
+		frm, to = _hhmmss(r.from_time), _hhmmss(r.to_time)
+		add(busy_room, r.room, day, frm, to)
+		add(busy_teacher, r.supervisor, day, frm, to)
 
 	return busy_teacher, busy_room
+
+
+def _clashes(store: dict, who: str, day: str, frm: str, to: str) -> bool:
+	"""Does `who` already have something overlapping [frm, to) that day?"""
+	if not who:
+		return False
+	for other_from, other_to in store.get(who, {}).get(day, ()):  # noqa: SIM110
+		if overlaps(frm, to, other_from, other_to):
+			return True
+	return False
 
 
 def _weekday_name(date) -> str:
@@ -770,11 +824,15 @@ def generate(plan: str, variant: str | int = None, persona: str = None):
 		for p in teaching
 	}
 
+	slot_times = {s: (slot_meta[s]["from_time"], slot_meta[s]["to_time"]) for s in slots}
+
 	busy_teacher, busy_room = _existing_bookings(doc.student_group, doc.academic_term)
-	solver = Solver(days, slots, subjects, busy_teacher, busy_room, seed=variant)
+	solver = Solver(
+		days, slots, subjects, busy_teacher, busy_room, seed=variant, slot_times=slot_times
+	)
 	grid, unplaced = solver.solve()
 
-	_assign_rooms(grid, days, slots, busy_room)
+	_assign_rooms(grid, days, slots, busy_room, slot_times)
 
 	lessons = []
 	for day in days:
@@ -959,7 +1017,7 @@ def apply_plan(
 	}
 
 
-def _assign_rooms(grid, days, slots, busy_room):
+def _assign_rooms(grid, days, slots, busy_room, slot_times):
 	"""Give every placed lesson a room.
 
 	Education checks a lesson's room against other lessons with the *same*
@@ -978,9 +1036,9 @@ def _assign_rooms(grid, days, slots, busy_room):
 			lesson = grid[day].get(slot)
 			if not lesson or lesson.get("preferred_room"):
 				continue
-			key = (day, slot)
+			frm, to = slot_times[slot]
 			free = next(
-				(r.name for r in rooms if key not in busy_room.get(r.name, set())),
+				(r.name for r in rooms if not _clashes(busy_room, r.name, day, frm, to)),
 				None,
 			)
 			if free:
@@ -988,7 +1046,7 @@ def _assign_rooms(grid, days, slots, busy_room):
 				placed = dict(lesson)
 				placed["preferred_room"] = free
 				grid[day][slot] = placed
-				busy_room.setdefault(free, set()).add(key)
+				busy_room.setdefault(free, {}).setdefault(day, []).append((frm, to))
 
 
 def _next_weekday(start, day_name: str):

@@ -62,6 +62,21 @@ def grade_for(percentage: float) -> dict:
 	return {"grade": last[1], "label": last[2], "emoji": last[3], "percentage": round(pct, 1)}
 
 
+def _own_student(persona: str) -> str | None:
+	"""The student a caller implicitly means when they name none.
+
+	A pupil means themselves; a guardian with a single child means that child.
+	A guardian of several is left to choose — picking one for them would show
+	the wrong child's results without saying so. Staff mean nobody.
+	"""
+	if persona not in (ROLE_STUDENT, ROLE_PARENT):
+		return None
+	students = resolve_scope(persona).get("students") or []
+	if persona == ROLE_STUDENT:
+		return students[0] if students else None
+	return students[0] if len(students) == 1 else None
+
+
 def _assert_can_see(persona: str, student: str):
 	if persona in BACK_OFFICE:
 		return
@@ -1591,8 +1606,27 @@ def term_grades(
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
-def academic_record(student: str, persona: str = None):
-	"""The student's whole history: every year and term, with final grades."""
+def academic_record(student: str = None, persona: str = None):
+	"""The student's whole history: every year and term, with final grades.
+
+	`student` is optional because the two personas who read their own record
+	have nothing to send: a pupil is their own subject, and a guardian who has
+	not picked a child yet sends nothing at all. Requiring it turned both of
+	those into a 500 and a red error screen on the Final results page.
+	"""
+	student = student or _own_student(persona)
+	if not student:
+		# No subject to report on is an empty record, not a failure — a guardian
+		# whose children are not linked yet should see "no results", not an error.
+		return {
+			"student": None,
+			"student_name": None,
+			"image": None,
+			"periods": [],
+			"cumulative": None,
+			"cumulative_grade": None,
+			"shows_cumulative": False,
+		}
 	_assert_can_see(persona, student)
 
 	periods = frappe.db.sql(

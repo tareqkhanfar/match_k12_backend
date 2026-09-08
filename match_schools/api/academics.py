@@ -8,20 +8,22 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	apply_period,
 	audience_filter,
-	hhmm,
 	BACK_OFFICE,
+	fail,
+	get_default_academic_term,
+	get_default_academic_year,
+	hhmm,
+	instructor_groups,
+	ms_endpoint,
+	parse_json_arg,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	get_default_academic_term,
-	get_default_academic_year,
-	ms_endpoint,
-	parse_json_arg,
-	resolve_scope,
 )
 
 WEEK_DAYS_AR = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
@@ -160,8 +162,7 @@ def courses_taught(instructor: str, student_group: str = None) -> list[str]:
 
 	# A Student Group can name a single course directly; that is the older
 	# per-subject group shape and still in use.
-	group_filters = {"instructor": instructor, "parenttype": "Student Group"}
-	owned = frappe.get_all("Student Group Instructor", filters=group_filters, pluck="parent")
+	owned = instructor_groups(instructor)
 	if owned:
 		if student_group:
 			owned = [g for g in owned if g == student_group]
@@ -267,26 +268,83 @@ def list_subjects(
 	):
 		grades.setdefault(r.course, []).append(r.parent)
 
+	# من يدرّس كل مادة هذا الفصل.
+	#
+	# كان يُستنتج من `Student Group.course` وحده — وهو الشكل القديم الذي
+	# تُخصَّص فيه شعبةٌ لمادة واحدة. أما المادة التي تُدرَّس داخل شعبة عامة
+	# (توجيهي علمي مثلاً) فلا شعبة تحمل اسمها، فتظهر أبداً «غير مُسند» مهما
+	# كان جدولها ممتلئاً بالمعلمين. الجدول هو المصدر الحقيقي، وقد يدرّس
+	# المادةَ الواحدة أكثر من معلّم في شُعب مختلفة — فتُعاد قائمةً لا اسماً.
+	term_groups = frappe.get_all(
+		"Student Group",
+		filters=apply_period({"disabled": 0}, "Student Group"),
+		pluck="name",
+		limit_page_length=0,
+	)
+
+	teachers_of: dict[str, list[str]] = {}
+	seen: dict[str, set] = {}
+
+	def remember(course: str, instructor: str | None, label: str | None):
+		if not course or not instructor:
+			return
+		if instructor in seen.setdefault(course, set()):
+			return
+		seen[course].add(instructor)
+		teachers_of.setdefault(course, []).append(
+			label or frappe.db.get_value("Instructor", instructor, "instructor_name") or instructor
+		)
+
+	if term_groups:
+		for r in frappe.get_all(
+			"Course Schedule",
+			filters={
+				"course": ["in", names],
+				"student_group": ["in", term_groups],
+				"docstatus": ["<", 2],
+			},
+			fields=["course", "instructor"],
+			limit_page_length=0,
+		):
+			remember(r.course, r.instructor, None)
+
+		if frappe.db.table_exists("MS Timetable Slot"):
+			for r in frappe.get_all(
+				"MS Timetable Slot",
+				filters={
+					"course": ["in", names],
+					"student_group": ["in", term_groups],
+					"active": 1,
+				},
+				fields=["course", "instructor"],
+				limit_page_length=0,
+			):
+				remember(r.course, r.instructor, None)
+
+	# والشكل القديم يبقى مصدراً إضافياً: شعبةٌ باسم المادة ومعلّمها مسجَّل فيها.
 	group_of: dict[str, str] = {}
 	for r in frappe.get_all(
 		"Student Group",
-		filters={"course": ["in", names], "disabled": 0},
+		filters=apply_period({"course": ["in", names], "disabled": 0}, "Student Group"),
 		fields=["name", "course"],
 	):
 		group_of.setdefault(r.course, r.name)
 
-	teacher_of: dict[str, str] = {}
 	if group_of:
+		by_group = {v: k for k, v in group_of.items()}
 		for r in frappe.get_all(
 			"Student Group Instructor",
 			filters={"parent": ["in", list(group_of.values())], "parenttype": "Student Group"},
-			fields=["parent", "instructor_name"],
+			fields=["parent", "instructor", "instructor_name"],
 		):
-			teacher_of.setdefault(r.parent, r.instructor_name)
+			remember(by_group.get(r.parent), r.instructor, r.instructor_name)
 
 	for c in courses:
 		c["grades"] = grades.get(c["name"], [])
-		c["teacher"] = teacher_of.get(group_of.get(c["name"], ""), None)
+		names_list = teachers_of.get(c["name"], [])
+		c["teachers"] = names_list
+		# الحقل المفرد يبقى لتوافق ما يقرأه الآن، ويحمل الأول.
+		c["teacher"] = names_list[0] if names_list else None
 		c["id"] = c["name"]
 		c["name_ar"] = c["course_name"]
 		# v16's Course has no code field; the record name doubles as the code.
@@ -965,33 +1023,10 @@ def save_subject(payload: str | dict, persona: str = None):
 	if isinstance(programs, list):
 		_sync_course_programs(doc.name, programs)
 
-	# A new teacher gets a login the same way a student or guardian does — the
-	# registrar hands over the slip on the spot rather than chasing IT later.
-	# An Instructor reaches its User through Employee, so the link is made
-	# there when one exists; otherwise the account still works because the
-	# persona resolves by full name as a fallback.
-	credentials = None
-	if not instructor_id and data.get("create_login") is not False:
-		from match_schools.api.credentials import create_account
-
-		existing_user = None
-		if doc.employee:
-			existing_user = frappe.db.get_value("Employee", doc.employee, "user_id")
-
-		if not existing_user:
-			credentials = create_account(
-				ROLE_TEACHER, doc.name, doc.instructor_name, mobile=data.get("mobile")
-			)
-			if doc.employee:
-				frappe.db.set_value(
-					"Employee", doc.employee, "user_id", credentials["user"],
-					update_modified=False,
-				)
-
 	frappe.db.commit()
 	return {
 		"success": True,
-		"data": {"id": doc.name, "name": doc.instructor_name, "credentials": credentials},
+		"data": {"id": doc.name, "name": doc.course_name},
 		"message_en": msg_en,
 		"message_ar": msg_ar,
 	}
@@ -1300,7 +1335,7 @@ def teacher_filter_options(persona: str = None):
 		"genders": sorted({r.gender for r in rows if r.gender}),
 		"groups": frappe.get_all(
 			"Student Group",
-			filters={"disabled": 0},
+			filters=apply_period({"disabled": 0}, "Student Group"),
 			fields=["name", "student_group_name"],
 			order_by="name",
 			limit_page_length=0,

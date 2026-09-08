@@ -22,18 +22,20 @@ from frappe.utils import add_days, cint, flt, getdate, today
 
 from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
-	hhmm,
+	apply_period,
 	BACK_OFFICE,
+	fail,
+	get_default_academic_term,
+	get_default_academic_year,
+	hhmm,
+	instructor_groups,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	get_default_academic_term,
-	get_default_academic_year,
-	ms_endpoint,
-	resolve_scope,
 )
 
 # Exam types the school schedules. Assessment Group is a free-form link in
@@ -71,28 +73,7 @@ def _visible_groups(persona: str, scope: dict, student: str = None) -> list[str]
 		return None
 
 	if persona == ROLE_TEACHER:
-		instructor = scope.get("instructor")
-		if not instructor:
-			return []
-		groups = {
-			r.parent
-			for r in frappe.get_all(
-				"Student Group Instructor",
-				filters={"instructor": instructor, "parenttype": "Student Group"},
-				fields=["parent"],
-			)
-		}
-		groups |= {
-			r.student_group
-			for r in frappe.get_all(
-				"Course Schedule",
-				filters={"instructor": instructor},
-				fields=["student_group"],
-				limit=1000,
-			)
-			if r.student_group
-		}
-		return sorted(groups)
+		return instructor_groups(scope.get("instructor"))
 
 	# Student or parent: the classes their children are enrolled in.
 	students = scope.get("students") or []
@@ -295,7 +276,7 @@ def form_options(persona: str = None):
 	scope = resolve_scope(persona)
 	groups = _visible_groups(persona, scope)
 
-	group_filters = {"disabled": 0}
+	group_filters = apply_period({"disabled": 0}, "Student Group")
 	if groups is not None:
 		if not groups:
 			return {"groups": [], "courses": [], "rooms": [], "types": _type_list()}

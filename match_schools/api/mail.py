@@ -23,13 +23,14 @@ from frappe import _
 from frappe.utils import add_to_date, cint, get_datetime, now
 
 from match_schools.api.utils import (
+	apply_period,
+	fail,
+	ms_endpoint,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	ms_endpoint,
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
@@ -355,6 +356,42 @@ def get_message(message: str = None, persona: str = None):
 	return row
 
 
+def _reply_allowance(data: dict) -> set[str]:
+	"""من يجوز الردّ عليهم في هذه الرسالة تحديداً.
+
+	السياسة تحكم **من تبدأ** مراسلته، لا هل تجيب من راسلك. طالبٌ تصله رسالة
+	من الإدارة كان يُمنع من الردّ برسالة «يمكنك مراسلة الأشخاص في قائمة جهات
+	اتصالك فقط» — لأن الإدارة ليست ضمن جمهوره. وهذا يجعل رسالةً تصله ولا
+	سبيل له إلى الجواب، وهو أسوأ من ألّا تصله.
+
+	تُفتح الإذن لطرفَي الرسالة الأصلية وحدهما، ولا تتوسّع: من ردّ على رسالة
+	لا يكسب بذلك حقّ مراسلة كل من في المدرسة.
+	"""
+	parent = (data.get("reply_to") or data.get("in_reply_to") or "").strip()
+	if not parent:
+		return set()
+
+	me = frappe.session.user
+	# لا يُفتح الإذن إلا لمن كان طرفاً في الرسالة الأصلية فعلاً.
+	mine = frappe.db.exists(
+		"MS Message Recipient", {"message": parent, "user": me, "is_pending": 0}
+	)
+	sender = frappe.db.get_value("MS Message", parent, "sender")
+	if not mine and sender != me:
+		return set()
+
+	people = {sender} if sender else set()
+	people |= set(
+		frappe.get_all(
+			"MS Message Recipient",
+			filters={"message": parent, "is_pending": 0},
+			pluck="user",
+		)
+	)
+	people.discard(me)
+	return {p for p in people if p}
+
+
 def _resolve_recipients(persona: str, data: dict) -> tuple[list[tuple[str, str]], str | None]:
 	"""Validate To/Cc/Bcc against the caller's contact list.
 
@@ -364,7 +401,7 @@ def _resolve_recipients(persona: str, data: dict) -> tuple[list[tuple[str, str]]
 	"""
 	pairs: list[tuple[str, str]] = []
 	seen: set[str] = set()
-	allowed = _allowed_recipients(persona)
+	allowed = _allowed_recipients(persona) | _reply_allowance(data)
 
 	# An audience is expanded here, not in the browser. The screen sends
 	# "guardians of 4-B", the server decides who that is for this caller, and
@@ -620,7 +657,7 @@ def save_message(payload: str | dict = None, persona: str = None):
 
 
 def _deliver(doc, pairs: list[tuple[str, str]]) -> None:
-	"""Put one copy in each recipient's mailbox."""
+	"""Put one copy in each recipient's mailbox, then ring their phones."""
 	for user, kind in pairs:
 		frappe.get_doc(
 			{
@@ -632,6 +669,34 @@ def _deliver(doc, pairs: list[tuple[str, str]]) -> None:
 				"is_pending": 0,
 			}
 		).insert(ignore_permissions=True)
+
+	_push(doc, [u for u, _k in pairs])
+
+
+def _push(doc, users: list[str]) -> None:
+	"""Send the phone notification for a delivered message.
+
+	The sender never gets their own copy — they are on the thread but they
+	just wrote it. Failure here is swallowed inside `push.notify`: a message
+	that reached the mailbox has been delivered whether or not the phone rang.
+	"""
+	from match_schools import push
+
+	audience = [u for u in users if u and u != doc.sender]
+	if not audience:
+		return
+
+	sender = frappe.db.get_value("User", doc.sender, "full_name") or doc.sender
+	subject = (doc.subject or "").strip() or "رسالة جديدة"
+	push.notify(
+		audience,
+		sender,
+		subject[:120],
+		channel="messages",
+		type="message",
+		id=doc.name,
+		thread=doc.thread or doc.name,
+	)
 
 
 def _hold(doc, pairs: list[tuple[str, str]]) -> None:
@@ -843,7 +908,10 @@ def recipient_groups(persona: str = None):
 	from match_schools.api.community import _my_groups
 
 	for g in _my_groups(persona) if persona == ROLE_TEACHER else frappe.get_all(
-		"Student Group", filters={"disabled": 0}, pluck="name", limit_page_length=0
+		"Student Group",
+		filters=apply_period({"disabled": 0}, "Student Group"),
+		pluck="name",
+		limit_page_length=0,
 	):
 		students = frappe.get_all(
 			"Student Group Student",
@@ -994,6 +1062,11 @@ def deliver_due_messages():
 				{"is_scheduled": 0, "sent_on": doc.scheduled_for or now(), "send_failed_reason": None},
 				update_modified=False,
 			)
+			held = frappe.get_all(
+				"MS Message Recipient",
+				filters={"message": name, "is_pending": 1},
+				pluck="user",
+			)
 			frappe.db.sql(
 				"""update `tabMS Message Recipient`
 				      set is_pending = 0
@@ -1001,6 +1074,9 @@ def deliver_due_messages():
 				name,
 			)
 			frappe.db.commit()
+			# The phone alert belongs to the moment the message actually
+			# arrives, not to the moment it was written and parked.
+			_push(doc, held)
 		except Exception:
 			frappe.db.rollback()
 			frappe.log_error(

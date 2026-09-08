@@ -18,12 +18,8 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, get_datetime, now_datetime, today
 
 from match_schools.api.utils import (
+	apply_period,
 	BACK_OFFICE,
-	ROLE_ADMIN,
-	ROLE_PARENT,
-	ROLE_SECRETARY,
-	ROLE_STUDENT,
-	ROLE_TEACHER,
 	fail,
 	get_default_academic_term,
 	get_default_academic_year,
@@ -31,6 +27,11 @@ from match_schools.api.utils import (
 	paginate,
 	parse_json_arg,
 	resolve_scope,
+	ROLE_ADMIN,
+	ROLE_PARENT,
+	ROLE_SECRETARY,
+	ROLE_STUDENT,
+	ROLE_TEACHER,
 )
 
 SEVERITY_AR = {
@@ -506,6 +507,46 @@ def _level_for(rule, student: str) -> tuple[str, bool, list[str]]:
 	return action.action_type, action.action_type == "Block Access", pages
 
 
+
+def _push_alerts(fresh: list[tuple[str, str, str, str]]) -> None:
+	"""Ring the phone of each flagged pupil and their guardians.
+
+	Guardians are the point of an alert — a pupil who is failing or absent is
+	precisely the one who will not read the app — so they are notified
+	alongside, never instead.
+	"""
+	from match_schools import push
+
+	for student, title, message, alert_id in fresh:
+		users = []
+		account = frappe.db.get_value("Student", student, "user")
+		if account:
+			users.append(account)
+
+		guardians = frappe.get_all(
+			"Student Guardian", filters={"parent": student}, pluck="guardian"
+		)
+		if guardians:
+			users += frappe.get_all(
+				"Guardian",
+				filters={"name": ["in", guardians], "user": ["is", "set"]},
+				pluck="user",
+			)
+		if not users:
+			continue
+
+		name = frappe.db.get_value("Student", student, "student_name") or ""
+		push.notify(
+			users,
+			f"{title} — {name}".strip(" —"),
+			message or title,
+			channel="alerts",
+			type="alert",
+			id=alert_id,
+			student=student,
+		)
+
+
 def evaluate_rule(rule) -> dict:
 	"""Run one rule and raise alerts for whoever matches."""
 	students = _scope_students(rule)
@@ -522,6 +563,9 @@ def evaluate_rule(rule) -> dict:
 	}
 
 	raised = 0
+	# Only alerts raised on this run ring phones. The de-dup above means a
+	# rule that runs hourly notifies once, on the run that first matched.
+	fresh: list[tuple[str, str, str, str]] = []
 	for student, value in matched.items():
 		# One open alert per student per rule — re-running must not spam.
 		existing = frappe.db.exists(
@@ -560,6 +604,7 @@ def evaluate_rule(rule) -> dict:
 		doc.resolution_notes = ",".join(pages) if pages else None
 		doc.insert(ignore_permissions=True)
 		raised += 1
+		fresh.append((student, title, message, doc.name))
 
 	# A student who no longer matches has fixed the problem, so close it out
 	# rather than leaving a stale warning on their file.
@@ -583,6 +628,9 @@ def evaluate_rule(rule) -> dict:
 		{"last_run_on": now_datetime(), "last_matched": len(matched)},
 		update_modified=False,
 	)
+
+	if fresh:
+		_push_alerts(fresh)
 
 	return {"matched": len(matched), "raised": raised, "resolved": resolved}
 
@@ -899,7 +947,7 @@ def rule_options(persona: str = None):
 			{"id": g.name, "name": g.student_group_name or g.name}
 			for g in frappe.get_all(
 				"Student Group",
-				filters={"disabled": 0},
+				filters=apply_period({"disabled": 0}, "Student Group"),
 				fields=["name", "student_group_name"],
 				limit=300,
 			)

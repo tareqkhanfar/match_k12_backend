@@ -141,16 +141,59 @@ def logout():
 
 
 def _named_students(students: list[str]) -> list[dict]:
-	"""Ids paired with names, in the order the scope supplied them."""
+	"""The guardian's children, enough to tell them apart on a picker.
+
+	Name alone is not enough in a school: brothers share a surname, and two
+	families share a first name. The photo, the section and the school number
+	are what a parent actually recognises their child by.
+	"""
 	if not students:
 		return []
-	names = {
-		r.name: r.student_name
+
+	rows = {
+		r.name: r
 		for r in frappe.get_all(
-			"Student", filters={"name": ["in", students]}, fields=["name", "student_name"]
+			"Student",
+			filters={"name": ["in", students]},
+			fields=["name", "student_name", "image", "ms_id_number"],
 		)
 	}
-	return [{"id": s, "name": names.get(s) or s} for s in students]
+
+	# الشعبة الفعّالة لكل ابن. استعلام واحد للجميع لا استعلام لكل ابن.
+	sections: dict[str, str] = {}
+	for link in frappe.get_all(
+		"Student Group Student",
+		filters={"student": ["in", students], "active": 1},
+		fields=["student", "parent"],
+	):
+		sections.setdefault(link.student, link.parent)
+
+	labels = {}
+	if sections:
+		labels = {
+			g.name: (g.student_group_name or g.name)
+			for g in frappe.get_all(
+				"Student Group",
+				filters={"name": ["in", list(set(sections.values()))]},
+				fields=["name", "student_group_name"],
+			)
+		}
+
+	out = []
+	for sid in students:
+		row = rows.get(sid)
+		group = sections.get(sid)
+		out.append(
+			{
+				"id": sid,
+				"name": (row.student_name if row else None) or sid,
+				"image": (row.image if row else None) or None,
+				"number": (row.ms_id_number if row else None) or None,
+				"student_group": group,
+				"class_name": labels.get(group) if group else None,
+			}
+		)
+	return out
 
 
 @frappe.whitelist(allow_guest=True)

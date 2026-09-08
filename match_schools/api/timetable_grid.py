@@ -25,17 +25,19 @@ from frappe.utils import add_days, cint, getdate, now_datetime, today
 from match_schools.api import academic_context as ctx
 from match_schools.api import scheduling as sched
 from match_schools.api.utils import (
-	ROLE_ADMIN,
-	ROLE_PARENT,
-	ROLE_SECRETARY,
-	ROLE_STUDENT,
-	ROLE_TEACHER,
+	apply_period,
 	fail,
 	get_default_academic_term,
 	get_default_academic_year,
 	ms_endpoint,
 	parse_json_arg,
 	resolve_scope,
+	ROLE_ADMIN,
+	ROLE_PARENT,
+	ROLE_SECRETARY,
+	ROLE_STUDENT,
+	ROLE_TEACHER,
+	sync_group_instructors,
 )
 
 
@@ -122,9 +124,11 @@ def grid_options(student_group: str = None, persona: str = None):
 	return {
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
 		"periods": _periods(student_group),
+		# شُعب الفصل المختار وحدها: بناء جدولٍ لشعبةٍ من العام الماضي عملٌ
+		# لا يُحفظ ولا يُعرض، والقائمة الكاملة تجعل اختيارها الخطأ الأسهل.
 		"groups": frappe.get_all(
 			"Student Group",
-			filters={"disabled": 0},
+			filters=apply_period({"disabled": 0}, "Student Group"),
 			fields=["name", "student_group_name", "program", "academic_year", "batch"],
 			order_by="name",
 			limit_page_length=0,
@@ -403,11 +407,31 @@ def check_slots(slots: str | list, student_group: str = None, persona: str = Non
 		for s in proposed
 	]
 
-	conflicts = sched.find_conflicts(lessons, exclude=_existing_slot_lessons(student_group))
+	conflicts = sched.find_conflicts(
+		lessons,
+		exclude=_existing_slot_lessons(student_group),
+		academic_term=_term_of(student_group),
+	)
 	return {
 		"conflicts": {str(k): v for k, v in conflicts.items()},
 		"summary": sched.summarise(conflicts),
 	}
+
+
+def _term_of(student_group: str | None) -> str | None:
+	"""The term a grid belongs to — the section's own, else the current one.
+
+	Conflict checks must be scoped to it. Without a term the check compares a
+	new year's timetable against every lesson ever saved, so opening a fresh
+	academic year reports the whole of last year as clashes: the same teachers
+	and rooms are of course still busy in the old calendar, and nothing the
+	user does to this year's grid can clear them.
+	"""
+	if student_group:
+		term = frappe.db.get_value("Student Group", student_group, "academic_term")
+		if term:
+			return term
+	return get_default_academic_term()
 
 
 def _period_time(slot: dict, edge: str) -> str:
@@ -485,7 +509,11 @@ def save_pattern(
 		for s in proposed
 	]
 
-	conflicts = sched.find_conflicts(lessons, exclude=_existing_slot_lessons(student_group))
+	conflicts = sched.find_conflicts(
+		lessons,
+		exclude=_existing_slot_lessons(student_group),
+		academic_term=academic_term or _term_of(student_group),
+	)
 	if conflicts:
 		summary = sched.summarise(conflicts)
 		return fail(
@@ -518,6 +546,10 @@ def save_pattern(
 		doc.active = 1
 		doc.insert(ignore_permissions=True)
 		created.append(doc.name)
+
+	# نمط الأسبوع هو أول موضع يُسمّى فيه معلّم الشعبة، فنسجّله فوراً — قبل
+	# توليد الحصص بوقت طويل، وقد لا يُولَّد أصلاً.
+	sync_group_instructors(student_group)
 
 	frappe.db.commit()
 	return {"studentGroup": student_group, "slots": len(created)}
@@ -686,6 +718,10 @@ def generate_lessons(
 			frappe.db.commit()
 			committed_at = created
 		current = add_days(current, 1)
+
+	# الجدول قال من يدرّس هذه الشعبة — نسجّله عليها، وإلا بقي «شعبي»
+	# و«طلابي» فارغَين عند من ارتبط بشعبته عبر الجدول وحده.
+	sync_group_instructors(student_group)
 
 	frappe.db.commit()
 	return {

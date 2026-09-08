@@ -595,6 +595,11 @@ def term_overview(academic_term: str = None, persona: str = None):
 		# the field blank, so the console came up empty and nothing could be
 		# published or withdrawn.
 		filters["academic_term"] = ["in", [academic_term, ""]]
+	# والسنة كذلك: اسم الفصل يتكرّر بين السنوات، والتقييد به وحده يخلط
+	# شعب سنتين تحملان «الفصل الثاني».
+	year = get_default_academic_year()
+	if year:
+		filters["academic_year"] = year
 	groups = frappe.get_all(
 		"Student Group", filters=filters, fields=["name", "student_group_name"], limit=300
 	)

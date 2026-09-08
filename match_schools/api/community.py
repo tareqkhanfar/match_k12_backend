@@ -25,16 +25,17 @@ from frappe import _
 from frappe.utils import cint, now
 
 from match_schools.api.utils import (
+	fail,
+	get_default_academic_term,
+	get_default_academic_year,
+	instructor_groups,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	get_default_academic_term,
-	get_default_academic_year,
-	ms_endpoint,
-	resolve_scope,
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
@@ -62,27 +63,7 @@ def _my_groups(persona: str) -> list[str]:
 	"""Classes this caller belongs to — taught, attended, or via a child."""
 	scope = resolve_scope(persona)
 	if persona == ROLE_TEACHER:
-		instructor = scope.get("instructor")
-		if not instructor:
-			return []
-		groups = set(
-			frappe.get_all(
-				"Student Group Instructor",
-				filters={"instructor": instructor, "parenttype": "Student Group"},
-				pluck="parent",
-			)
-		)
-		groups |= {
-			r.student_group
-			for r in frappe.get_all(
-				"Course Schedule",
-				filters={"instructor": instructor, "docstatus": ["<", 2]},
-				fields=["student_group"],
-				limit_page_length=0,
-			)
-			if r.student_group
-		}
-		return sorted(groups)
+		return instructor_groups(scope.get("instructor"))
 
 	students = scope.get("students") or []
 	if not students:

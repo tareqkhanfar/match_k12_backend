@@ -9,15 +9,17 @@ from frappe.utils import add_days, flt, getdate, today
 
 from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
+	apply_period,
 	BACK_OFFICE,
-	ROLE_ADMIN,
-	ROLE_PARENT,
-	ROLE_STUDENT,
-	ROLE_TEACHER,
 	fail,
+	instructor_groups,
 	ms_endpoint,
 	resolve_scope,
+	ROLE_ADMIN,
+	ROLE_PARENT,
 	ROLE_SECRETARY,
+	ROLE_STUDENT,
+	ROLE_TEACHER,
 )
 
 # "Excused" is an absence the school has accepted a reason for. It is a
@@ -444,16 +446,8 @@ def attendance_report(
 
 
 def _instructor_group_names(instructor: str | None) -> list[str]:
-	if not instructor:
-		return []
-	return [
-		r.parent
-		for r in frappe.get_all(
-			"Student Group Instructor",
-			filters={"instructor": instructor, "parenttype": "Student Group"},
-			fields=["parent"],
-		)
-	]
+	"""موحَّدة الآن مع بقية الشاشات — انظر `instructor_groups`."""
+	return instructor_groups(instructor)
 
 
 def _chronic_absentees(where: str, params: dict, threshold: float = 80.0) -> list[dict]:
@@ -494,7 +488,7 @@ def my_groups(persona: str = None):
 	if persona in BACK_OFFICE:
 		groups = frappe.get_all(
 			"Student Group",
-			filters={"disabled": 0},
+			filters=apply_period({"disabled": 0}, "Student Group"),
 			fields=["name", "student_group_name", "program", "batch", "academic_year"],
 			order_by="student_group_name",
 		)

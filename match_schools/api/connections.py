@@ -20,16 +20,18 @@ from frappe import _
 from frappe.utils import cint, nowdate
 
 from match_schools.api.utils import (
+	apply_period,
+	fail,
+	get_default_academic_term,
+	get_default_academic_year,
+	instructor_groups,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	fail,
-	get_default_academic_term,
-	get_default_academic_year,
-	ms_endpoint,
-	resolve_scope,
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
@@ -322,26 +324,18 @@ def my_classes(persona: str = None):
 	filters = {"disabled": 0}
 	if persona == ROLE_TEACHER:
 		scope = resolve_scope(persona)
-		mine = set(scope.get("student_groups") or [])
-		instructor = scope.get("instructor")
-		if instructor:
-			mine |= {
-				r.student_group
-				for r in frappe.get_all(
-					"MS Timetable Slot",
-					filters={"instructor": instructor, "active": 1},
-					fields=["student_group"],
-					limit_page_length=0,
-				)
-				if r.student_group
-			}
+		# المصدر الموحَّد: كان يقرأ نمط الأسبوع وحده، فتغيب عنه شُعبٌ يرتبط
+		# بها المعلّم عبر سجلّ الشعبة أو عبر الحصص المولَّدة.
+		mine = set(instructor_groups(scope.get("instructor"))) | set(
+			scope.get("student_groups") or []
+		)
 		if not mine:
 			return {"classes": []}
 		filters["name"] = ["in", sorted(mine)]
 
-	year = get_default_academic_year()
-	if year and frappe.get_meta("Student Group").has_field("academic_year"):
-		filters["academic_year"] = year
+	# السنة والفصل معاً: التقييد بالسنة وحدها يُبقي شعب الفصل الأول ظاهرة
+	# لمن اختار الفصل الثاني.
+	apply_period(filters, "Student Group")
 
 	rows = frappe.get_all(
 		"Student Group",

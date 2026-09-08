@@ -148,6 +148,144 @@ def _programs_for_students(students: list[str]) -> list[str]:
 	)
 
 
+# ---------------------------------------------------------------------------
+# من يتلقّى إشعار الهاتف عن إعلان
+# ---------------------------------------------------------------------------
+
+
+def _students_in_scope(doc) -> list[str]:
+	"""Student ids an announcement is aimed at — all of them when unscoped."""
+	if doc.get("student_group"):
+		return frappe.get_all(
+			"Student Group Student",
+			filters={"parent": doc.student_group, "active": 1},
+			pluck="student",
+			limit_page_length=0,
+		)
+	if doc.get("program"):
+		return frappe.get_all(
+			"Program Enrollment",
+			filters={"program": doc.program, "docstatus": ["<", 2]},
+			pluck="student",
+			limit_page_length=0,
+		)
+	return frappe.get_all("Student", filters={"enabled": 1}, pluck="name", limit_page_length=0)
+
+
+def _guardian_users(students: list[str]) -> list[str]:
+	if not students:
+		return []
+	guardians = frappe.get_all(
+		"Student Guardian",
+		filters={"parent": ["in", students]},
+		pluck="guardian",
+		limit_page_length=0,
+	)
+	if not guardians:
+		return []
+	return frappe.get_all(
+		"Guardian",
+		filters={"name": ["in", list(set(guardians))], "user": ["is", "set"]},
+		pluck="user",
+		limit_page_length=0,
+	)
+
+
+def _instructor_users() -> list[str]:
+	"""User accounts behind Instructor records.
+
+	The reverse of `get_linked_instructor`, and it must follow the same three
+	routes. Reading `ms_user` alone silently skipped every teacher linked
+	through Employee or matched by name — on a live site that was 17 of 19
+	teachers never getting a phone alert.
+	"""
+	users: list[str] = []
+	rows = frappe.get_all(
+		"Instructor", fields=["ms_user", "employee", "instructor_name"], limit_page_length=0
+	)
+
+	users += [r.ms_user for r in rows if r.ms_user]
+
+	employees = [r.employee for r in rows if r.employee and not r.ms_user]
+	if employees:
+		users += frappe.get_all(
+			"Employee",
+			filters={"name": ["in", employees], "user_id": ["is", "set"]},
+			pluck="user_id",
+			limit_page_length=0,
+		)
+
+	# Last resort, exactly as the forward lookup does it: match on full name.
+	names = [r.instructor_name for r in rows if r.instructor_name and not (r.ms_user or r.employee)]
+	if names:
+		users += frappe.get_all(
+			"User",
+			filters={"full_name": ["in", names], "enabled": 1},
+			pluck="name",
+			limit_page_length=0,
+		)
+
+	return [u for u in users if u]
+
+
+def announcement_audience(doc) -> list[str]:
+	"""The user accounts an announcement should reach on their phones.
+
+	Program and Student Group narrow *who*, not *what kind* — a class
+	announcement goes to that class's pupils and their guardians, which is
+	what a teacher means by posting it there.
+	"""
+	audience = doc.get("audience") or "All"
+	users: list[str] = []
+
+	wants_students = audience in ("All", "Students", "Program", "Student Group")
+	wants_parents = audience in ("All", "Parents", "Program", "Student Group")
+	wants_teachers = audience in ("All", "Teachers")
+
+	students = _students_in_scope(doc) if (wants_students or wants_parents) else []
+
+	if wants_students and students:
+		users += frappe.get_all(
+			"Student",
+			filters={"name": ["in", students], "user": ["is", "set"]},
+			pluck="user",
+			limit_page_length=0,
+		)
+	if wants_parents:
+		users += _guardian_users(students)
+	if wants_teachers:
+		users += _instructor_users()
+
+	enabled = frappe.get_all(
+		"User",
+		filters={"name": ["in", list(set(u for u in users if u))], "enabled": 1},
+		pluck="name",
+		limit_page_length=0,
+	) if users else []
+	return enabled
+
+
+def _push_announcement(doc) -> None:
+	"""Ring the phones for a freshly published announcement."""
+	from match_schools import push
+
+	if not cint(doc.get("published")):
+		return
+	audience = announcement_audience(doc)
+	if not audience:
+		return
+	kind = TYPE_AR.get(doc.get("announcement_type") or "Announcement", "إعلان")
+	body = frappe.utils.strip_html(doc.get("body") or "").strip()
+	push.notify(
+		audience,
+		f"{kind}: {doc.title}",
+		body[:160] or doc.title,
+		channel="announcements",
+		type="announcement",
+		id=doc.name,
+	)
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def save_announcement(payload: str | dict, persona: str = None):
@@ -175,6 +313,7 @@ def save_announcement(payload: str | dict, persona: str = None):
 		doc.update(fields)
 		doc.save()
 		msg_en, msg_ar = "Announcement updated.", "تم تحديث الإعلان."
+		is_new = False
 	else:
 		if not fields.get("title"):
 			return fail(message_en="Title is required.", message_ar="العنوان مطلوب.")
@@ -182,8 +321,14 @@ def save_announcement(payload: str | dict, persona: str = None):
 		doc = frappe.get_doc(fields)
 		doc.insert()
 		msg_en, msg_ar = "Announcement published.", "تم نشر الإعلان."
+		is_new = True
 
 	frappe.db.commit()
+
+	# Only a brand new announcement rings phones. Editing one — fixing a typo,
+	# extending the expiry — must not notify the whole school a second time.
+	if is_new:
+		_push_announcement(doc)
 	return {
 		"success": True,
 		"data": {"id": doc.name, "title": doc.title},

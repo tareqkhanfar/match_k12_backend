@@ -599,7 +599,7 @@ def form_options(persona: str = None):
 			{"id": g.name, "name": g.student_group_name or g.name}
 			for g in frappe.get_all(
 				"Student Group",
-				filters={"disabled": 0},
+				filters=apply_period({"disabled": 0}, "Student Group"),
 				fields=["name", "student_group_name"],
 				order_by="student_group_name",
 				limit=300,

@@ -602,9 +602,7 @@ def class_files(student_group: str = None, persona: str = None):
 	This is the one door students and guardians have into the drive, and it
 	opens on published files for their own class only.
 	"""
-	if not student_group:
-		return {"files": []}
-
+	mine = None
 	if persona in (ROLE_STUDENT, ROLE_PARENT):
 		students = resolve_scope(persona).get("students") or []
 		mine = frappe.get_all(
@@ -612,10 +610,21 @@ def class_files(student_group: str = None, persona: str = None):
 			filters={"student": ["in", students or [""]], "active": 1},
 			pluck="parent",
 		)
-		if student_group not in mine:
+		if student_group and student_group not in mine:
 			frappe.throw(_("This class is not yours."), frappe.PermissionError)
 
-	filters = {"student_group": student_group, "is_published": 1}
+	# A pupil or guardian who names no class means their own — the server
+	# already knows which. Requiring them to name it forced the app to ask a
+	# staff-only endpoint for the id first, which answered 403 and left the
+	# screen empty for exactly the people it was written for.
+	if not student_group:
+		if mine is None:
+			return {"files": []}
+		if not mine:
+			return {"files": []}
+		filters = {"student_group": ["in", list(set(mine))], "is_published": 1}
+	else:
+		filters = {"student_group": student_group, "is_published": 1}
 	apply_period(filters, "MS Drive File")
 	rows = frappe.get_all(
 		"MS Drive File",

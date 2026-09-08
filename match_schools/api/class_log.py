@@ -20,16 +20,17 @@ from frappe import _
 from frappe.utils import cint, getdate, now, nowdate
 
 from match_schools.api.utils import (
+	apply_period,
+	fail,
+	hhmm,
+	instructor_groups,
+	ms_endpoint,
+	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
-	apply_period,
-	fail,
-	hhmm,
-	ms_endpoint,
-	resolve_scope,
 )
 
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
@@ -53,20 +54,11 @@ def _my_groups(persona: str) -> list[str] | None:
 
 	scope = resolve_scope(persona)
 	if persona == ROLE_TEACHER:
-		groups = set(scope.get("student_groups") or [])
-		instructor = scope.get("instructor")
-		if instructor:
-			groups |= {
-				r.student_group
-				for r in frappe.get_all(
-					"MS Timetable Slot",
-					filters={"instructor": instructor, "active": 1},
-					fields=["student_group"],
-					limit_page_length=0,
-				)
-				if r.student_group
-			}
-		return sorted(groups)
+		# مصدر واحد لكل الشاشات، ومقيَّد بالفصل المختار.
+		return sorted(
+			set(instructor_groups(scope.get("instructor")))
+			| set(scope.get("student_groups") or [])
+		)
 
 	return sorted(
 		{

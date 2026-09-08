@@ -260,8 +260,15 @@ def _existing_bookings(exclude: set[str], academic_term: str | None) -> dict:
 	"""
 	filters: dict = {"docstatus": ["<", 2]}
 	if academic_term:
+		# الشعب التي بلا فصل تدخل في الفحص أيضاً، لا تُستثنى منه.
+		#
+		# استثناؤها هو الاتجاه الخطر: شعبةٌ نُسي ضبط فصلها تختفي حصصها من
+		# التدقيق، فيُسمح بحجز معلّم مشغول فعلاً عندها ولا شيء ينبّه أحداً.
+		# أما إدخالها فأسوأ ما يسبّبه تحذيرٌ زائد يراه المستخدم ويعالجه.
 		groups = frappe.get_all(
-			"Student Group", filters={"academic_term": academic_term}, pluck="name"
+			"Student Group",
+			filters={"academic_term": ["in", [academic_term, "", None]]},
+			pluck="name",
 		)
 		if groups:
 			filters["student_group"] = ["in", groups]

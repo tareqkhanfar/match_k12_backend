@@ -12,7 +12,7 @@ records it describes.
 
 import frappe
 import frappe.defaults
-from frappe.utils import add_days, cint, flt, now_datetime, today
+from frappe.utils import add_days, cint, flt, now, now_datetime, today
 
 from match_schools.api.utils import (
 	BACK_OFFICE,
@@ -21,7 +21,9 @@ from match_schools.api.utils import (
 	ROLE_SECRETARY,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
+	fail,
 	ms_endpoint,
+	ok,
 	resolve_scope,
 )
 
@@ -598,3 +600,93 @@ def _back_office_items(since: str) -> list[dict]:
 		)
 
 	return items
+
+
+# ---------------------------------------------------------------------------
+# إشعارات الدفع
+# ---------------------------------------------------------------------------
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def register_device(token: str = None, platform: str = "android", persona: str = None):
+	"""تسجيل جهاز ليتلقّى إشعارات الدفع.
+
+	الرمز يخصّ الجهاز لا الشخص، فهاتف يتناوب عليه اثنان يصل رمزه نفسه. لذلك
+	أي تسجيل سابق للرمز نفسه — لأي مستخدم — يُحوَّل إلى صاحب الجلسة الحالية
+	بدل أن يُضاف بجانبه: وإلا وصلت إشعارات الأول إلى الثاني.
+	"""
+	token = (token or "").strip()
+	if not token:
+		return fail(message_en="A device token is required.", message_ar="رمز الجهاز مطلوب.")
+	if len(token) > 512:
+		return fail(message_en="Token is too long.", message_ar="رمز الجهاز طويل جداً.")
+
+	existing = frappe.get_all("MS Device Token", filters={"token": token}, pluck="name")
+	if existing:
+		for name in existing:
+			frappe.db.set_value(
+				"MS Device Token",
+				name,
+				{
+					"user": frappe.session.user,
+					"platform": platform or "android",
+					"is_active": 1,
+					"failures": 0,
+					"last_seen": now(),
+				},
+				update_modified=False,
+			)
+	else:
+		frappe.get_doc(
+			{
+				"doctype": "MS Device Token",
+				"user": frappe.session.user,
+				"token": token,
+				"platform": platform or "android",
+				"is_active": 1,
+				"last_seen": now(),
+			}
+		).insert(ignore_permissions=True)
+
+	frappe.db.commit()
+	return ok(
+		{"registered": True},
+		message_en="Device registered.",
+		message_ar="تم تسجيل الجهاز للإشعارات.",
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def unregister_device(token: str = None, persona: str = None):
+	"""إلغاء تسجيل جهاز — يُستدعى عند تسجيل الخروج."""
+	token = (token or "").strip()
+	if not token:
+		return fail(message_en="A device token is required.", message_ar="رمز الجهاز مطلوب.")
+
+	for name in frappe.get_all(
+		"MS Device Token",
+		filters={"token": token, "user": frappe.session.user},
+		pluck="name",
+	):
+		frappe.delete_doc("MS Device Token", name, ignore_permissions=True, force=True)
+
+	frappe.db.commit()
+	return ok(
+		{},
+		message_en="Device unregistered.",
+		message_ar="تم إلغاء تسجيل الجهاز.",
+	)
+
+
+def tokens_for(users: list[str]) -> list[str]:
+	"""رموز الأجهزة الفعّالة لمجموعة مستخدمين."""
+	if not users:
+		return []
+	return frappe.get_all(
+		"MS Device Token",
+		filters={"user": ["in", users], "is_active": 1},
+		pluck="token",
+		limit_page_length=0,
+	)

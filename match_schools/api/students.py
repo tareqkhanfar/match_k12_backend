@@ -11,17 +11,18 @@ from frappe.utils import cint, flt
 
 from match_schools.api.utils import (
 	BACK_OFFICE,
-	ROLE_ADMIN,
-	ROLE_PARENT,
-	ROLE_STUDENT,
-	ROLE_TEACHER,
 	build_order_by,
 	fail,
 	get_default_academic_year,
+	instructor_groups,
 	ms_endpoint,
 	paginate,
 	resolve_scope,
+	ROLE_ADMIN,
+	ROLE_PARENT,
 	ROLE_SECRETARY,
+	ROLE_STUDENT,
+	ROLE_TEACHER,
 )
 
 
@@ -153,16 +154,13 @@ def _allowed_student_ids(persona: str, scope: dict) -> list[str] | None:
 
 
 def _students_of_instructor(instructor: str | None) -> list[str]:
-	if not instructor:
-		return []
-	groups = [
-		r.parent
-		for r in frappe.get_all(
-			"Student Group Instructor",
-			filters={"instructor": instructor, "parenttype": "Student Group"},
-			fields=["parent"],
-		)
-	]
+	"""الطلاب الذين يدرّسهم هذا المعلّم في الفصل المختار.
+
+	كان يقرأ جدول معلّمي الشعبة وحده وبلا تقييد بالفترة، فينتج عنه خطآن معاً:
+	معلّم مرتبط بشعبه عبر الجدول فقط لا يرى أحداً، ومن يرى طلاباً يرى فيهم
+	طلاب فصول ماضية لم يعودوا في صفّه.
+	"""
+	groups = instructor_groups(instructor)
 	if not groups:
 		return []
 	return list(
