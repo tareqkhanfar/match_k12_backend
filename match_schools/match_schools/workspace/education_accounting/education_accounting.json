@@ -547,5 +547,6 @@
    "stats_filter": "{\"enabled\": 1}"
   }
  ],
- "title": "Education Accounting"
+ "title": "Education Accounting",
+ "type": "Workspace"
 }
