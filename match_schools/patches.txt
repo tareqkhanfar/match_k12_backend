@@ -25,3 +25,4 @@ match_schools.patches.anchor_records_to_term
 match_schools.patches.add_performance_indexes
 match_schools.patches.stamp_existing_periods
 match_schools.patches.optional_student_email
+match_schools.patches.fix_workspace_type
