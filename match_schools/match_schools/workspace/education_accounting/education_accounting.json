@@ -1,7 +1,7 @@
 {
  "app": "match_schools",
  "charts": [],
- "content": "[{\"id\": \"a00f7055e1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>اختصارات سريعة</b></span>\", \"col\": 12}}, {\"id\": \"f89f769088\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"فواتير الرسوم\", \"col\": 4}}, {\"id\": \"eb9acc819f\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"سندات القبض\", \"col\": 4}}, {\"id\": \"08fb35e078\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"كشف حساب الطالب\", \"col\": 4}}, {\"id\": \"e8ade7ad58\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"كشف رسوم ولي الأمر\", \"col\": 4}}, {\"id\": \"e8ea89746b\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الطلاب غير المسجلين\", \"col\": 4}}, {\"id\": \"23e4fe0f95\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الطالب\", \"col\": 4}}, {\"id\": \"e03c4c0fa6\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"724f16ee4f\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>محاسبة التعليم</b></span>\", \"col\": 12}}, {\"id\": \"73ee1b4ac6\", \"type\": \"card\", \"data\": {\"card_name\": \"الرسوم الدراسية (School Fees)\", \"col\": 4}}, {\"id\": \"ad998bfaec\", \"type\": \"card\", \"data\": {\"card_name\": \"تقارير الرسوم (Fee Reports)\", \"col\": 4}}, {\"id\": \"d20cf64bab\", \"type\": \"card\", \"data\": {\"card_name\": \"المحاسبة (Accounting)\", \"col\": 4}}, {\"id\": \"b0a26eb6be\", \"type\": \"card\", \"data\": {\"card_name\": \"التقارير المالية (Financial Reports)\", \"col\": 4}}, {\"id\": \"7882d96894\", \"type\": \"card\", \"data\": {\"card_name\": \"الطلاب والتسجيل (Students & Enrolment)\", \"col\": 4}}]",
+ "content": "[{\"id\": \"a00f7055e1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>اختصارات سريعة</b></span>\", \"col\": 12}}, {\"id\": \"f89f769088\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"فواتير الرسوم\", \"col\": 4}}, {\"id\": \"eb9acc819f\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"سندات القبض\", \"col\": 4}}, {\"id\": \"08fb35e078\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"كشف حساب الطالب\", \"col\": 4}}, {\"id\": \"e8ade7ad58\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"كشف رسوم ولي الأمر\", \"col\": 4}}, {\"id\": \"e8ea89746b\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الطلاب غير المسجلين\", \"col\": 4}}, {\"id\": \"23e4fe0f95\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الطالب\", \"col\": 4}}, {\"id\": \"e03c4c0fa6\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"724f16ee4f\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>محاسبة التعليم</b></span>\", \"col\": 12}}, {\"id\": \"73ee1b4ac6\", \"type\": \"card\", \"data\": {\"card_name\": \"الرسوم الدراسية (School Fees)\", \"col\": 4}}, {\"id\": \"ad998bfaec\", \"type\": \"card\", \"data\": {\"card_name\": \"تقارير الرسوم (Fee Reports)\", \"col\": 4}}, {\"id\": \"d20cf64bab\", \"type\": \"card\", \"data\": {\"card_name\": \"المحاسبة (Accounting)\", \"col\": 4}}, {\"id\": \"4479289316\", \"type\": \"card\", \"data\": {\"card_name\": \"المخزون (Stock)\", \"col\": 4}}, {\"id\": \"b0a26eb6be\", \"type\": \"card\", \"data\": {\"card_name\": \"التقارير المالية (Financial Reports)\", \"col\": 4}}, {\"id\": \"7882d96894\", \"type\": \"card\", \"data\": {\"card_name\": \"الطلاب والتسجيل (Students & Enrolment)\", \"col\": 4}}]",
  "creation": "2026-09-08 00:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -181,7 +181,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "المحاسبة (Accounting)",
-   "link_count": 8,
+   "link_count": 11,
    "link_to": null,
    "link_type": "DocType",
    "onboard": 0,
@@ -235,6 +235,28 @@
    "dependencies": "",
    "hidden": 0,
    "is_query_report": 0,
+   "label": "العميل",
+   "link_count": 0,
+   "link_to": "Customer",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "المورّد",
+   "link_count": 0,
+   "link_to": "Supplier",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "السنة المالية",
    "link_count": 0,
    "link_to": "Fiscal Year",
@@ -265,27 +287,6 @@
    "type": "Link"
   },
   {
-   "dependencies": "",
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "الصنف",
-   "link_count": 0,
-   "link_to": "Item",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "التقارير المالية (Financial Reports)",
-   "link_count": 8,
-   "link_to": null,
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Card Break"
-  },
-  {
    "dependencies": "GL Entry",
    "hidden": 0,
    "is_query_report": 1,
@@ -306,6 +307,92 @@
    "link_type": "Report",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "المخزون (Stock)",
+   "link_count": 6,
+   "link_to": null,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "الصنف",
+   "link_count": 0,
+   "link_to": "Item",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "مجموعة الصنف",
+   "link_count": 0,
+   "link_to": "Item Group",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "طلب مواد",
+   "link_count": 0,
+   "link_to": "Material Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "قيد المخزون",
+   "link_count": 0,
+   "link_to": "Stock Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Stock Ledger Entry",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "رصيد المخزون",
+   "link_count": 0,
+   "link_to": "Stock Balance",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Stock Ledger Entry",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "حركات المخزون",
+   "link_count": 0,
+   "link_to": "Stock Ledger",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "التقارير المالية (Financial Reports)",
+   "link_count": 9,
+   "link_to": null,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
   },
   {
    "dependencies": "GL Entry",
@@ -333,9 +420,20 @@
    "dependencies": "Sales Invoice",
    "hidden": 0,
    "is_query_report": 1,
-   "label": "أعمار الذمم للزبائن",
+   "label": "أرباح المبيعات",
    "link_count": 0,
-   "link_to": "Accounts Receivable",
+   "link_to": "Gross Profit",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Sales Invoice",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "تقرير فواتير المبيعات",
+   "link_count": 0,
+   "link_to": "Sales Register",
    "link_type": "Report",
    "onboard": 0,
    "type": "Link"
@@ -352,12 +450,34 @@
    "type": "Link"
   },
   {
+   "dependencies": "Purchase Invoice",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "ذمم التجار",
+   "link_count": 0,
+   "link_to": "Supplier Ledger Summary",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
    "dependencies": "Sales Invoice",
    "hidden": 0,
    "is_query_report": 1,
-   "label": "تقرير فواتير المبيعات",
+   "label": "أعمار الذمم للزبائن",
    "link_count": 0,
-   "link_to": "Sales Register",
+   "link_to": "Accounts Receivable",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Purchase Invoice",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "أعمار الذمم للتجار",
+   "link_count": 0,
+   "link_to": "Accounts Payable",
    "link_type": "Report",
    "onboard": 0,
    "type": "Link"

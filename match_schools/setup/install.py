@@ -12,7 +12,26 @@ def after_install():
 	install_custom_fields()
 	install_admission_workflow()
 	apply_doctype_permissions()
+	sync_accounting_workspace()
 	frappe.db.commit()
+
+
+def sync_accounting_workspace():
+	"""Add the match_utils accounting tools to Education Accounting, if present.
+
+	Kept out of the shipped workspace JSON on purpose — a Workspace Link to a
+	doctype that is not installed fails validation and would break migrate.
+	See `setup/accounting_workspace.py`.
+	"""
+	from match_schools.setup.accounting_workspace import sync
+
+	try:
+		sync()
+	except Exception:
+		# Never let a cosmetic workspace tweak abort an install or a migrate.
+		frappe.log_error(
+			frappe.get_traceback(), "Education Accounting workspace sync failed"
+		)
 
 
 def install_custom_fields():
