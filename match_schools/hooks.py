@@ -84,11 +84,18 @@ override_doctype_class = {"Student": "match_schools.ms_student.MSStudent"}
 # Jinja
 # ----------
 
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "match_schools.utils.jinja_methods",
-# 	"filters": "match_schools.utils.jinja_filters"
-# }
+# What the school print formats need that the document does not carry: the
+# family behind a Customer, and the running balance. See `ms_print.py`.
+#
+# Listed as individual functions, not as the module path: Frappe exposes every
+# function found in a hooked module, imports included, so a module path would
+# put `flt` and friends into every template's namespace.
+jinja = {
+	"methods": [
+		"match_schools.ms_print.ms_receipt_context",
+		"match_schools.ms_print.ms_invoice_context",
+	],
+}
 
 # Installation
 # ------------
