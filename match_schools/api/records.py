@@ -44,6 +44,8 @@ AR = {
 	"User account": "حساب المستخدم", "Status": "الحالة", "Department": "القسم",
 	"Instructor Log": "سجل المعلم", "Other details": "تفاصيل أخرى",
 	"Active": "نشط", "Left": "غادر", "Guardian Name": "اسم ولي الأمر",
+	"Exit": "المغادرة", "Place Of Birth": "مكان الولادة",
+	"Mothor ID": "رقم هوية الأم", "Mother ID": "رقم هوية الأم", "Father ID": "رقم هوية الأب",
 }
 
 
@@ -57,6 +59,7 @@ def _check(doctype: str, name: str):
 def _ar(text: str | None) -> str:
 	if not text:
 		return ""
+	text = text.strip()
 	translated = frappe._(text, lang="ar")
 	return AR.get(text, translated) if translated == text else translated
 
