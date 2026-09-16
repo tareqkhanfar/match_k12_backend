@@ -10,6 +10,7 @@ def after_install():
 	create_persona_roles()
 	patch_fees_income_account_fetch()
 	install_custom_fields()
+	install_patch_fields()
 	install_admission_workflow()
 	apply_doctype_permissions()
 	sync_accounting_workspace()
@@ -41,6 +42,47 @@ def install_custom_fields():
 	create_fields()
 
 	_seed_force_password_change()
+
+
+# `bench install-app` records every patch in patches.txt as applied without
+# running it, so a new site never got the fields these add — every screen that
+# read one failed with "Unknown column". Each patch is paired with something it
+# creates and runs only while that is missing: several also backfill data, and
+# repeating a backfill on every migrate would overwrite what a school set since.
+PATCHES_THAT_ADD_FIELDS = (
+	("add_academic_period_settings", "Custom Field", "ms_teacher_can_edit_closed_period"),
+	("add_gradebook_publishing", "Custom Field", "ms_is_published"),
+	("add_grade_appeals_and_release", "Custom Field", "ms_reopened_on"),
+	("allow_multiple_behaviour_categories", "Property Setter", ("MS Behaviour Record", "category", "fieldtype")),
+	("add_quarter_assessment_tree", "Custom Field", "ms_parent_component"),
+	("make_course_schedule_room_optional", "Property Setter", ("Course Schedule", "room", "reqd")),
+	("add_timetable_audience", "Custom Field", "ms_audience"),
+	("add_lesson_change_original_course", "Custom Field", "original_course"),
+	("add_grandfather_name", "Custom Field", "ms_grandfather_name"),
+	("add_component_exclusion", "Custom Field", "ms_excluded"),
+	("add_component_aggregation", "Custom Field", "ms_aggregation"),
+	("add_survey_class_audience", "Custom Field", "ms_student_groups"),
+	("add_instructor_user_link", "Custom Field", "ms_user"),
+	("add_program_promotion", "Custom Field", "ms_promotion_status"),
+	("anchor_records_to_term", "Custom Field", "ms_academic_term"),
+	("optional_student_email", "Property Setter", ("Student", "student_email_id", "reqd")),
+)
+
+
+def install_patch_fields():
+	import importlib
+
+	for name, kind, marker in PATCHES_THAT_ADD_FIELDS:
+		if kind == "Custom Field":
+			present = frappe.db.exists("Custom Field", {"fieldname": marker})
+		else:
+			doc_type, field_name, prop = marker
+			present = frappe.db.exists(
+				"Property Setter",
+				{"doc_type": doc_type, "field_name": field_name, "property": prop},
+			)
+		if not present:
+			importlib.import_module(f"match_schools.patches.{name}").execute()
 
 
 def _seed_force_password_change():

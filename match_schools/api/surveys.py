@@ -108,7 +108,7 @@ def _is_open(survey) -> bool:
 
 
 @frappe.whitelist()
-@ms_endpoint(ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def pending_required(persona: str = None):
 	"""Compulsory surveys this caller still owes an answer to.
 
@@ -120,6 +120,10 @@ def pending_required(persona: str = None):
 	An anonymous survey records no respondent, so it can never be marked as
 	answered and would lock the portal permanently. Those are never required.
 	"""
+	# The portal's access guard asks on every screen, for every persona.
+	if persona in (ROLE_ADMIN, ROLE_SECRETARY):
+		return {"surveys": [], "count": 0}
+
 	rows = frappe.get_all(
 		"MS Survey",
 		filters={

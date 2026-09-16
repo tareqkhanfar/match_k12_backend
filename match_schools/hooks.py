@@ -162,6 +162,11 @@ doc_events = {
 	},
 	"Sales Invoice": {
 		"validate": "match_schools.ms_billing.validate_student_invoice",
+		# فاتورة رسوم معتمدة ترنّ هاتف الطالب ووليّ أمره.
+		"on_submit": "match_schools.fee_notifications.on_invoice_submit",
+	},
+	"Payment Entry": {
+		"on_submit": "match_schools.fee_notifications.on_payment_submit",
 	},
 	# Education builds `student_name` from three names and runs it in its own
 	# validate. These hooks run afterwards, so rebuilding the name here is what
