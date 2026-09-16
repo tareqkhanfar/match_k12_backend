@@ -44,6 +44,8 @@ AR = {
 	"User account": "حساب المستخدم", "Status": "الحالة", "Department": "القسم",
 	"Instructor Log": "سجل المعلم", "Other details": "تفاصيل أخرى",
 	"Active": "نشط", "Left": "غادر", "Guardian Name": "اسم ولي الأمر",
+	"Male": "ذكر", "Female": "أنثى", "Gender": "الجنس", "Pincode": "الرمز البريدي",
+	"Pin": "الرمز البريدي", "Palestinian Territory, Occupied": "فلسطين",
 	"Exit": "المغادرة", "Place Of Birth": "مكان الولادة",
 	"Mothor ID": "رقم هوية الأم", "Mother ID": "رقم هوية الأم", "Father ID": "رقم هوية الأب",
 }
@@ -60,8 +62,8 @@ def _ar(text: str | None) -> str:
 	if not text:
 		return ""
 	text = text.strip()
-	translated = frappe._(text, lang="ar")
-	return AR.get(text, translated) if translated == text else translated
+	# The map wins: some shipped translations are wrong here ("State" → حالة).
+	return AR.get(text) or frappe._(text, lang="ar")
 
 
 def _editable(df, doc) -> bool:
@@ -135,6 +137,7 @@ def _layout(doc) -> dict:
 			"reqd": cint(df.reqd),
 			"editable": _editable(df, doc),
 			"value": _value(df, doc.get(df.fieldname)),
+			"display": _ar(str(doc.get(df.fieldname))) if df.fieldtype == "Link" and doc.get(df.fieldname) else None,
 		})
 
 	if current["fields"]:
