@@ -940,16 +940,59 @@ def teacher_grid_options(persona: str = None):
 	for g in groups:
 		g["courses"] = _courses_for_group(g["name"])
 
+	# A school that has not built a single class plan has no period rows yet,
+	# and the grid would draw no rows at all. The school day is defined
+	# independently of any class, so it stands in.
+	from match_schools.api.timetable import build_periods, school_day_shape
+
+	periods = _periods(None)
+	shape = school_day_shape()
+	if not periods:
+		periods = [
+			{
+				"order": p["period_order"],
+				"name": p["period_name"],
+				"from": sched.hhmmss(p["from_time"])[:5],
+				"to": sched.hhmmss(p["to_time"])[:5],
+				"isBreak": bool(p["is_break"]),
+			}
+			for p in build_periods(
+				count=shape["count"],
+				minutes=shape["minutes"],
+				start=shape["start"],
+				gap=shape["gap"],
+				break_after=shape["break_after"],
+				break_minutes=shape["break_minutes"],
+			)
+			if not p["is_break"]
+		]
+
+	assigned = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot", filters={"active": 1}, fields=["instructor"], limit_page_length=0
+	):
+		if r.instructor:
+			assigned[r.instructor] = assigned.get(r.instructor, 0) + 1
+
 	return {
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
-		"periods": _periods(None),
+		"workingDays": shape["working_days"],
+		"periods": periods,
 		"groups": groups,
-		"instructors": frappe.get_all(
-			"Instructor",
-			filters={"status": "Active"},
-			fields=["name", "instructor_name"],
-			order_by="instructor_name",
-		),
+		"instructors": [
+			{
+				"name": i.name,
+				"instructor_name": i.instructor_name,
+				"quota": cint(i.get("ms_weekly_quota")),
+				"assigned": assigned.get(i.name, 0),
+			}
+			for i in frappe.get_all(
+				"Instructor",
+				filters={"status": "Active"},
+				fields=["name", "instructor_name", "ms_weekly_quota"],
+				order_by="instructor_name",
+			)
+		],
 		"rooms": frappe.get_all("Room", fields=["name", "room_name"], order_by="name"),
 		"defaultAcademicYear": get_default_academic_year(),
 		"defaultAcademicTerm": get_default_academic_term(),
@@ -971,7 +1014,63 @@ def taken_periods(instructor: str = None, persona: str = None):
 		fields=["day", "period_order", "student_group", "instructor", "course", "room"],
 		limit_page_length=0,
 	)
-	labels = _group_labels({r.student_group for r in rows if r.student_group})
+	taken = [
+		{
+			"day": r.day,
+			"period": cint(r.period_order),
+			"studentGroup": r.student_group,
+			"instructor": r.instructor,
+			"course": r.course,
+			"room": r.room,
+		}
+		for r in rows
+		if not instructor or r.instructor != instructor
+	]
+
+	# Lessons already generated for the term occupy the week too, and the save
+	# is checked against them. Leaving them out would let a cell be filled on
+	# screen only to be refused on save — the grid must show what the server
+	# will accept. Each lesson is matched against its own class's clock:
+	# sections may run different period times, and one school-wide mapping
+	# silently dropped the sections that differ.
+	starts: dict[str, dict] = {}
+	for r in frappe.get_all(
+		"Course Schedule",
+		filters={"docstatus": ["<", 2]},
+		fields=["schedule_date", "from_time", "to_time", "course", "instructor", "room", "student_group"],
+		limit_page_length=0,
+	):
+		if not r.schedule_date or not r.student_group:
+			continue
+		if instructor and r.instructor == instructor:
+			continue
+		if r.student_group not in starts:
+			starts[r.student_group] = _periods(r.student_group)
+		day = sched._weekday(r.schedule_date)
+		if not day:
+			continue
+		# Matched by overlap rather than by an identical start: lessons
+		# generated from an older bell schedule run minutes apart from the
+		# current one, and an exact-start match reported those cells free —
+		# the save then refused them.
+		lesson_from = sched.hhmmss(r.from_time)
+		lesson_to = sched.hhmmss(r.to_time or r.from_time)
+		for period in starts[r.student_group]:
+			if sched.overlaps(
+				lesson_from, lesson_to, f"{period['from']}:00", f"{period['to']}:00"
+			):
+				taken.append(
+					{
+						"day": day,
+						"period": cint(period["order"]),
+						"studentGroup": r.student_group,
+						"instructor": r.instructor,
+						"course": r.course,
+						"room": r.room,
+					}
+				)
+
+	labels = _group_labels({t["studentGroup"] for t in taken if t["studentGroup"]})
 	names = dict(
 		frappe.get_all(
 			"Instructor",
@@ -980,21 +1079,158 @@ def taken_periods(instructor: str = None, persona: str = None):
 			as_list=True,
 		)
 	)
+	seen = set()
+	unique = []
+	for t in taken:
+		key = (t["day"], t["period"], t["studentGroup"])
+		if key in seen:
+			continue
+		seen.add(key)
+		t["studentGroupName"] = labels.get(t["studentGroup"], t["studentGroup"])
+		t["instructorName"] = names.get(t["instructor"], t["instructor"])
+		unique.append(t)
+	return {"taken": unique}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def teacher_assignments(instructor: str, persona: str = None):
+	"""What this teacher owes each class per week, and what is already placed.
+
+	The class plans already record "this section studies maths four periods a
+	week with this teacher". Reading them here means the teacher screen counts
+	against the same figures the class screen was built from, instead of asking
+	the timetabler to retype them.
+	"""
+	# A class may carry several plans from earlier attempts; the newest is the
+	# one the class builder reads, so the others must not be counted twice.
+	plans = {}
+	current_plan = {}
+	for p in frappe.get_all(
+		"MS Timetable Plan",
+		fields=["name", "student_group"],
+		order_by="modified desc",
+		limit_page_length=0,
+	):
+		plans[p.name] = p
+		current_plan.setdefault(p.student_group, p.name)
+
+	rows = [
+		r
+		for r in frappe.get_all(
+			"MS Subject Load",
+			filters={"instructor": instructor, "parenttype": "MS Timetable Plan"},
+			fields=["parent", "course", "periods_per_week", "max_per_day", "preferred_room"],
+			limit_page_length=0,
+		)
+		if current_plan.get((plans.get(r.parent) or {}).get("student_group")) == r.parent
+	]
+	placed: dict[tuple, int] = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters={"instructor": instructor, "active": 1},
+		fields=["student_group", "course"],
+		limit_page_length=0,
+	):
+		placed[(r.student_group, r.course)] = placed.get((r.student_group, r.course), 0) + 1
+
+	out = []
+	seen = set()
+	for r in rows:
+		plan = plans.get(r.parent)
+		if not plan or not plan.student_group:
+			continue
+		key = (plan.student_group, r.course)
+		if key in seen:
+			continue
+		seen.add(key)
+		out.append({
+			"studentGroup": plan.student_group,
+			"course": r.course,
+			"required": cint(r.periods_per_week),
+			"maxPerDay": cint(r.max_per_day) or 2,
+			"room": r.preferred_room,
+			"placed": placed.get(key, 0),
+		})
+
+	# Lessons already on the grid that no plan mentions: a week entered here
+	# first, or a plan since edited. Listing them keeps the totals honest.
+	for (group, course), count in placed.items():
+		if (group, course) not in seen and group and course:
+			out.append({
+				"studentGroup": group,
+				"course": course,
+				"required": count,
+				"maxPerDay": 2,
+				"room": None,
+				"placed": count,
+				"fromGrid": True,
+			})
+
+	labels = _group_labels({a["studentGroup"] for a in out})
+	for a in out:
+		a["studentGroupName"] = labels.get(a["studentGroup"], a["studentGroup"])
+
+	quota = cint(frappe.db.get_value("Instructor", instructor, "ms_weekly_quota"))
 	return {
-		"taken": [
+		"assignments": sorted(out, key=lambda a: (a["studentGroupName"], a["course"])),
+		"quota": quota,
+		"placed": sum(placed.values()),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def check_teacher_slots(instructor: str, slots: str | list = None, persona: str = None):
+	"""Validate a teacher's proposed week without saving it.
+
+	The screen calls this before the save button lights up, so a clash is
+	pointed at on the grid rather than refused after the fact. It runs the very
+	checks the save runs — a cell that passes here saves.
+	"""
+	proposed = [
+		s for s in (parse_json_arg(slots) or []) if s.get("course") and s.get("studentGroup")
+	]
+	for s in proposed:
+		s["student_group"] = s.get("studentGroup")
+
+	problems = _teacher_clashes(instructor, proposed)
+	lessons = [
+		{
+			"day": s.get("day"),
+			"from_time": _period_time(s, "from"),
+			"to_time": _period_time(s, "to"),
+			"instructor": instructor,
+			"room": s.get("room"),
+			"student_group": s.get("studentGroup"),
+		}
+		for s in proposed
+	]
+	exclude = set(
+		frappe.get_all(
+			"Course Schedule",
+			filters={"instructor": instructor, "docstatus": ["<", 2]},
+			pluck="name",
+		)
+	)
+	conflicts = sched.find_conflicts(lessons, exclude=exclude, academic_term=None)
+	for index, items in conflicts.items():
+		s = proposed[index] if index < len(proposed) else {}
+		problems.append(
 			{
-				"day": r.day,
-				"period": r.period_order,
-				"studentGroup": r.student_group,
-				"studentGroupName": labels.get(r.student_group, r.student_group),
-				"instructor": r.instructor,
-				"instructorName": names.get(r.instructor, r.instructor),
-				"course": r.course,
-				"room": r.room,
+				"day": s.get("day"),
+				"period": cint(s.get("period")),
+				"studentGroup": s.get("studentGroup"),
+				"message": items[0]["detail"] if items else items,
 			}
-			for r in rows
-			if not instructor or r.instructor != instructor
-		]
+		)
+
+	quota = cint(frappe.db.get_value("Instructor", instructor, "ms_weekly_quota"))
+	return {
+		"problems": problems,
+		"quota": quota,
+		"placed": len(proposed),
+		"overQuota": bool(quota and len(proposed) > quota),
 	}
 
 
@@ -1025,46 +1261,22 @@ def save_teacher_pattern(
 
 	# A section already promised to another teacher in that period. The dated
 	# lessons below cannot catch this on a school that has not generated any.
-	booked = {
-		(r.day, cint(r.period_order), r.student_group): r
-		for r in frappe.get_all(
-			"MS Timetable Slot",
-			filters={"active": 1, "instructor": ["!=", instructor]},
-			fields=["day", "period_order", "student_group", "instructor", "course"],
-			limit_page_length=0,
-		)
-	}
-	labels = _group_labels({s.get("studentGroup") for s in proposed})
-	clashes = []
-	seen = {}
-	for s in proposed:
-		key = (s.get("day"), cint(s.get("period")), s.get("studentGroup"))
-		if key in booked:
-			other = booked[key]
-			who = (
-				frappe.db.get_value("Instructor", other.instructor, "instructor_name")
-				or other.instructor
-			)
-			group_label = labels.get(s.get("studentGroup"), s.get("studentGroup"))
-			clashes.append(
-				"{0}: محجوزة لدى {1}".format(group_label, who)
-				if who
-				else "{0}: الحصة محجوزة مسبقاً".format(group_label)
-			)
-		cell = (s.get("day"), cint(s.get("period")))
-		if cell in seen:
-			clashes.append(
-				"{0}: حصتان في الوقت نفسه".format(
-					labels.get(s.get("studentGroup"), s.get("studentGroup"))
-				)
-			)
-		seen[cell] = key
-
-	if clashes:
+	problems = _teacher_clashes(instructor, proposed)
+	if problems:
 		return fail(
-			"The timetable has {0} conflict(s)".format(len(clashes)),
-			"تعارضات: " + "، ".join(clashes[:6]),
-			data={"clashes": clashes},
+			"The timetable has {0} conflict(s)".format(len(problems)),
+			"تعارضات: " + "، ".join(p["message"] for p in problems[:6]),
+			data={"problems": problems},
+		)
+
+	# النصاب: a teacher's contract caps the week, and a timetable that exceeds
+	# it is not a draft to fix later — it cannot be worked.
+	quota = cint(frappe.db.get_value("Instructor", instructor, "ms_weekly_quota"))
+	if quota and len(proposed) > quota:
+		return fail(
+			"Weekly quota exceeded: {0} of {1}".format(len(proposed), quota),
+			"عدد الحصص {0} يتجاوز نصاب المعلم الأسبوعي ({1})".format(len(proposed), quota),
+			data={"quota": quota, "placed": len(proposed)},
 		)
 
 	lessons = [
@@ -1122,5 +1334,83 @@ def save_teacher_pattern(
 		if group:
 			sync_group_instructors(group)
 
+	_sync_plans(instructor, proposed)
+
 	frappe.db.commit()
 	return {"instructor": instructor, "slots": created, "groups": sorted(g for g in touched if g)}
+
+
+def _sync_plans(instructor: str, proposed: list[dict]) -> None:
+	"""Write what was just placed back into each class's plan.
+
+	The class builder arranges a week from its plan — "four periods of maths
+	with this teacher" — so a week entered on the teacher screen has to update
+	those figures too, or the next automatic arrangement would undo it. Only
+	rows for this teacher's subjects are touched; a plan without a row for the
+	subject gains one, and a class with no plan at all is left to the class
+	screen, which is where plans are created.
+	"""
+	counts: dict[tuple, int] = {}
+	for s in proposed:
+		key = (s.get("studentGroup"), s.get("course"))
+		counts[key] = counts.get(key, 0) + 1
+
+	for (group, course), count in counts.items():
+		plan_name = frappe.db.get_value(
+			"MS Timetable Plan", {"student_group": group}, "name", order_by="modified desc"
+		)
+		if not plan_name:
+			continue
+		plan = frappe.get_doc("MS Timetable Plan", plan_name)
+		row = next((r for r in plan.subject_loads if r.course == course), None)
+		if row:
+			# Another teacher may own this subject in the plan; the grid is the
+			# newer decision, so it wins — for this subject only.
+			row.instructor = instructor
+			row.periods_per_week = count
+		else:
+			plan.append(
+				"subject_loads",
+				{"course": course, "instructor": instructor, "periods_per_week": count, "max_per_day": 2},
+			)
+		plan.save(ignore_permissions=True)
+
+
+def _teacher_clashes(instructor: str, proposed: list[dict]) -> list[dict]:
+	"""Cells this teacher cannot have: a section already promised elsewhere,
+	or two of their own lessons in one period."""
+	booked = {
+		(r.day, cint(r.period_order), r.student_group): r
+		for r in frappe.get_all(
+			"MS Timetable Slot",
+			filters={"active": 1, "instructor": ["!=", instructor]},
+			fields=["day", "period_order", "student_group", "instructor", "course"],
+			limit_page_length=0,
+		)
+	}
+	labels = _group_labels({s.get("studentGroup") for s in proposed})
+	problems: list[dict] = []
+	seen: dict = {}
+	for s in proposed:
+		day, period = s.get("day"), cint(s.get("period"))
+		group = s.get("studentGroup")
+		group_label = labels.get(group, group)
+		other = booked.get((day, period, group))
+		if other:
+			who = (
+				frappe.db.get_value("Instructor", other.instructor, "instructor_name")
+				or other.instructor
+			)
+			problems.append({
+				"day": day, "period": period, "studentGroup": group,
+				"message": "{0}: محجوزة لدى {1}".format(group_label, who)
+				if who
+				else "{0}: الحصة محجوزة مسبقاً".format(group_label),
+			})
+		if (day, period) in seen:
+			problems.append({
+				"day": day, "period": period, "studentGroup": group,
+				"message": "{0}: حصتان في الوقت نفسه".format(group_label),
+			})
+		seen[(day, period)] = group
+	return problems

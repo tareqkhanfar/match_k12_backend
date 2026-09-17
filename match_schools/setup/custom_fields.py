@@ -36,6 +36,17 @@ CUSTOM_FIELDS = {
 	],
 	"Instructor": [
 		dict(ID_NUMBER, reqd=0, insert_after="instructor_name"),
+		{
+			"fieldname": "ms_weekly_quota",
+			"label": "نصاب الحصص الأسبوعي",
+			"fieldtype": "Int",
+			"insert_after": "status",
+			"description": (
+				"أقصى عدد حصص أسبوعية لهذا المعلم. يمنع بناء الجدول من تجاوزه، "
+				"ويُترك صفراً حين لا نصاب محدّد."
+			),
+			"translatable": 0,
+		},
 	],
 	"Guardian": [
 		dict(ID_NUMBER, reqd=0, insert_after="guardian_name"),

@@ -1229,7 +1229,7 @@ def my_blocks(persona: str = None):
 
 
 @frappe.whitelist()
-@ms_endpoint(ROLE_PARENT, ROLE_STUDENT)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
 def my_alerts(persona: str = None):
 	"""Alerts the caller has not yet acknowledged.
 
