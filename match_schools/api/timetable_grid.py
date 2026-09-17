@@ -907,3 +907,220 @@ def _resolve_range(student_group: str, from_date: str | None, to_date: str | Non
 			return from_date or year.year_start_date, to_date or year.year_end_date
 
 	return from_date, to_date
+
+
+def _group_labels(names: set[str]) -> dict:
+	if not names:
+		return {}
+	return {
+		r.name: r.student_group_name or r.name
+		for r in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list(names)]},
+			fields=["name", "student_group_name"],
+		)
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def teacher_grid_options(persona: str = None):
+	"""The teacher builder's pickers: every class with the subjects it studies.
+
+	A school entering a paper timetable works down one teacher's row, so it
+	needs every class at once rather than one class's courses at a time.
+	"""
+	groups = frappe.get_all(
+		"Student Group",
+		filters=apply_period({"disabled": 0}, "Student Group"),
+		fields=["name", "student_group_name", "program", "academic_year", "batch"],
+		order_by="program, student_group_name",
+		limit_page_length=0,
+	)
+	for g in groups:
+		g["courses"] = _courses_for_group(g["name"])
+
+	return {
+		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
+		"periods": _periods(None),
+		"groups": groups,
+		"instructors": frappe.get_all(
+			"Instructor",
+			filters={"status": "Active"},
+			fields=["name", "instructor_name"],
+			order_by="instructor_name",
+		),
+		"rooms": frappe.get_all("Room", fields=["name", "room_name"], order_by="name"),
+		"defaultAcademicYear": get_default_academic_year(),
+		"defaultAcademicTerm": get_default_academic_term(),
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def taken_periods(instructor: str = None, persona: str = None):
+	"""Which classes are already booked, and by whom, in every period.
+
+	The teacher builder needs this to grey out a cell before it is clicked: a
+	section cannot sit in two lessons at once, however free the teacher is.
+	`instructor`'s own slots are excluded — those are the ones being redrawn.
+	"""
+	rows = frappe.get_all(
+		"MS Timetable Slot",
+		filters={"active": 1},
+		fields=["day", "period_order", "student_group", "instructor", "course", "room"],
+		limit_page_length=0,
+	)
+	labels = _group_labels({r.student_group for r in rows if r.student_group})
+	names = dict(
+		frappe.get_all(
+			"Instructor",
+			filters={"status": ["!=", ""]},
+			fields=["name", "instructor_name"],
+			as_list=True,
+		)
+	)
+	return {
+		"taken": [
+			{
+				"day": r.day,
+				"period": r.period_order,
+				"studentGroup": r.student_group,
+				"studentGroupName": labels.get(r.student_group, r.student_group),
+				"instructor": r.instructor,
+				"instructorName": names.get(r.instructor, r.instructor),
+				"course": r.course,
+				"room": r.room,
+			}
+			for r in rows
+			if not instructor or r.instructor != instructor
+		]
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def save_teacher_pattern(
+	instructor: str,
+	slots: str | list,
+	academic_year: str = None,
+	academic_term: str = None,
+	persona: str = None,
+):
+	"""Replace one teacher's week, across every class they teach.
+
+	The class builder replaces a class's whole week; this replaces a teacher's,
+	and the two write the same slots. Only this teacher's rows are touched, so
+	a class keeps whatever its other teachers have already been given.
+	"""
+	if not frappe.db.exists("Instructor", instructor):
+		return fail("Instructor not found", "لم يتم العثور على المعلم")
+
+	proposed = [s for s in (parse_json_arg(slots) or []) if s.get("course") and s.get("studentGroup")]
+	for s in proposed:
+		# `_period_time` reads a class's own period plan under this key.
+		s["student_group"] = s.get("studentGroup")
+	academic_year = academic_year or get_default_academic_year()
+	academic_term = academic_term or get_default_academic_term()
+
+	# A section already promised to another teacher in that period. The dated
+	# lessons below cannot catch this on a school that has not generated any.
+	booked = {
+		(r.day, cint(r.period_order), r.student_group): r
+		for r in frappe.get_all(
+			"MS Timetable Slot",
+			filters={"active": 1, "instructor": ["!=", instructor]},
+			fields=["day", "period_order", "student_group", "instructor", "course"],
+			limit_page_length=0,
+		)
+	}
+	labels = _group_labels({s.get("studentGroup") for s in proposed})
+	clashes = []
+	seen = {}
+	for s in proposed:
+		key = (s.get("day"), cint(s.get("period")), s.get("studentGroup"))
+		if key in booked:
+			other = booked[key]
+			who = (
+				frappe.db.get_value("Instructor", other.instructor, "instructor_name")
+				or other.instructor
+			)
+			group_label = labels.get(s.get("studentGroup"), s.get("studentGroup"))
+			clashes.append(
+				"{0}: محجوزة لدى {1}".format(group_label, who)
+				if who
+				else "{0}: الحصة محجوزة مسبقاً".format(group_label)
+			)
+		cell = (s.get("day"), cint(s.get("period")))
+		if cell in seen:
+			clashes.append(
+				"{0}: حصتان في الوقت نفسه".format(
+					labels.get(s.get("studentGroup"), s.get("studentGroup"))
+				)
+			)
+		seen[cell] = key
+
+	if clashes:
+		return fail(
+			"The timetable has {0} conflict(s)".format(len(clashes)),
+			"تعارضات: " + "، ".join(clashes[:6]),
+			data={"clashes": clashes},
+		)
+
+	lessons = [
+		{
+			"day": s.get("day"),
+			"from_time": _period_time(s, "from"),
+			"to_time": _period_time(s, "to"),
+			"instructor": instructor,
+			"room": s.get("room"),
+			"student_group": s.get("studentGroup"),
+		}
+		for s in proposed
+	]
+	exclude = set(
+		frappe.get_all(
+			"Course Schedule",
+			filters={"instructor": instructor, "docstatus": ["<", 2]},
+			pluck="name",
+		)
+	)
+	conflicts = sched.find_conflicts(lessons, exclude=exclude, academic_term=academic_term)
+	if conflicts:
+		summary = sched.summarise(conflicts)
+		return fail(
+			"The timetable has {0} conflict(s)".format(summary["total"]),
+			"الجدول يحتوي على {0} تعارضاً — عالجها قبل الحفظ".format(summary["total"]),
+			data={"conflicts": {str(k): v for k, v in conflicts.items()}, "summary": summary},
+		)
+
+	touched = {s.get("studentGroup") for s in proposed}
+	for existing in frappe.get_all(
+		"MS Timetable Slot", filters={"instructor": instructor}, fields=["name", "student_group"]
+	):
+		touched.add(existing.student_group)
+		frappe.delete_doc("MS Timetable Slot", existing.name, ignore_permissions=True, force=True)
+
+	created = 0
+	for s in proposed:
+		doc = frappe.new_doc("MS Timetable Slot")
+		doc.student_group = s.get("studentGroup")
+		doc.day = s.get("day")
+		doc.period_order = cint(s.get("period"))
+		doc.from_time = _period_time(s, "from")
+		doc.to_time = _period_time(s, "to")
+		doc.course = s.get("course")
+		doc.instructor = instructor
+		doc.room = s.get("room") or None
+		doc.academic_year = academic_year
+		doc.academic_term = academic_term
+		doc.active = 1
+		doc.insert(ignore_permissions=True)
+		created += 1
+
+	for group in touched:
+		if group:
+			sync_group_instructors(group)
+
+	frappe.db.commit()
+	return {"instructor": instructor, "slots": created, "groups": sorted(g for g in touched if g)}
