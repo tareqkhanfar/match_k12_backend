@@ -552,7 +552,12 @@ def save_pattern(
 	sync_group_instructors(student_group)
 
 	frappe.db.commit()
-	return {"studentGroup": student_group, "slots": len(created)}
+	return {
+		"studentGroup": student_group,
+		"slots": len(created),
+		# Lessons already generated follow the saved week from today on.
+		"lessons": resync_lessons({"student_group": student_group}),
+	}
 
 
 @frappe.whitelist()
@@ -597,143 +602,24 @@ def generate_lessons(
 	if getdate(end) < getdate(start):
 		return fail("The end date is before the start", "تاريخ النهاية قبل تاريخ البداية")
 
-	removed = 0
-	kept_attended = 0
-	if cint(replace):
-		# Regenerating replaces the untouched lessons but keeps any that were
-		# deliberately changed — a substitution is a decision, not noise.
-		changed = set(
-			frappe.get_all(
-				"MS Lesson Change",
-				filters={"docstatus": 1},
-				pluck="course_schedule",
-			)
-		)
-		candidates = frappe.get_all(
-			"Course Schedule",
-			filters={
-				"student_group": student_group,
-				"schedule_date": ["between", [start, end]],
-				"docstatus": ["<", 2],
-			},
-			pluck="name",
-		)
-
-		# A lesson that has already been register-marked is a record of what
-		# happened, not a plan. Regenerating must not delete it and orphan the
-		# attendance rows that point at it.
-		attended = set(
-			frappe.get_all(
-				"Student Attendance",
-				filters={"course_schedule": ["in", candidates]} if candidates else {"name": ""},
-				pluck="course_schedule",
-			)
-		)
-
-		doomed = [n for n in candidates if n not in changed and n not in attended]
-		kept_attended = len([n for n in candidates if n in attended])
-
-		# Deleted in batches rather than one document at a time. A whole term is
-		# well over a thousand lessons, and `delete_doc` per row held a single
-		# transaction open long enough to hit MariaDB's 50-second lock wait —
-		# the run then failed after ~53s, which over HTTP reached the browser as
-		# an unparseable gateway error rather than a message.
-		#
-		# Course Schedule owns no child tables and nothing links to it here, so
-		# a direct delete is equivalent to `delete_doc` minus the per-row
-		# document load.
-		BATCH = 200
-		for i in range(0, len(doomed), BATCH):
-			chunk = doomed[i : i + BATCH]
-			frappe.db.delete("Course Schedule", {"name": ["in", chunk]})
-			removed += len(chunk)
-			# Commit each batch so locks are released as we go instead of
-			# accumulating across the whole term.
-			frappe.db.commit()
-
-	by_day: dict[str, list] = {}
-	for s in slots:
-		by_day.setdefault(s.day, []).append(s)
-
-	created, skipped = 0, []
-	committed_at = 0
-	current = getdate(start)
-	last = getdate(end)
-	while current <= last:
-		# The school is shut: no lesson is generated, and the day is reported
-		# so the run explains the gap rather than silently missing dates.
-		holiday = ctx.holiday_reason(current)
-		if holiday:
-			skipped.append({"date": str(current), "course": None, "reason": holiday})
-			current = add_days(current, 1)
-			continue
-
-		for s in by_day.get(current.strftime("%A"), []):
-			# Education builds the lesson title as "course by instructor" and
-			# crashes on a missing teacher. Refusing here names the subject,
-			# instead of failing later with a TypeError nobody can act on.
-			if not s.instructor:
-				skipped.append(
-					{
-						"date": str(current),
-						"course": s.course,
-						"reason": "لا يوجد معلم لهذه المادة — عيّن معلماً قبل التوليد",
-					}
-				)
-				continue
-
-			try:
-				doc = frappe.new_doc("Course Schedule")
-				doc.student_group = student_group
-				doc.course = s.course
-				doc.instructor = s.instructor
-				# A Link field rejects "" but accepts None. Schools that never
-				# record rooms leave this empty, and the room is optional here
-				# (see the make_course_schedule_room_optional patch).
-				doc.room = s.room or None
-				doc.schedule_date = current
-				doc.from_time = s.from_time
-				doc.to_time = s.to_time
-				# Who may read this lesson. Defaults to draft so a week being
-				# worked on is not broadcast to families mid-build.
-				doc.ms_audience = audience
-				if audience != "draft":
-					doc.ms_published_on = now_datetime()
-				doc.insert(ignore_permissions=True)
-				created += 1
-			except Exception as exc:
-				# Education validates the date against the term and rejects
-				# overlaps; report which lesson was refused rather than
-				# abandoning the whole run.
-				skipped.append(
-					{
-						"date": str(current),
-						"course": s.course,
-						"reason": str(exc)[:140],
-					}
-				)
-		# Commit as we go rather than holding one transaction across a whole
-		# term, for the same reason the deletes are batched.
-		if created - committed_at >= 200:
-			frappe.db.commit()
-			committed_at = created
-		current = add_days(current, 1)
+	result = regenerate_lessons(
+		[dict(sl, student_group=student_group) for sl in slots],
+		{"student_group": student_group},
+		start,
+		end,
+		audience,
+		replace=bool(cint(replace)),
+	)
+	_remember_until({"student_group": student_group}, end)
+	_remember_audience({"student_group": student_group}, audience)
 
 	# الجدول قال من يدرّس هذه الشعبة — نسجّله عليها، وإلا بقي «شعبي»
 	# و«طلابي» فارغَين عند من ارتبط بشعبته عبر الجدول وحده.
 	sync_group_instructors(student_group)
 
 	frappe.db.commit()
-	return {
-		"studentGroup": student_group,
-		"from": str(start),
-		"to": str(end),
-		"created": created,
-		"removed": removed,
-		# Lessons left alone because a register was already taken against them.
-		"keptAttended": kept_attended,
-		"skipped": skipped,
-	}
+	result["studentGroup"] = student_group
+	return result
 
 
 AUDIENCES = {
@@ -1401,7 +1287,13 @@ def save_teacher_pattern(
 	_sync_plans(instructor, proposed)
 
 	frappe.db.commit()
-	return {"instructor": instructor, "slots": created, "groups": sorted(g for g in touched if g)}
+	return {
+		"instructor": instructor,
+		"slots": created,
+		"groups": sorted(g for g in touched if g),
+		# Lessons already generated follow the saved week from today on.
+		"lessons": resync_lessons({"instructor": instructor}),
+	}
 
 
 def _sync_plans(instructor: str, proposed: list[dict]) -> None:
@@ -1478,3 +1370,324 @@ def _teacher_clashes(instructor: str, proposed: list[dict]) -> list[dict]:
 			})
 		seen[(day, period)] = group
 	return problems
+
+
+# --- Dated lessons: one engine for every screen that generates them ----------
+
+
+def _protected(names: list[str]) -> set[str]:
+	"""Lessons a regeneration must leave alone.
+
+	A lesson with a substitution or swap recorded against it is a decision, and
+	one with a register taken is a record of what happened; deleting either
+	would lose it and orphan whatever points at it.
+	"""
+	if not names:
+		return set()
+	changed = set(
+		frappe.get_all(
+			"MS Lesson Change",
+			filters={"docstatus": 1, "course_schedule": ["in", names]},
+			pluck="course_schedule",
+		)
+	)
+	attended = set(
+		frappe.get_all(
+			"Student Attendance",
+			filters={"course_schedule": ["in", names]},
+			pluck="course_schedule",
+		)
+	)
+	return changed | attended
+
+
+def regenerate_lessons(
+	slots: list[dict],
+	scope: dict,
+	start,
+	end,
+	audience: str = "draft",
+	replace: bool = True,
+) -> dict:
+	"""Replace the dated lessons in `scope` between two dates with `slots`.
+
+	`scope` names whose lessons are being replaced — a teacher's or a
+	section's — and nothing outside it is deleted. Protected lessons stay, and
+	no new lesson is created on top of one: the kept lesson already occupies
+	that section, and that teacher, at that time.
+	"""
+	start, end = getdate(start), getdate(end)
+	existing = frappe.get_all(
+		"Course Schedule",
+		filters={**scope, "schedule_date": ["between", [start, end]], "docstatus": ["<", 2]},
+		fields=["name", "student_group", "instructor", "schedule_date", "from_time"],
+		limit_page_length=0,
+	)
+	keep = _protected([e.name for e in existing]) if replace else {e.name for e in existing}
+	doomed = [e.name for e in existing if e.name not in keep]
+
+	# What a kept lesson occupies, so the new week is not laid over it.
+	held_group: set[tuple] = set()
+	held_teacher: set[tuple] = set()
+	for e in existing:
+		if e.name in keep:
+			at = (str(e.schedule_date), sched.hhmmss(e.from_time))
+			held_group.add((e.student_group, *at))
+			if e.instructor:
+				held_teacher.add((e.instructor, *at))
+
+	removed = 0
+	for i in range(0, len(doomed), 200):
+		chunk = doomed[i : i + 200]
+		frappe.db.delete("Course Schedule", {"name": ["in", chunk]})
+		removed += len(chunk)
+		frappe.db.commit()
+
+	by_day: dict[str, list] = {}
+	for s in slots:
+		by_day.setdefault(s["day"], []).append(s)
+
+	created, kept_over, skipped, committed_at = 0, 0, [], 0
+	current = start
+	while current <= end:
+		holiday = ctx.holiday_reason(current)
+		if holiday:
+			if by_day.get(current.strftime("%A")):
+				skipped.append({"date": str(current), "course": None, "reason": holiday})
+			current = add_days(current, 1)
+			continue
+		for s in by_day.get(current.strftime("%A"), []):
+			at = (str(current), sched.hhmmss(s["from_time"]))
+			if (s["student_group"], *at) in held_group or (
+				s.get("instructor") and (s["instructor"], *at) in held_teacher
+			):
+				kept_over += 1
+				continue
+			if not s.get("instructor"):
+				skipped.append({
+					"date": str(current), "course": s["course"],
+					"reason": "لا يوجد معلم لهذه المادة — عيّن معلماً قبل التوليد",
+				})
+				continue
+			try:
+				doc = frappe.new_doc("Course Schedule")
+				doc.student_group = s["student_group"]
+				doc.course = s["course"]
+				doc.instructor = s["instructor"]
+				doc.room = s.get("room") or None
+				doc.schedule_date = current
+				doc.from_time = s["from_time"]
+				doc.to_time = s["to_time"]
+				doc.ms_audience = audience
+				if audience != "draft":
+					doc.ms_published_on = now_datetime()
+				doc.insert(ignore_permissions=True)
+				created += 1
+			except Exception as exc:
+				frappe.clear_messages()
+				skipped.append({"date": str(current), "course": s["course"], "reason": str(exc)[:160]})
+		if created - committed_at >= 200:
+			frappe.db.commit()
+			committed_at = created
+		current = add_days(current, 1)
+
+	frappe.db.commit()
+	return {
+		"from": str(start),
+		"to": str(end),
+		"created": created,
+		"removed": removed,
+		"keptAttended": len(keep),
+		"keptOver": kept_over,
+		"skipped": skipped,
+	}
+
+
+def _until_key(scope: dict) -> str:
+	kind, value = next(iter(scope.items()))
+	return f"ms_lessons_until:{kind}:{value}"
+
+
+def _remember_audience(scope: dict, audience: str) -> None:
+	frappe.db.set_default(_until_key(scope).replace("until", "audience", 1), audience)
+
+
+def _remember_until(scope: dict, end) -> None:
+	"""Record how far lessons were generated for this teacher or section.
+
+	The last lesson on the calendar is not the same thing: a range ending on a
+	Thursday whose last lesson is Monday would leave a lesson moved onto
+	Wednesday ungenerated by the next sync.
+	"""
+	key = _until_key(scope)
+	stored = frappe.db.get_default(key)
+	if not stored or getdate(end) > getdate(stored):
+		frappe.db.set_default(key, str(getdate(end)))
+
+
+def _generated_until(scope: dict, since):
+	"""How far a sync must reach: the furthest any generation covered.
+
+	A teacher's lessons may have been generated section by section, and a
+	section's teacher by teacher, so both kinds of record count.
+	"""
+	dates = [_last_lesson_date(scope, since)]
+	dates.append(frappe.db.get_default(_until_key(scope)))
+	field, value = next(iter(scope.items()))
+	other = "student_group" if field == "instructor" else "instructor"
+	for related in frappe.get_all(
+		"MS Timetable Slot", filters={field: value}, pluck=other, distinct=True
+	):
+		if related:
+			dates.append(frappe.db.get_default(_until_key({other: related})))
+	dates = [getdate(d) for d in dates if d]
+	return max(dates) if dates else None
+
+
+def _last_lesson_date(scope: dict, since):
+	rows = frappe.get_all(
+		"Course Schedule",
+		filters={**scope, "schedule_date": [">=", since], "docstatus": ["<", 2]},
+		fields=["schedule_date"],
+		order_by="schedule_date desc",
+		limit=1,
+	)
+	return rows[0].schedule_date if rows else None
+
+
+def _slot_rows(filters: dict) -> list[dict]:
+	return [
+		dict(r)
+		for r in frappe.get_all(
+			"MS Timetable Slot",
+			filters={**filters, "active": 1},
+			fields=["day", "from_time", "to_time", "course", "instructor", "room", "student_group"],
+			limit_page_length=0,
+		)
+	]
+
+
+def _audience_of(scope: dict, since) -> str:
+	"""The audience the lessons being replaced were released to."""
+	counts: dict[str, int] = {}
+	for a in frappe.get_all(
+		"Course Schedule",
+		filters={**scope, "schedule_date": [">=", since], "docstatus": ["<", 2]},
+		pluck="ms_audience",
+		limit_page_length=0,
+	):
+		counts[a or "draft"] = counts.get(a or "draft", 0) + 1
+	if counts:
+		return max(counts, key=counts.get)
+	# Every lesson was removed (the week emptied, then refilled): fall back to
+	# the audience last generated for, so the lessons do not come back hidden.
+	stored = frappe.db.get_default(_until_key(scope).replace("until", "audience", 1))
+	return stored if stored in AUDIENCES else "draft"
+
+
+def resync_lessons(scope: dict) -> dict | None:
+	"""Carry a saved change to the week into lessons already generated.
+
+	Only when the scope already has lessons from today on — a week never
+	generated stays that way until someone presses generate. The past is never
+	rewritten, and the lessons keep the audience they were released to, so an
+	edit does not quietly unpublish a timetable families can already see.
+	"""
+	since = getdate(today())
+	if not _last_lesson_date(scope, since) and not frappe.db.get_default(_until_key(scope)):
+		return None
+	last = _generated_until(scope, since)
+	if not last or last < since:
+		return None
+	audience = _audience_of(scope, since)
+	try:
+		return regenerate_lessons(_slot_rows(scope), scope, since, last, audience)
+	except Exception:
+		# The week itself is already saved; say that the lessons did not follow
+		# rather than letting the save look failed. Generating again is safe —
+		# it replaces the same range from the same week.
+		frappe.db.rollback()
+		frappe.log_error(frappe.get_traceback(), "Lesson resync failed")
+		return {
+			"created": 0, "removed": 0, "keptAttended": 0, "keptOver": 0, "skipped": [],
+			"error": "حُفظ الجدول، لكن تعذّر تحديث الحصص المولّدة — اضغط «توليد الحصص» لإكمالها.",
+		}
+
+
+def _teacher_range(instructor: str):
+	"""The term to generate a teacher's week over: that of the sections taught."""
+	groups = frappe.get_all(
+		"MS Timetable Slot", filters={"instructor": instructor, "active": 1},
+		pluck="student_group", distinct=True,
+	)
+	ranges = [r for r in (_resolve_range(g, None, None) for g in groups) if r[0] and r[1]]
+	if not ranges:
+		return None, None
+	return min(getdate(r[0]) for r in ranges), max(getdate(r[1]) for r in ranges)
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def teacher_lessons_status(instructor: str, persona: str = None):
+	"""What generating would cover, and what is already generated."""
+	start, end = _teacher_range(instructor)
+	since = getdate(today())
+	future = frappe.db.count(
+		"Course Schedule",
+		{"instructor": instructor, "schedule_date": [">=", since], "docstatus": ["<", 2]},
+	)
+	last = _last_lesson_date({"instructor": instructor}, since)
+	return {
+		"from": str(start or ""),
+		"to": str(end or ""),
+		"generated": future,
+		"generatedTo": str(last or ""),
+		"audience": _audience_of({"instructor": instructor}, since) if future else "draft",
+		"slots": frappe.db.count("MS Timetable Slot", {"instructor": instructor, "active": 1}),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def generate_teacher_lessons(
+	instructor: str,
+	from_date: str = None,
+	to_date: str = None,
+	audience: str = "draft",
+	persona: str = None,
+):
+	"""Turn one teacher's saved week into dated lessons.
+
+	Replaces only this teacher's lessons in the range — other teachers in the
+	same sections are left exactly as they are.
+	"""
+	if not frappe.db.exists("Instructor", instructor):
+		return fail("Instructor not found", "لم يتم العثور على المعلم")
+	if audience not in AUDIENCES:
+		return fail("Unknown audience", "جمهور غير معروف")
+	slots = _slot_rows({"instructor": instructor})
+	has_lessons = frappe.db.exists(
+		"Course Schedule", {"instructor": instructor, "docstatus": ["<", 2]}
+	)
+	if not slots and not has_lessons:
+		return fail(
+			"This teacher has no saved week",
+			"لا يوجد جدول محفوظ لهذا المعلم — ابنِ جدوله واحفظه أولاً",
+		)
+	start, end = (from_date, to_date) if from_date and to_date else _teacher_range(instructor)
+	if not start or not end:
+		return fail(
+			"Could not determine the term dates",
+			"تعذّر تحديد تواريخ الفصل — حدّد الفترة يدوياً",
+		)
+	if getdate(end) < getdate(start):
+		return fail("The end date is before the start", "تاريخ النهاية قبل تاريخ البداية")
+
+	result = regenerate_lessons(slots, {"instructor": instructor}, start, end, audience)
+	_remember_until({"instructor": instructor}, end)
+	_remember_audience({"instructor": instructor}, audience)
+	for group in {s["student_group"] for s in slots}:
+		sync_group_instructors(group)
+	frappe.db.commit()
+	result["instructor"] = instructor
+	return result

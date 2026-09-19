@@ -648,6 +648,9 @@ def import_timetable(commit: int = 0, persona: str = None):
 		)
 
 	summary["committed"] = True
+	# After the commit, outside the try: the week is saved either way, and a
+	# lesson sync that fails reports its own error instead of "nothing saved".
+	summary["lessonSync"] = _resync([{"instructor": t} for t in slots])
 	return summary
 
 
@@ -1062,4 +1065,22 @@ def _import_flat(table: list[list], cols: dict[str, int], commit: int) -> dict:
 			"تعذّر الاستيراد ولم يُحفظ أي شيء — الجدول كما كان.",
 		)
 	summary["committed"] = True
+	summary["lessonSync"] = _resync([{"student_group": g} for g in {e["student_group"] for e in entries}])
 	return summary
+
+
+def _resync(scopes: list[dict]) -> dict:
+	"""Carry an import into lessons already generated, totalled for the screen."""
+	total = {"created": 0, "removed": 0, "keptAttended": 0, "skipped": []}
+	touched = False
+	for scope in scopes:
+		result = tg.resync_lessons(scope)
+		if not result:
+			continue
+		touched = True
+		for key in ("created", "removed", "keptAttended"):
+			total[key] += result[key]
+		total["skipped"] += result["skipped"]
+		if result.get("error"):
+			total["error"] = result["error"]
+	return total if touched else None
