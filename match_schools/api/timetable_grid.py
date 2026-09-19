@@ -448,7 +448,7 @@ def _period_time(slot: dict, edge: str) -> str:
 	period = cint(slot.get("period"))
 	# This class's own plan when it has one: two sections may run different
 	# days, and the globally newest plan would then supply the wrong clock.
-	for p in _periods(slot.get("student_group")):
+	for p in _clock(slot.get("student_group")):
 		if p["order"] == period:
 			return sched.hhmmss((p["from"] if edge == "from" else p["to"]) + ":00")
 
@@ -929,30 +929,86 @@ def school_grid() -> tuple[list[dict], list[str]]:
 	a grid would draw no rows at all. The school day is defined independently
 	of any class, so it stands in.
 	"""
+	from match_schools.api.timetable import school_day_shape
+
+	shape = school_day_shape()
+	return _periods(None) or _slot_clock(None) or _shape_clock(), shape["working_days"]
+
+
+def _slot_clock(student_group: str | None) -> list[dict]:
+	"""The periods a timetable already in use runs on, read from its slots.
+
+	A school that imported its week has no plan, but every slot carries its
+	period number and times — that is the clock. The most common time per
+	period wins, since sections may run a period minutes apart.
+	"""
+	filters = {"active": 1}
+	if student_group:
+		filters["student_group"] = student_group
+	tally: dict[int, dict] = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters=filters,
+		fields=["period_order", "from_time", "to_time"],
+		limit_page_length=0,
+	):
+		key = (sched.hhmmss(r.from_time)[:5], sched.hhmmss(r.to_time)[:5])
+		counts = tally.setdefault(cint(r.period_order), {})
+		counts[key] = counts.get(key, 0) + 1
+	return [
+		{
+			"order": order,
+			"name": str(order),
+			"from": max(counts, key=counts.get)[0],
+			"to": max(counts, key=counts.get)[1],
+			"isBreak": False,
+		}
+		for order, counts in sorted(tally.items())
+		if order
+	]
+
+
+def _shape_clock() -> list[dict]:
+	"""The school day as configured, teaching periods numbered 1..n.
+
+	Breaks are left out and the lessons numbered consecutively, the way a
+	school counts them — so "period 3" is the third lesson whether or not a
+	break comes before it.
+	"""
 	from match_schools.api.timetable import build_periods, school_day_shape
 
-	periods = _periods(None)
 	shape = school_day_shape()
-	if not periods:
-		periods = [
-			{
-				"order": p["period_order"],
-				"name": p["period_name"],
-				"from": sched.hhmmss(p["from_time"])[:5],
-				"to": sched.hhmmss(p["to_time"])[:5],
-				"isBreak": bool(p["is_break"]),
-			}
-			for p in build_periods(
-				count=shape["count"],
-				minutes=shape["minutes"],
-				start=shape["start"],
-				gap=shape["gap"],
-				break_after=shape["break_after"],
-				break_minutes=shape["break_minutes"],
-			)
-			if not p["is_break"]
-		]
-	return periods, shape["working_days"]
+	teaching = [
+		p
+		for p in build_periods(
+			count=shape["count"],
+			minutes=shape["minutes"],
+			start=shape["start"],
+			gap=shape["gap"],
+			break_after=shape["break_after"],
+			break_minutes=shape["break_minutes"],
+		)
+		if not p["is_break"]
+	]
+	return [
+		{
+			"order": i + 1,
+			"name": p["period_name"],
+			"from": sched.hhmmss(p["from_time"])[:5],
+			"to": sched.hhmmss(p["to_time"])[:5],
+			"isBreak": False,
+		}
+		for i, p in enumerate(teaching)
+	]
+
+
+def _clock(student_group: str | None) -> list[dict]:
+	"""One class's periods: its plan, else its own slots, else the school's.
+
+	Everything that turns a period number into a time goes through here, so a
+	school with no plan at all still gets real times rather than blanks.
+	"""
+	return _periods(student_group) or _slot_clock(student_group) or school_grid()[0]
 
 
 @frappe.whitelist()
@@ -1053,7 +1109,7 @@ def taken_periods(instructor: str = None, persona: str = None):
 		if instructor and r.instructor == instructor:
 			continue
 		if r.student_group not in starts:
-			starts[r.student_group] = _periods(r.student_group)
+			starts[r.student_group] = _clock(r.student_group)
 		day = sched._weekday(r.schedule_date)
 		if not day:
 			continue
