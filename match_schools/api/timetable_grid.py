@@ -922,27 +922,13 @@ def _group_labels(names: set[str]) -> dict:
 	}
 
 
-@frappe.whitelist()
-@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
-def teacher_grid_options(persona: str = None):
-	"""The teacher builder's pickers: every class with the subjects it studies.
+def school_grid() -> tuple[list[dict], list[str]]:
+	"""The school-wide week: its periods and its working days.
 
-	A school entering a paper timetable works down one teacher's row, so it
-	needs every class at once rather than one class's courses at a time.
+	A school that has not built a single class plan has no period rows yet, and
+	a grid would draw no rows at all. The school day is defined independently
+	of any class, so it stands in.
 	"""
-	groups = frappe.get_all(
-		"Student Group",
-		filters=apply_period({"disabled": 0}, "Student Group"),
-		fields=["name", "student_group_name", "program", "academic_year", "batch"],
-		order_by="program, student_group_name",
-		limit_page_length=0,
-	)
-	for g in groups:
-		g["courses"] = _courses_for_group(g["name"])
-
-	# A school that has not built a single class plan has no period rows yet,
-	# and the grid would draw no rows at all. The school day is defined
-	# independently of any class, so it stands in.
 	from match_schools.api.timetable import build_periods, school_day_shape
 
 	periods = _periods(None)
@@ -966,6 +952,28 @@ def teacher_grid_options(persona: str = None):
 			)
 			if not p["is_break"]
 		]
+	return periods, shape["working_days"]
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def teacher_grid_options(persona: str = None):
+	"""The teacher builder's pickers: every class with the subjects it studies.
+
+	A school entering a paper timetable works down one teacher's row, so it
+	needs every class at once rather than one class's courses at a time.
+	"""
+	groups = frappe.get_all(
+		"Student Group",
+		filters=apply_period({"disabled": 0}, "Student Group"),
+		fields=["name", "student_group_name", "program", "academic_year", "batch"],
+		order_by="program, student_group_name",
+		limit_page_length=0,
+	)
+	for g in groups:
+		g["courses"] = _courses_for_group(g["name"])
+
+	periods, working_days = school_grid()
 
 	assigned = {}
 	for r in frappe.get_all(
@@ -976,7 +984,7 @@ def teacher_grid_options(persona: str = None):
 
 	return {
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
-		"workingDays": shape["working_days"],
+		"workingDays": working_days,
 		"periods": periods,
 		"groups": groups,
 		"instructors": [
