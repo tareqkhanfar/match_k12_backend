@@ -45,12 +45,18 @@ DAY_AR = {
 	"Wednesday": "الأربعاء", "Thursday": "الخميس", "Friday": "الجمعة", "Saturday": "السبت",
 }
 
-# Longest first, so "الحادي عشر" is not read as "الأول".
+# Longest first, so "الحادي عشر" is not read as "الأول". Kindergarten has no
+# grade number; "ت" is the letter schools write for it.
 ORDINALS = [
-	("الحادي عشر", 11), ("الثاني عشر", 12), ("الاول", 1), ("الثاني", 2), ("الثالث", 3),
-	("الرابع", 4), ("الخامس", 5), ("السادس", 6), ("السابع", 7), ("الثامن", 8),
-	("التاسع", 9), ("العاشر", 10),
+	("الحادي عشر", "11"), ("الثاني عشر", "12"), ("التمهيدي", "ت"), ("الاول", "1"),
+	("الثاني", "2"), ("الثالث", "3"), ("الرابع", "4"), ("الخامس", "5"), ("السادس", "6"),
+	("السابع", "7"), ("الثامن", "8"), ("التاسع", "9"), ("العاشر", "10"),
 ]
+
+
+def _bare(label) -> str:
+	"""A section's name without the academic year it carries: "(2026-2027)"."""
+	return re.sub(r"\s*\([^)]*\)\s*", " ", str(label or "")).strip()
 
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -78,10 +84,10 @@ def _derive_code(label: str) -> str:
 	The number is read from normalised text; the letter is kept as the school
 	wrote it, because the code is what staff will see and type.
 	"""
-	number = next((n for word, n in ORDINALS if word in _norm(label)), None)
+	number = next((n for word, n in ORDINALS if word in _norm(_bare(label))), None)
 	if not number:
 		return ""
-	original = re.sub(r"\s+", " ", str(label)).strip()
+	original = re.sub(r"\s+", " ", _bare(label)).strip()
 	tail = original.split("-")[-1].strip() if "-" in original else original.split(" ")[-1]
 	if not tail or len(tail) > 2:
 		return ""
@@ -343,6 +349,8 @@ def _read(content: bytes):
 		group_by[_code_key(g.name)] = g.name
 		if g.student_group_name:
 			group_by[_code_key(g.student_group_name)] = g.name
+		# The name as a person writes it, without the year in brackets.
+		group_by.setdefault(_code_key(_bare(g.student_group_name or g.name)), g.name)
 	codes = _auto_codes(groups)
 	if SECTIONS_SHEET in wb.sheetnames:
 		# The school's own codes win: they are what is written on its paper.
