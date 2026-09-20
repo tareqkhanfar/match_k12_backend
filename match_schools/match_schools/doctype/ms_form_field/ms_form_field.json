@@ -1,0 +1,21 @@
+{
+ "actions": [], "creation": "2026-09-20 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["fieldname", "label", "fieldtype", "column_break_1", "options", "default_value", "column_break_2", "reqd", "width", "description"],
+ "fields": [
+  {"fieldname": "fieldname", "fieldtype": "Data", "label": "المعرّف", "reqd": 1},
+  {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "العنوان", "reqd": 1},
+  {"fieldname": "fieldtype", "fieldtype": "Select", "in_list_view": 1, "label": "النوع", "reqd": 1, "default": "Data",
+   "options": "Section\nData\nLong Text\nNumber\nDate\nTime\nDatetime\nSelect\nMulti Select\nCheckbox\nRating\nTable\nAttach\nHeading"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "options", "fieldtype": "Small Text", "label": "الخيارات أو الأعمدة"},
+  {"fieldname": "default_value", "fieldtype": "Data", "label": "القيمة الافتراضية"},
+  {"fieldname": "column_break_2", "fieldtype": "Column Break"},
+  {"fieldname": "reqd", "fieldtype": "Check", "in_list_view": 1, "label": "مطلوب"},
+  {"fieldname": "width", "fieldtype": "Select", "label": "العرض", "default": "half", "options": "half\nfull\nthird"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "توضيح"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-09-20 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Form Field",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

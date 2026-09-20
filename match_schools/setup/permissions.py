@@ -116,6 +116,10 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"MS Gradebook Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: FULL, STUDENT: READ, PARENT: READ},
 	# The teacher submits; only the back office reviews and publishes.
 	"MS Survey": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
+	# --- Specialist files: nursing, counselling, special needs, and the rest.
+	# The design is the back office's; filling one in is a teacher's work too.
+	"MS Form Template": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ},
+	"MS Form Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE},
 	"MS Survey Question": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	"MS Survey Response": {
 		ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE, STUDENT: WRITE, PARENT: WRITE,

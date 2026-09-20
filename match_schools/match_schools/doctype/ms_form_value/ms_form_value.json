@@ -1,0 +1,14 @@
+{
+ "actions": [], "creation": "2026-09-20 00:00:00", "doctype": "DocType",
+ "editable_grid": 1, "engine": "InnoDB", "istable": 1,
+ "field_order": ["fieldname", "label", "fieldtype", "value"],
+ "fields": [
+  {"fieldname": "fieldname", "fieldtype": "Data", "in_list_view": 1, "label": "المعرّف", "reqd": 1},
+  {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "العنوان"},
+  {"fieldname": "fieldtype", "fieldtype": "Data", "label": "النوع"},
+  {"fieldname": "value", "fieldtype": "Long Text", "in_list_view": 1, "label": "القيمة"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-09-20 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Form Value",
+ "owner": "Administrator", "permissions": [], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

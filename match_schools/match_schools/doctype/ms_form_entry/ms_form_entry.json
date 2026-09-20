@@ -1,0 +1,30 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "naming_series:",
+ "creation": "2026-09-20 00:00:00", "doctype": "DocType", "editable_grid": 0, "engine": "InnoDB",
+ "field_order": ["naming_series", "template", "template_title", "category", "column_break_main", "student", "student_name", "student_group", "section_meta", "status", "filled_by", "filled_on", "column_break_meta", "academic_year", "academic_term", "notes", "section_values", "values_table"],
+ "fields": [
+  {"fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "MS-FRE-.YYYY.-", "default": "MS-FRE-.YYYY.-"},
+  {"fieldname": "template", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "النموذج", "options": "MS Form Template", "reqd": 1},
+  {"fieldname": "template_title", "fieldtype": "Data", "label": "اسم النموذج", "read_only": 1},
+  {"fieldname": "category", "fieldtype": "Data", "in_standard_filter": 1, "label": "الفئة", "read_only": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "student", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "الطالب", "options": "Student", "reqd": 1},
+  {"fieldname": "student_name", "fieldtype": "Data", "label": "اسم الطالب", "read_only": 1},
+  {"fieldname": "student_group", "fieldtype": "Link", "label": "الشعبة", "options": "Student Group"},
+  {"fieldname": "section_meta", "fieldtype": "Section Break", "label": "بيانات التعبئة"},
+  {"fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "الحالة", "options": "مسودة\nمكتمل", "default": "مسودة"},
+  {"fieldname": "filled_by", "fieldtype": "Link", "label": "عبّأه", "options": "User"},
+  {"fieldname": "filled_on", "fieldtype": "Datetime", "label": "تاريخ التعبئة"},
+  {"fieldname": "column_break_meta", "fieldtype": "Column Break"},
+  {"fieldname": "academic_year", "fieldtype": "Link", "label": "السنة الدراسية", "options": "Academic Year"},
+  {"fieldname": "academic_term", "fieldtype": "Link", "label": "الفصل الدراسي", "options": "Academic Term"},
+  {"fieldname": "notes", "fieldtype": "Small Text", "label": "ملاحظات"},
+  {"fieldname": "section_values", "fieldtype": "Section Break", "label": "القيم"},
+  {"fieldname": "values_table", "fieldtype": "Table", "label": "القيم", "options": "MS Form Value"}
+ ],
+ "index_web_pages_for_search": 0, "links": [], "modified": "2026-09-20 00:00:00",
+ "modified_by": "Administrator", "module": "Match Schools", "name": "MS Form Entry",
+ "naming_rule": "By \"Naming Series\" field", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "role": "System Manager", "share": 1, "write": 1}],
+ "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 1
+}
