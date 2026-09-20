@@ -8,13 +8,19 @@
 يجوز أن تكون أبطأ ما فيه.
 """
 
+import json
+
 import frappe
 from frappe.utils import nowdate
 
 from match_schools.api.utils import (
+	fail,
 	get_default_academic_year,
+	get_persona,
 	instructor_groups,
 	ms_endpoint,
+	parse_json_arg,
+	PERSONA_LABELS_AR,
 	resolve_scope,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -266,3 +272,135 @@ def _due_assignments(groups: list[str] | None, students: list[str]) -> int:
 		return 0
 	done = handed_in_pairs([r.name for r in rows])
 	return sum(1 for r in rows for s in students if (r.name, s) not in done)
+
+
+# --- Per-user layout ----------------------------------------------------------
+#
+# The workspace is the same for everyone in a role, which is right until it
+# isn't: a school hands one secretary the admissions work and another the fees,
+# and both stare past half the screen. A layout says what one person sees —
+# which sections, which links inside them, and which of the counted cards —
+# and everyone without one keeps the default.
+
+def _layout_of(user: str) -> dict:
+	stored = frappe.db.get_value("MS Workspace Layout", {"user": user}, "layout")
+	if not stored:
+		return {}
+	try:
+		return json.loads(stored) or {}
+	except Exception:
+		# A layout that cannot be read must not take the workspace with it.
+		return {}
+
+
+@frappe.whitelist()
+@ms_endpoint(*ALL_ROLES)
+def my_layout(persona: str = None):
+	"""What this user's workspace should show. Empty means the default."""
+	return {"layout": _layout_of(frappe.session.user), "user": frappe.session.user}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN)
+def layout_users(search: str = "", persona: str = None):
+	"""Who can be customised, and who already is."""
+	filters = {"enabled": 1, "name": ["not in", ["Guest"]]}
+	or_filters = (
+		[["full_name", "like", f"%{search}%"], ["name", "like", f"%{search}%"]] if search else None
+	)
+	rows = frappe.get_all(
+		"User",
+		filters=filters,
+		or_filters=or_filters,
+		fields=["name", "full_name", "user_type"],
+		order_by="full_name",
+		limit=60,
+	)
+	customised = set(frappe.get_all("MS Workspace Layout", pluck="user"))
+	out = []
+	for r in rows:
+		user_persona = get_persona(r.name)
+		if not user_persona:
+			continue
+		out.append(
+			{
+				"user": r.name,
+				"name": r.full_name or r.name,
+				"persona": user_persona,
+				"personaLabel": PERSONA_LABELS_AR.get(user_persona, user_persona),
+				"customised": r.name in customised,
+			}
+		)
+	return {"users": out}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN)
+def layout_for(user: str, persona: str = None):
+	"""One user's layout, with the persona whose default it departs from."""
+	target = get_persona(user)
+	if not target:
+		return fail(
+			"This user has no Match Schools role.",
+			"هذا المستخدم بلا دور في النظام — لا مساحة عمل له.",
+		)
+	return {
+		"user": user,
+		"persona": target,
+		"personaLabel": PERSONA_LABELS_AR.get(target, target),
+		"layout": _layout_of(user),
+		"cards": [{"key": c["key"], "label": c["label"]} for c in _cards_for(target)],
+	}
+
+
+def _cards_for(target_persona: str) -> list[dict]:
+	"""The counted cards a persona's workspace offers.
+
+	Built by the same code that builds the real ones, so a card added there
+	appears here without being listed twice. The counts belong to whoever is
+	asking and are discarded — only the keys and labels are wanted.
+	"""
+	# Down to the function itself: the wrappers above it replace the persona
+	# argument with the caller's own, which would hand an admin's cards back
+	# for every user being customised.
+	builder = shortcuts
+	while hasattr(builder, "__wrapped__"):
+		builder = builder.__wrapped__
+	try:
+		return (builder(persona=target_persona) or {}).get("shortcuts") or []
+	except Exception:
+		frappe.clear_messages()
+		return []
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN)
+def save_layout(user: str, layout: str | dict = None, persona: str = None):
+	"""Store one user's workspace, or clear it back to the default."""
+	if not get_persona(user):
+		return fail(
+			"This user has no Match Schools role.",
+			"هذا المستخدم بلا دور في النظام — لا مساحة عمل له.",
+		)
+	data = parse_json_arg(layout, {}) or {}
+	empty = not any(
+		data.get(key) for key in ("hiddenGroups", "hiddenItems", "hiddenCards", "groupOrder")
+	)
+	existing = frappe.db.get_value("MS Workspace Layout", {"user": user}, "name")
+	if empty:
+		if existing:
+			frappe.delete_doc("MS Workspace Layout", existing, ignore_permissions=True)
+			frappe.db.commit()
+		return {"user": user, "layout": {}, "reset": True}
+
+	doc = (
+		frappe.get_doc("MS Workspace Layout", existing)
+		if existing
+		else frappe.new_doc("MS Workspace Layout")
+	)
+	doc.user = user
+	doc.updated_by_user = frappe.session.user
+	doc.layout = json.dumps(data, ensure_ascii=False)
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"user": user, "layout": data, "reset": False}
