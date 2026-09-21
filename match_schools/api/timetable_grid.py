@@ -998,14 +998,15 @@ def _peer_clock(student_group: str | None) -> list[dict]:
 
 @frappe.request_cache
 def _school_clock() -> list[dict]:
-	"""The school day as lessons only, numbered the way a school counts them.
+	"""The school day as lessons only, keeping the school's own numbering.
 
-	The school-wide grid may come from a plan that carries its break as a row
-	of its own, and a break is not a period: offered as one it became "الحصة 3"
-	on screen, twenty minutes long, with no lesson ever in it.
+	The school-wide grid may carry its break as a row of its own, and a break
+	is not a period: offered as one it became "الحصة 4" on screen, twenty
+	minutes long, with no lesson ever in it. Its number is left out rather
+	than closed up, because a school whose break is period 4 numbers the
+	lesson after it 5 — and that is the number in its saved week.
 	"""
-	rows = [p for p in school_grid()[0] if not p.get("isBreak")]
-	return [{**p, "order": i + 1, "isBreak": False} for i, p in enumerate(rows)]
+	return [p for p in school_grid()[0] if not p.get("isBreak")]
 
 
 def clocks_for(groups: list[str]) -> dict:
@@ -1135,16 +1136,15 @@ def grid_periods() -> tuple[list[dict], list[str]]:
 		}
 		for order, counts in tally.items()
 	}
-	# The day is as long as the longer of the two: a timetable cannot have
-	# fewer periods than it already uses, and a school part-way through
-	# building its first week still needs the rest of the day to fill in —
-	# with two lessons saved, a grid of two rows has nowhere to put the rest.
-	last = max([*real, *shape] or [0])
+	# Every period either of them knows about: the timetable cannot have fewer
+	# periods than it already uses, and a school part-way through building its
+	# first week still needs the rest of the day to fill in — with two lessons
+	# saved, a grid of two rows has nowhere to put the rest. Only periods one
+	# of them names, never a number invented to close a gap: a school whose
+	# break is period 4 has no period 4 to offer.
 	return [
-		row
-		for order in range(1, last + 1)
-		for row in [real.get(order) or shape.get(order)]
-		if row
+		real.get(order) or shape[order]
+		for order in sorted(set(real) | set(shape))
 	], working_days
 
 
