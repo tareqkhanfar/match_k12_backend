@@ -56,7 +56,7 @@ def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 		for r in frappe.get_all(
 			"Student Attendance",
 			filters={"student_group": student_group, "date": date, "docstatus": ["<", 2]},
-			fields=["name", "student", "status", "docstatus"],
+			fields=["name", "student", "status", "docstatus", "ms_absence_reason"],
 		)
 	}
 
@@ -69,6 +69,7 @@ def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 				"student_name": s.student_name,
 				"roll_number": s.group_roll_number,
 				"status": record.status if record else None,
+				"reason": (record.ms_absence_reason if record else None) or "",
 				"status_label": STATUS_AR.get(record.status) if record else None,
 				"attendance_id": record.name if record else None,
 				"submitted": bool(record and record.docstatus == 1),
@@ -190,7 +191,7 @@ def mark_attendance(student_group: str, date: str, entries: str | list, persona:
 		status = row.get("status")
 		if not student or status not in STATUS_AR:
 			continue
-		result = _write_one(student, student_group, date, status)
+		result = _write_one(student, student_group, date, status, row.get("reason"))
 		if result == "created":
 			saved += 1
 		elif result == "updated":
@@ -212,7 +213,7 @@ def mark_attendance(student_group: str, date: str, entries: str | list, persona:
 	}
 
 
-def _write_one(student: str, student_group: str, date, status: str) -> str:
+def _write_one(student: str, student_group: str, date, status: str, reason: str = None) -> str:
 	"""Record one pupil's attendance. Returns created / updated / unchanged.
 
 	A record whose status already matches is left completely alone. This
@@ -221,14 +222,18 @@ def _write_one(student: str, student_group: str, date, status: str) -> str:
 	whole class to correct a single pupil left a cancelled document behind for
 	every child in the room, every time — thirty cancellations to fix one.
 	"""
+	# A reason belongs to an absence. Marking a pupil present clears whatever
+	# excuse was recorded before, rather than leaving it to contradict the row.
+	reason = (reason or "").strip() if status in EXCUSED else ""
+
 	existing = frappe.db.get_value(
 		"Student Attendance",
 		{"student": student, "student_group": student_group, "date": date, "docstatus": ["<", 2]},
-		["name", "docstatus", "status"],
+		["name", "docstatus", "status", "ms_absence_reason"],
 		as_dict=True,
 	)
 
-	if existing and existing.status == status:
+	if existing and existing.status == status and (existing.ms_absence_reason or "") == reason:
 		return "unchanged"
 
 	if existing:
@@ -245,19 +250,27 @@ def _write_one(student: str, student_group: str, date, status: str) -> str:
 					"student_group": student_group,
 					"date": date,
 					"status": status,
+					"ms_absence_reason": reason,
 				}
 			)
 			doc.insert()
 			doc.submit()
 		else:
 			doc.status = status
+			doc.ms_absence_reason = reason
 			doc.save()
 			doc.submit()
 		return "updated"
 
 	doc = frappe.new_doc("Student Attendance")
 	doc.update(
-		{"student": student, "student_group": student_group, "date": date, "status": status}
+		{
+			"student": student,
+			"student_group": student_group,
+			"date": date,
+			"status": status,
+			"ms_absence_reason": reason,
+		}
 	)
 	doc.insert()
 	doc.submit()

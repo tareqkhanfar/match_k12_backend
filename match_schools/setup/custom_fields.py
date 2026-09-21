@@ -34,6 +34,17 @@ CUSTOM_FIELDS = {
 	"Student": [
 		dict(ID_NUMBER, reqd=0),
 	],
+	# An excused absence is only as useful as its reason: "بعذر" without one
+	# tells a parent nothing and a report less.
+	"Student Attendance": [
+		{
+			"fieldname": "ms_absence_reason",
+			"label": "سبب الغياب",
+			"fieldtype": "Small Text",
+			"insert_after": "status",
+			"translatable": 0,
+		},
+	],
 	"Instructor": [
 		dict(ID_NUMBER, reqd=0, insert_after="instructor_name"),
 		{
