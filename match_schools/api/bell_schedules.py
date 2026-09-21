@@ -252,11 +252,17 @@ def save_schedule(
 	if not [r for r in rows if not cint(r.get("isBreak"))]:
 		return fail("Add at least one lesson", "أضف حصة واحدة على الأقل.")
 
-	doc = (
-		frappe.get_doc("MS Bell Schedule", name)
-		if name and frappe.db.exists("MS Bell Schedule", name)
-		else frappe.new_doc("MS Bell Schedule")
-	)
+	title = (title or "").strip()
+	if not title:
+		return fail("Name the schedule", "اكتب اسماً للتوقيت.")
+	editing = bool(name and frappe.db.exists("MS Bell Schedule", name))
+	# The name is what identifies a schedule; a second one with the same name
+	# would otherwise surface as a raw duplicate-entry error.
+	taken = frappe.db.exists("MS Bell Schedule", {"schedule_name": title})
+	if taken and (not editing or taken != name):
+		return fail("Name already used", "يوجد توقيت بهذا الاسم — اختر اسماً آخر.")
+
+	doc = frappe.get_doc("MS Bell Schedule", name) if editing else frappe.new_doc("MS Bell Schedule")
 	doc.schedule_name = title
 	doc.is_default = cint(is_default)
 	days = parse_json_arg(working_days)
@@ -275,6 +281,11 @@ def save_schedule(
 			},
 		)
 	doc.save(ignore_permissions=True)
+	# The id follows the title, so the grades and sections pointing at it (and
+	# the labels beside them) read the name the school gave it. Links follow.
+	if editing and doc.name != title:
+		frappe.rename_doc("MS Bell Schedule", doc.name, title, force=True)
+		doc = frappe.get_doc("MS Bell Schedule", title)
 	frappe.db.commit()
 	return {
 		"name": doc.name,
