@@ -976,7 +976,7 @@ def _level_of(student_group: str | None) -> int | None:
 	return cint(frappe.db.get_value("Program", program, "ms_level"))
 
 
-def _peer_clock(student_group: str | None) -> list[dict]:
+def _peer_clock(student_group: str | None, exact: bool = False) -> list[dict]:
 	"""The clock of the nearest grade level that has a timetable.
 
 	A section with no lessons of its own — a new one, or a year that has not
@@ -992,6 +992,8 @@ def _peer_clock(student_group: str | None) -> list[dict]:
 		return []
 	if level in clocks:
 		return clocks[level]
+	if exact:
+		return []
 	# Ties go to the lower grade: a kindergarten section follows grade one.
 	nearest = min(clocks, key=lambda other: (abs(other - level), other))
 	return clocks[nearest]
@@ -1041,7 +1043,8 @@ def clocks_for(groups: list[str]) -> dict:
 			},
 		)
 	shape = _school_clock()
-	assigned = bell.clocks_of(groups)
+	assigned = bell.clocks_of(groups, use_default=False)
+	default = bell.default_clock()
 	out = {}
 	for group in groups:
 		periods = dict(own.get(group) or {})
@@ -1052,7 +1055,7 @@ def clocks_for(groups: list[str]) -> dict:
 				periods[cint(p["order"])] = p
 			out[group] = [periods[o] for o in sorted(periods)]
 			continue
-		for source in (_peer_clock(group), shape):
+		for source in (_peer_clock(group, exact=True), default, _peer_clock(group), shape):
 			for p in source or []:
 				periods.setdefault(cint(p["order"]), p)
 		out[group] = [periods[o] for o in sorted(periods)]
@@ -1105,7 +1108,10 @@ def _clock(student_group: str | None) -> list[dict]:
 	# schedule says what the day is meant to be, the slots only say what was
 	# built. Any period the schedule does not define but the saved week uses
 	# is kept, so a lesson never disappears because a schedule was shortened.
-	assigned = bell.clock_of(student_group)
+	# Only an assignment counts here. The default is a stand-in for sections
+	# nobody has decided about, so it must never override a week that was built
+	# on another bell — it comes into the chain below, after what the data says.
+	assigned = bell.clock_of(student_group, use_default=False)
 	if assigned:
 		rows = {cint(p["order"]): p for p in assigned}
 		for p in _slot_clock(student_group):
@@ -1126,7 +1132,15 @@ def _clock(student_group: str | None) -> list[dict]:
 		and frappe.db.exists("MS Timetable Plan", {"student_group": student_group})
 		else []
 	)
-	for source in (_peer_clock(student_group), own_plan, _school_clock()):
+	# What the data says first (this section's slots, then its own grade's),
+	# then the school's default day, then the looser guesses.
+	for source in (
+		_peer_clock(student_group, exact=True),
+		bell.default_clock(),
+		_peer_clock(student_group),
+		own_plan,
+		_school_clock(),
+	):
 		for p in source or []:
 			# A break is not a period: a class has no lesson in it, and a row
 			# for it on a timetable is a lie about the school day.
@@ -1152,7 +1166,8 @@ def grid_periods() -> tuple[list[dict], list[str]]:
 	# on it yet: a grade whose schedule runs eight lessons needs eight rows to
 	# build its first timetable in.
 	for schedule_rows in bell.clocks_of(
-		frappe.get_all("Student Group", filters={"disabled": 0}, pluck="name")
+		frappe.get_all("Student Group", filters={"disabled": 0}, pluck="name"),
+		use_default=False,
 	).values():
 		for p in schedule_rows:
 			counts = tally.setdefault(cint(p["order"]), {})

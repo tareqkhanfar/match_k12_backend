@@ -96,8 +96,15 @@ def _assignments() -> tuple[dict, dict, str | None]:
 	return sections, programs, fallback
 
 
-def schedule_of(student_group: str | None) -> str | None:
-	"""The schedule one section follows: its own, its grade's, or the default."""
+def schedule_of(student_group: str | None, use_default: bool = True) -> str | None:
+	"""The schedule one section follows: its own, its grade's, or the default.
+
+	Only the first two are an *assignment* — somebody decided this section runs
+	that day. The default is a stand-in for sections nobody has decided about,
+	so callers that would rewrite or override something built pass
+	`use_default=False`: a default set casually must never be able to re-time
+	a week that was built on a different bell.
+	"""
 	if not student_group:
 		return None
 	sections, programs, fallback = _assignments()
@@ -106,33 +113,43 @@ def schedule_of(student_group: str | None) -> str | None:
 	program = frappe.db.get_value("Student Group", student_group, "program")
 	if program and program in programs:
 		return programs[program]
-	return fallback
+	return fallback if use_default else None
 
 
-def clock_of(student_group: str | None) -> list[dict]:
+def clock_of(student_group: str | None, use_default: bool = True) -> list[dict]:
 	"""The lessons of one section's school day, breaks left out.
 
 	This is configuration, not history: it says what the day is meant to be.
 	A section with no schedule assigned and no default returns nothing, and
 	the caller falls back to reading the times out of the saved week.
 	"""
-	schedule = schedule_of(student_group)
+	schedule = schedule_of(student_group, use_default)
 	if not schedule:
 		return []
 	return [p for p in _all_rows().get(schedule, []) if not p["isBreak"]]
 
 
-def day_of(student_group: str | None) -> list[dict]:
+def default_clock() -> list[dict]:
+	"""The lessons of the school's default day, for a section with nothing else."""
+	_, _, fallback = _assignments()
+	if not fallback:
+		return []
+	return [p for p in _all_rows().get(fallback, []) if not p["isBreak"]]
+
+
+def day_of(student_group: str | None, use_default: bool = False) -> list[dict]:
 	"""The whole day including breaks — what a grid draws as rows."""
-	schedule = schedule_of(student_group)
+	schedule = schedule_of(student_group, use_default)
 	return list(_all_rows().get(schedule, [])) if schedule else []
 
 
-def clocks_of(groups: list[str]) -> dict:
+def clocks_of(groups: list[str], use_default: bool = True) -> dict:
 	"""Several sections' clocks at once, for a grid that spans the school."""
 	if not groups:
 		return {}
 	sections, programs, fallback = _assignments()
+	if not use_default:
+		fallback = None
 	rows = _all_rows()
 	programs_by_group = {}
 	for r in frappe.get_all(
@@ -419,6 +436,8 @@ def apply_times(name: str, dry_run: int = 1, persona: str = None):
 			"protected": len(keep),
 			"missing": missing[:10],
 			"sample": changes[:8],
+			# Who is affected, by name, so nobody is surprised by the count.
+			"sections": sorted({c["group"] for c in changes}),
 			"message_ar": "معاينة فقط — لم يُحفَظ شيء.",
 			"message_en": "Preview only.",
 		}
@@ -448,15 +467,20 @@ def apply_times(name: str, dry_run: int = 1, persona: str = None):
 
 
 def clocks_owner(schedule: str) -> dict:
-	"""Every section that follows this schedule, however it reached it."""
-	sections, programs, fallback = _assignments()
+	"""Every section *assigned* to this schedule — directly or through its grade.
+
+	The default is deliberately not counted. "Default" means "for sections
+	nobody has assigned"; treating those as followers made a default schedule
+	own the whole school, and applying it re-timed every grade onto one bell.
+	"""
+	sections, programs, _ = _assignments()
 	groups = frappe.get_all(
 		"Student Group", filters={"disabled": 0}, fields=["name", "program"],
 		limit_page_length=0,
 	)
 	out = {}
 	for g in groups:
-		owner = sections.get(g.name) or programs.get(g.program) or fallback
+		owner = sections.get(g.name) or programs.get(g.program)
 		if owner == schedule:
 			out[g.name] = owner
 	return out
