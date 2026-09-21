@@ -100,7 +100,7 @@ def _teaching_periods() -> tuple[list[dict], list[str]]:
 	The stored order counts breaks too (period 3 may be the break), so the
 	sheet's "الأحد 3" is the third lesson of the day, not stored order 3.
 	"""
-	periods, working_days = tg.school_grid()
+	periods, working_days = tg.grid_periods()
 	return [p for p in periods if not p.get("isBreak")], working_days
 
 

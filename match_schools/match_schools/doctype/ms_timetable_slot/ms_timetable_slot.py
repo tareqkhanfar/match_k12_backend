@@ -3,6 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import cint
 
 
 class MSTimetableSlot(Document):
@@ -18,9 +19,23 @@ class MSTimetableSlot(Document):
 		self.set_times_from_period()
 
 	def set_times_from_period(self):
-		"""Fill the times from the school's period definition when omitted."""
+		"""Fill the times from the period definition when omitted.
+
+		This class's own clock first: two stages break at different points in
+		the morning, so the school-wide period table would give half the school
+		the wrong time for the lesson either side of the break.
+		"""
 		if self.from_time and self.to_time:
 			return
+
+		from match_schools.api.timetable_grid import _clock
+
+		for p in _clock(self.student_group):
+			if cint(p["order"]) == cint(self.period_order):
+				self.from_time = self.from_time or f"{p['from']}:00"
+				self.to_time = self.to_time or f"{p['to']}:00"
+				return
+
 		period = frappe.db.get_value(
 			"MS Timetable Period",
 			{"period_order": self.period_order},

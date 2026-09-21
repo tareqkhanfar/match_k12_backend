@@ -244,7 +244,7 @@ def get_pattern(
 		# Without it the builder looks empty and a teacher gets double-booked,
 		# with the clash only surfacing on save.
 		"busy": _busy_slots(student_group, instructor, academic_term),
-		"periods": _periods(student_group),
+		"periods": _grid_rows(student_group),
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
 		"studentGroup": student_group,
 		"instructor": instructor,
@@ -434,7 +434,7 @@ def _term_of(student_group: str | None) -> str | None:
 	return get_default_academic_term()
 
 
-def _period_time(slot: dict, edge: str) -> str:
+def _period_time(slot: dict, edge: str, student_group: str | None = None) -> str:
 	"""A slot's time, taken from its period definition.
 
 	The period is authoritative: a lesson in period 5 runs when period 5 runs.
@@ -446,9 +446,15 @@ def _period_time(slot: dict, edge: str) -> str:
 	so a one-off slot outside the standard day is not silently blanked.
 	"""
 	period = cint(slot.get("period"))
-	# This class's own plan when it has one: two sections may run different
-	# days, and the globally newest plan would then supply the wrong clock.
-	for p in _clock(slot.get("student_group")):
+	# Which class this slot belongs to. The teacher builder and the import send
+	# it inside the slot as `studentGroup`, the class builder sends one section
+	# for the whole grid; reading only one of those spellings silently fell
+	# back to the school-wide clock, so every stage was shown period 4 at the
+	# same time even though the break moves it.
+	group = slot.get("studentGroup") or slot.get("student_group") or student_group
+	# This class's own clock: two stages break at different times, so the same
+	# period number is not the same hour in both.
+	for p in _clock(group):
 		if p["order"] == period:
 			return sched.hhmmss((p["from"] if edge == "from" else p["to"]) + ":00")
 
@@ -500,8 +506,8 @@ def save_pattern(
 	lessons = [
 		{
 			"day": s.get("day"),
-			"from_time": _period_time(s, "from"),
-			"to_time": _period_time(s, "to"),
+			"from_time": _period_time(s, "from", student_group),
+			"to_time": _period_time(s, "to", student_group),
 			"instructor": s.get("instructor"),
 			"room": s.get("room"),
 			"student_group": student_group,
@@ -536,8 +542,8 @@ def save_pattern(
 		doc.student_group = student_group
 		doc.day = s.get("day")
 		doc.period_order = cint(s.get("period"))
-		doc.from_time = _period_time(s, "from")
-		doc.to_time = _period_time(s, "to")
+		doc.from_time = _period_time(s, "from", student_group)
+		doc.to_time = _period_time(s, "to", student_group)
 		doc.course = s.get("course")
 		doc.instructor = s.get("instructor")
 		doc.room = s.get("room") or None
@@ -871,7 +877,7 @@ def _slot_clock(student_group: str | None) -> list[dict]:
 	return [
 		{
 			"order": order,
-			"name": str(order),
+			"name": f"الحصة {order}",
 			"from": max(counts, key=counts.get)[0],
 			"to": max(counts, key=counts.get)[1],
 			"isBreak": False,
@@ -915,6 +921,153 @@ def _shape_clock() -> list[dict]:
 	]
 
 
+@frappe.request_cache
+def _clocks_by_level() -> dict:
+	"""The clock each grade level actually runs, read from the timetable.
+
+	A school may run two bells — the younger grades break before the fourth
+	lesson and the older ones after it — and the difference is real: the same
+	"period 4" is a different time for each. Rather than hard-code one school's
+	bells, the times in use are read back from the saved week, per level.
+	"""
+	levels = {
+		g.name: cint(level)
+		for g in frappe.get_all(
+			"Student Group", fields=["name", "program"], limit_page_length=0
+		)
+		for level in [frappe.db.get_value("Program", g.program, "ms_level") if g.program else 0]
+	}
+	tally: dict[int, dict[int, dict]] = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters={"active": 1},
+		fields=["student_group", "period_order", "from_time", "to_time"],
+		limit_page_length=0,
+	):
+		level = levels.get(r.student_group)
+		if level is None:
+			continue
+		times = (sched.hhmmss(r.from_time)[:5], sched.hhmmss(r.to_time)[:5])
+		counts = tally.setdefault(level, {}).setdefault(cint(r.period_order), {})
+		counts[times] = counts.get(times, 0) + 1
+	return {
+		level: [
+			{
+				"order": order,
+				"name": str(order),
+				"from": max(counts, key=counts.get)[0],
+				"to": max(counts, key=counts.get)[1],
+				"isBreak": False,
+			}
+			for order, counts in sorted(periods.items())
+			if order
+		]
+		for level, periods in tally.items()
+	}
+
+
+def _level_of(student_group: str | None) -> int | None:
+	if not student_group:
+		return None
+	program = frappe.db.get_value("Student Group", student_group, "program")
+	if not program:
+		return None
+	return cint(frappe.db.get_value("Program", program, "ms_level"))
+
+
+def _peer_clock(student_group: str | None) -> list[dict]:
+	"""The clock of the nearest grade level that has a timetable.
+
+	A section with no lessons of its own — a new one, or a year that has not
+	been timetabled yet — still has a real bell: the one its own grade runs,
+	or failing that the grade closest to it. Nearest by level rather than by
+	name, so nothing depends on how a school spells "الصف الأول".
+	"""
+	level = _level_of(student_group)
+	if level is None:
+		return []
+	clocks = _clocks_by_level()
+	if not clocks:
+		return []
+	if level in clocks:
+		return clocks[level]
+	# Ties go to the lower grade: a kindergarten section follows grade one.
+	nearest = min(clocks, key=lambda other: (abs(other - level), other))
+	return clocks[nearest]
+
+
+@frappe.request_cache
+def _school_clock() -> list[dict]:
+	"""The school day as lessons only, numbered the way a school counts them.
+
+	The school-wide grid may come from a plan that carries its break as a row
+	of its own, and a break is not a period: offered as one it became "الحصة 3"
+	on screen, twenty minutes long, with no lesson ever in it.
+	"""
+	rows = [p for p in school_grid()[0] if not p.get("isBreak")]
+	return [{**p, "order": i + 1, "isBreak": False} for i, p in enumerate(rows)]
+
+
+def clocks_for(groups: list[str]) -> dict:
+	"""Each of these classes' clocks, in one pass.
+
+	The teacher builder draws one grid across the whole school, so every class
+	on it needs its own times — asking `_clock` per class would be a query per
+	class. The per-level clocks and the school day are read once and shared;
+	only the classes' own saved slots are fetched, in a single query.
+	"""
+	if not groups:
+		return {}
+	own: dict[str, dict[int, dict]] = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters={"active": 1, "student_group": ["in", groups]},
+		fields=["student_group", "period_order", "from_time", "to_time"],
+		limit_page_length=0,
+	):
+		order = cint(r.period_order)
+		if not order:
+			continue
+		own.setdefault(r.student_group, {}).setdefault(
+			order,
+			{
+				"order": order,
+				"name": str(order),
+				"from": sched.hhmmss(r.from_time)[:5],
+				"to": sched.hhmmss(r.to_time)[:5],
+				"isBreak": False,
+			},
+		)
+	shape = _school_clock()
+	out = {}
+	for group in groups:
+		periods = dict(own.get(group) or {})
+		for source in (_peer_clock(group), shape):
+			for p in source or []:
+				periods.setdefault(cint(p["order"]), p)
+		out[group] = [periods[o] for o in sorted(periods)]
+	return out
+
+
+def _grid_rows(student_group: str | None) -> list[dict]:
+	"""The rows of one class's builder: the periods it really runs.
+
+	Its own clock decides, so the time on a row is the time the lesson is
+	saved with — a plan written before the week was built could say 09:55 for
+	a period the class has run at 10:10 all year. A break the plan defines is
+	kept, unless a lesson already uses that number, in which case the lesson
+	wins: a period nobody can fill is worse than a break nobody can see.
+	"""
+	rows = {cint(p["order"]): dict(p) for p in _clock(student_group)}
+	for p in _periods(student_group):
+		if p.get("isBreak") and cint(p["order"]) not in rows:
+			rows[cint(p["order"])] = dict(p)
+	for order, row in rows.items():
+		if not row.get("name") or str(row["name"]).strip().isdigit():
+			row["name"] = f"الحصة {order}"
+	return [rows[o] for o in sorted(rows)]
+
+
 def _clock(student_group: str | None) -> list[dict]:
 	"""One class's periods: its plan, else its own slots, else the school's.
 
@@ -926,12 +1079,73 @@ def _clock(student_group: str | None) -> list[dict]:
 	has never used produced a slot with no time, and the clash check then broke
 	on an empty string rather than saying anything useful.
 	"""
-	own = _periods(student_group) or _slot_clock(student_group)
-	if not own:
-		return school_grid()[0]
+	# The saved week is the truth: what a period actually runs at is what the
+	# slots say, not what a plan written earlier assumed. The plan, the grade's
+	# clock and the school day fill in periods the section has never used — a
+	# section with no lesson in period 1 all week still has a period 1.
+	own = _slot_clock(student_group)
 	known = {cint(p["order"]) for p in own}
-	rest = [p for p in school_grid()[0] if cint(p["order"]) not in known]
-	return sorted(own + rest, key=lambda p: cint(p["order"])) if rest else own
+	# Then the classes of the same grade: their saved slots are real times for
+	# the same school day, so they beat this section's plan, which is a template
+	# someone typed once and may never have matched the week that was built.
+	# This section's own plan counts; another section's does not. `_periods`
+	# falls back to the newest plan in the school, which says nothing about
+	# this class — its grade's clock is the better answer.
+	own_plan = (
+		_periods(student_group)
+		if student_group
+		and frappe.db.exists("MS Timetable Plan", {"student_group": student_group})
+		else []
+	)
+	for source in (_peer_clock(student_group), own_plan, _school_clock()):
+		for p in source or []:
+			# A break is not a period: a class has no lesson in it, and a row
+			# for it on a timetable is a lie about the school day.
+			if p.get("isBreak") or cint(p["order"]) in known:
+				continue
+			known.add(cint(p["order"]))
+			own.append(p)
+	return sorted(own, key=lambda p: cint(p["order"]))
+
+
+def grid_periods() -> tuple[list[dict], list[str]]:
+	"""The rows of a grid that spans the whole school, and its working days.
+
+	The periods the timetable actually uses, numbered as it numbers them, so
+	the number on a row is the number that gets stored. The school-wide grid
+	may come from a plan that counts its break as a period, and taking the
+	rows from there renumbered the lessons around it: the row labelled 3 saved
+	period 4, and the screen and the register then disagreed.
+	"""
+	working_days = school_grid()[1]
+	tally: dict[int, dict[tuple, int]] = {}
+	for clock in _clocks_by_level().values():
+		for p in clock:
+			counts = tally.setdefault(cint(p["order"]), {})
+			key = (p["from"], p["to"])
+			counts[key] = counts.get(key, 0) + 1
+	shape = {cint(p["order"]): p for p in _school_clock()}
+	real = {
+		order: {
+			"order": order,
+			"name": f"الحصة {order}",
+			"from": max(counts, key=counts.get)[0],
+			"to": max(counts, key=counts.get)[1],
+			"isBreak": False,
+		}
+		for order, counts in tally.items()
+	}
+	# The day is as long as the longer of the two: a timetable cannot have
+	# fewer periods than it already uses, and a school part-way through
+	# building its first week still needs the rest of the day to fill in —
+	# with two lessons saved, a grid of two rows has nowhere to put the rest.
+	last = max([*real, *shape] or [0])
+	return [
+		row
+		for order in range(1, last + 1)
+		for row in [real.get(order) or shape.get(order)]
+		if row
+	], working_days
 
 
 @frappe.whitelist()
@@ -952,7 +1166,7 @@ def teacher_grid_options(persona: str = None):
 	for g in groups:
 		g["courses"] = _courses_for_group(g["name"])
 
-	periods, working_days = school_grid()
+	periods, working_days = grid_periods()
 
 	assigned = {}
 	for r in frappe.get_all(
@@ -960,6 +1174,14 @@ def teacher_grid_options(persona: str = None):
 	):
 		if r.instructor:
 			assigned[r.instructor] = assigned.get(r.instructor, 0) + 1
+
+	# Each class's own times, so the grid can say what a cell really is: the
+	# same period number is a different hour for the younger and older grades,
+	# and one time at the head of the row was wrong for half the school.
+	clocks = clocks_for([g["name"] for g in groups])
+	for g in groups:
+		g["clock"] = clocks.get(g["name"], [])
+
 
 	return {
 		"days": [{"value": k, "label": v} for k, v in sched.WEEKDAYS],
@@ -1054,6 +1276,8 @@ def taken_periods(instructor: str = None, persona: str = None):
 						"instructor": r.instructor,
 						"course": r.course,
 						"room": r.room,
+						"from": lesson_from[:5],
+						"to": lesson_to[:5],
 					}
 				)
 
@@ -1387,7 +1611,13 @@ def _sync_plans(instructor: str, proposed: list[dict], limits: dict = None) -> N
 
 def _teacher_clashes(instructor: str, proposed: list[dict]) -> list[dict]:
 	"""Cells this teacher cannot have: a section already promised elsewhere,
-	or two of their own lessons in one period."""
+	or two of their own lessons at the same time.
+
+	Judged by the clock, not by the period number. Two sections can run the
+	same numbered period at different times — where the break falls decides —
+	so comparing numbers would both invent clashes that do not exist and miss
+	ones that do.
+	"""
 	booked = {
 		(r.day, cint(r.period_order), r.student_group): r
 		for r in frappe.get_all(
@@ -1399,11 +1629,12 @@ def _teacher_clashes(instructor: str, proposed: list[dict]) -> list[dict]:
 	}
 	labels = _group_labels({s.get("studentGroup") for s in proposed})
 	problems: list[dict] = []
-	seen: dict = {}
+	seen: list[dict] = []
 	for s in proposed:
 		day, period = s.get("day"), cint(s.get("period"))
 		group = s.get("studentGroup")
 		group_label = labels.get(group, group)
+		start, end = _period_time(s, "from"), _period_time(s, "to")
 		other = booked.get((day, period, group))
 		if other:
 			who = (
@@ -1416,12 +1647,19 @@ def _teacher_clashes(instructor: str, proposed: list[dict]) -> list[dict]:
 				if who
 				else "{0}: الحصة محجوزة مسبقاً".format(group_label),
 			})
-		if (day, period) in seen:
-			problems.append({
-				"day": day, "period": period, "studentGroup": group,
-				"message": "{0}: حصتان في الوقت نفسه".format(group_label),
-			})
-		seen[(day, period)] = group
+		# The teacher's own week, compared by the clock each section runs.
+		for earlier in seen:
+			if earlier["day"] != day or not (start and end):
+				continue
+			if sched.overlaps(start, end, earlier["from"], earlier["to"]):
+				problems.append({
+					"day": day, "period": period, "studentGroup": group,
+					"message": "{0}: تتعارض مع {1} في الوقت نفسه ({2}–{3})".format(
+						group_label, earlier["label"], start[:5], end[:5]
+					),
+				})
+				break
+		seen.append({"day": day, "from": start, "to": end, "label": group_label})
 	return problems
 
 

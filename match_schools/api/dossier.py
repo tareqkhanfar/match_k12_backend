@@ -639,6 +639,27 @@ def _alerts(student: str) -> list[dict]:
 	]
 
 
+def _empty_week(student_group: str | None) -> dict:
+	"""The week's rows and columns for a class with nothing scheduled."""
+	from match_schools.api.timetable_grid import _clock
+
+	rows = [
+		{"order": cint(p["order"]), "from": p["from"], "to": p["to"]}
+		for p in _clock(student_group)
+	]
+	week_ar = {
+		"Sunday": "الأحد", "Monday": "الاثنين", "Tuesday": "الثلاثاء",
+		"Wednesday": "الأربعاء", "Thursday": "الخميس",
+	}
+	return {
+		"days": [{"value": d, "label": label} for d, label in week_ar.items()],
+		"periods": [p["from"] for p in rows],
+		"periodRows": rows,
+		"cells": [],
+		"lessons": [],
+	}
+
+
 def _timetable(student: str) -> dict:
 	"""The student's week, laid out as a grid rather than a list of dates.
 
@@ -680,7 +701,10 @@ def _timetable(student: str) -> dict:
 		limit=400,
 	)
 	if not rows:
-		return empty
+		# No lessons yet is still a timetable: the week's shape is the school
+		# day, and an empty grid says "nothing is scheduled" where a blank
+		# screen only looks broken.
+		return {**empty, **_empty_week(groups[0])}
 
 	# One cell per (weekday, start time); the same lesson repeats every week,
 	# so the most recent occurrence wins and the rest collapse into it.
@@ -729,13 +753,36 @@ def _timetable(student: str) -> dict:
 		"Friday": "الجمعة",
 		"Saturday": "السبت",
 	}
+	# Sunday to Thursday are the school week whether or not a lesson landed in
+	# each of them: a day with no lesson is a fact about the week, not a reason
+	# to drop the column. A school that also teaches at the weekend gets those
+	# columns too, but only when it uses them.
+	SCHOOL_WEEK = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"}
 	days = [
-		{"value": d, "label": week_ar[d]} for d in week if d in days_seen
+		{"value": d, "label": week_ar[d]}
+		for d in week
+		if d in SCHOOL_WEEK or d in days_seen
 	]
+
+	# The whole school day, not only the periods this student happens to have
+	# a lesson in. A free period is part of a timetable and reading it as one
+	# depends on the row being there — otherwise the periods below it shift up
+	# and "period 4" on screen is period 5 in the register.
+	from match_schools.api.timetable_grid import _clock
+
+	clock = _clock(groups[0] if groups else None)
+	period_rows = [
+		{"order": cint(p["order"]), "from": p["from"], "to": p["to"]} for p in clock
+	]
+	for start in sorted(starts):
+		if not any(p["from"] == start for p in period_rows):
+			period_rows.append({"order": 0, "from": start, "to": ""})
+	period_rows.sort(key=lambda p: p["from"])
 
 	return {
 		"days": days,
-		"periods": sorted(starts),
+		"periods": [p["from"] for p in period_rows],
+		"periodRows": period_rows,
 		"cells": list(cells.values()),
 		# The dated rows, newest first, for a plain chronological view.
 		"lessons": [
@@ -785,6 +832,10 @@ def student_dossier(student: str, persona: str = None):
 	_timetable_grid = {
 		"days": _grid.get("days", []),
 		"periods": _grid.get("periods", []),
+		# The rows with their numbers and both ends of each period: a grid
+		# built from start times alone renumbered itself whenever a period
+		# held no lesson.
+		"periodRows": _grid.get("periodRows", []),
 		"cells": _grid.get("cells", []),
 		"lessons": _timetable_lessons,
 	}

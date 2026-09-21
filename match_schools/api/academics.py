@@ -596,6 +596,13 @@ def timetable(
 		):
 			group_names[g.name] = g
 
+	# The periods of the school day, so a week reads as a timetable rather than
+	# as whatever happens to be booked. Without this the screen had to invent
+	# the rows from the times it could see: a class with no lesson in period 1
+	# lost the row entirely and every later period was renumbered, so "period
+	# 4" on screen could be period 5 in the register.
+	periods, period_of = _week_grid(rows, student_group)
+
 	days: dict[str, list] = {}
 	for r in rows:
 		group = group_names.get(r.student_group) or frappe._dict()
@@ -607,6 +614,9 @@ def timetable(
 				"date": str(r.schedule_date),
 				"from_time": hhmm(r.from_time),
 				"to_time": hhmm(r.to_time),
+				# Which period this is, by its real time rather than by its
+				# place in the day's list.
+				"period_order": period_of(r.student_group, r.from_time, r.to_time),
 				"subject": r.course,
 				"teacher": r.instructor_name,
 				"student_group": r.student_group,
@@ -625,7 +635,107 @@ def timetable(
 			}
 		)
 
-	return {"week_start": str(start), "week_end": str(end), "days": days}
+	return {
+		"week_start": str(start),
+		"week_end": str(end),
+		"days": days,
+		"periods": periods,
+	}
+
+
+def _week_periods(rows: list, student_group: str | None) -> list[dict]:
+	"""Every period of the school day for the classes in this week.
+
+	One class runs one clock, so its own is used. A teacher's week may cross
+	two — the younger grades break before the fourth lesson and the older ones
+	after it — and then the period carries both times and says so.
+	"""
+	from match_schools.api.timetable_grid import _clock
+
+	groups = [student_group] if student_group else sorted({r.student_group for r in rows if r.student_group})
+	if not groups:
+		groups = [None]
+
+	merged: dict[int, dict] = {}
+	for group in groups:
+		for p in _clock(group):
+			slot = merged.setdefault(
+				cint(p["order"]), {"order": cint(p["order"]), "times": [], "varies": False}
+			)
+			pair = {"from": p["from"], "to": p["to"], "student_group": group}
+			if not any(t["from"] == pair["from"] and t["to"] == pair["to"] for t in slot["times"]):
+				slot["times"].append(pair)
+	out = []
+	for order in sorted(merged):
+		slot = merged[order]
+		first = slot["times"][0] if slot["times"] else {"from": "", "to": ""}
+		out.append(
+			{
+				"order": order,
+				"from": first["from"],
+				"to": first["to"],
+				"varies": len(slot["times"]) > 1,
+				"times": slot["times"],
+			}
+		)
+	return out
+
+
+def _period_matcher(periods: list[dict]):
+	"""Map a lesson to its period by the time it actually runs."""
+	lookup: dict[tuple, int] = {}
+	for p in periods:
+		for t in p["times"]:
+			lookup[(t.get("student_group"), t["from"])] = p["order"]
+			lookup.setdefault((None, t["from"]), p["order"])
+
+	def match(student_group, from_time):
+		start = hhmm(from_time)
+		return lookup.get((student_group, start)) or lookup.get((None, start))
+
+	return match
+
+
+def _week_grid(rows: list, student_group: str | None):
+	"""The week's rows and a way to place each lesson in one of them.
+
+	The grid is the school day: seven periods, there whether or not a lesson
+	falls in them. A lesson recorded at a time no period starts at — an old
+	week built on a clock since changed, or a one-off — keeps a row of its own
+	rather than disappearing from the screen, which is the one thing a
+	timetable must never do.
+	"""
+	periods = _week_periods(rows, student_group)
+	match = _period_matcher(periods)
+
+	extras: dict[tuple, dict] = {}
+	for r in rows:
+		if match(r.student_group, r.from_time) is not None:
+			continue
+		start, end = hhmm(r.from_time), hhmm(r.to_time)
+		key = (start, end)
+		if key not in extras:
+			extras[key] = {
+				"order": 100 + len(extras),
+				"from": start,
+				"to": end,
+				"varies": False,
+				"extra": True,
+				"times": [{"from": start, "to": end, "student_group": None}],
+			}
+
+	def place(student_group, from_time, to_time):
+		found = match(student_group, from_time)
+		if found is not None:
+			return found
+		row = extras.get((hhmm(from_time), hhmm(to_time)))
+		return row["order"] if row else None
+
+	for p in periods:
+		p.setdefault("extra", False)
+	full = periods + list(extras.values())
+	full.sort(key=lambda p: (p["from"] or "99:99", p["order"]))
+	return full, place
 
 
 # --- Exams and grades ------------------------------------------------------
