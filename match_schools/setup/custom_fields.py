@@ -141,6 +141,31 @@ CUSTOM_FIELDS = {
 			"depends_on": "eval:!!doc.student",
 		},
 	],
+	# Which school day a grade follows. A school runs more than one bell: the
+	# younger grades break before the fourth lesson and the older ones after
+	# it, and a kindergarten may run five lessons where a secondary year runs
+	# eight. The grade carries the schedule; a section may override it.
+	"Program": [
+		{
+			"fieldname": "ms_bell_schedule",
+			"label": "أوقات الدوام",
+			"fieldtype": "Link",
+			"options": "MS Bell Schedule",
+			"insert_after": "program_name",
+			"translatable": 0,
+		},
+	],
+	"Student Group": [
+		{
+			"fieldname": "ms_bell_schedule",
+			"label": "أوقات الدوام",
+			"fieldtype": "Link",
+			"options": "MS Bell Schedule",
+			"insert_after": "student_group_name",
+			"description": "اتركه فارغاً لتتبع الشعبة توقيت صفّها",
+			"translatable": 0,
+		},
+	],
 }
 
 

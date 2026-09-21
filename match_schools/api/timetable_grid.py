@@ -23,6 +23,7 @@ from frappe import _
 from frappe.utils import add_days, cint, getdate, now_datetime, today
 
 from match_schools.api import academic_context as ctx
+from match_schools.api import bell_schedules as bell
 from match_schools.api import scheduling as sched
 from match_schools.api.utils import (
 	apply_period,
@@ -1040,9 +1041,17 @@ def clocks_for(groups: list[str]) -> dict:
 			},
 		)
 	shape = _school_clock()
+	assigned = bell.clocks_of(groups)
 	out = {}
 	for group in groups:
 		periods = dict(own.get(group) or {})
+		if assigned.get(group):
+			# The schedule decides the day; the class's own slots only add a
+			# period it uses that the schedule has since dropped.
+			for p in assigned[group]:
+				periods[cint(p["order"])] = p
+			out[group] = [periods[o] for o in sorted(periods)]
+			continue
 		for source in (_peer_clock(group), shape):
 			for p in source or []:
 				periods.setdefault(cint(p["order"]), p)
@@ -1060,13 +1069,21 @@ def _grid_rows(student_group: str | None) -> list[dict]:
 	wins: a period nobody can fill is worse than a break nobody can see.
 	"""
 	rows = {cint(p["order"]): dict(p) for p in _clock(student_group)}
-	for p in _periods(student_group):
-		if p.get("isBreak") and cint(p["order"]) not in rows:
-			rows[cint(p["order"])] = dict(p)
+	# Breaks are drawn too, so the day on screen reads like the day the school
+	# keeps. A break carries no period number, so it is keyed by its time.
+	breaks = [p for p in bell.day_of(student_group) if p.get("isBreak")] or [
+		p for p in _periods(student_group) if p.get("isBreak")
+	]
+	for p in breaks:
+		key = cint(p["order"]) or -len(rows) - 1
+		if key not in rows:
+			rows[key] = dict(p)
 	for order, row in rows.items():
 		if not row.get("name") or str(row["name"]).strip().isdigit():
-			row["name"] = f"الحصة {order}"
-	return [rows[o] for o in sorted(rows)]
+			row["name"] = f"الحصة {order}" if order > 0 else "استراحة"
+	# By the clock, not by the number: a break has no number, and a day reads
+	# in the order it happens.
+	return sorted(rows.values(), key=lambda r: (r.get("from") or "99:99", cint(r.get("order"))))
 
 
 def _clock(student_group: str | None) -> list[dict]:
@@ -1084,6 +1101,17 @@ def _clock(student_group: str | None) -> list[dict]:
 	# slots say, not what a plan written earlier assumed. The plan, the grade's
 	# clock and the school day fill in periods the section has never used — a
 	# section with no lesson in period 1 all week still has a period 1.
+	# A school day someone configured beats one read back from the data: the
+	# schedule says what the day is meant to be, the slots only say what was
+	# built. Any period the schedule does not define but the saved week uses
+	# is kept, so a lesson never disappears because a schedule was shortened.
+	assigned = bell.clock_of(student_group)
+	if assigned:
+		rows = {cint(p["order"]): p for p in assigned}
+		for p in _slot_clock(student_group):
+			rows.setdefault(cint(p["order"]), p)
+		return [rows[o] for o in sorted(rows)]
+
 	own = _slot_clock(student_group)
 	known = {cint(p["order"]) for p in own}
 	# Then the classes of the same grade: their saved slots are real times for
@@ -1120,6 +1148,16 @@ def grid_periods() -> tuple[list[dict], list[str]]:
 	"""
 	working_days = school_grid()[1]
 	tally: dict[int, dict[tuple, int]] = {}
+	# Every configured school day counts, whether or not a week has been built
+	# on it yet: a grade whose schedule runs eight lessons needs eight rows to
+	# build its first timetable in.
+	for schedule_rows in bell.clocks_of(
+		frappe.get_all("Student Group", filters={"disabled": 0}, pluck="name")
+	).values():
+		for p in schedule_rows:
+			counts = tally.setdefault(cint(p["order"]), {})
+			key = (p["from"], p["to"])
+			counts[key] = counts.get(key, 0) + 1
 	for clock in _clocks_by_level().values():
 		for p in clock:
 			counts = tally.setdefault(cint(p["order"]), {})
@@ -1991,14 +2029,33 @@ def _timeless(proposed: list[dict]) -> str:
 	the screen could only report as "something went wrong".
 	"""
 	bad = []
+	short: dict[str, tuple] = {}
 	for s in proposed:
-		if not (_period_time(s, "from") and _period_time(s, "to")):
-			day = dict(sched.WEEKDAYS).get(s.get("day"), s.get("day"))
-			bad.append(f"{day} الحصة {cint(s.get('period'))}")
+		if _period_time(s, "from") and _period_time(s, "to"):
+			continue
+		day = dict(sched.WEEKDAYS).get(s.get("day"), s.get("day"))
+		bad.append(f"{day} الحصة {cint(s.get('period'))}")
+		# A day that simply has fewer lessons is not a missing time, it is the
+		# wrong question: say so rather than send the school off to define a
+		# school day it has already defined.
+		group = s.get("studentGroup") or s.get("student_group")
+		schedule = bell.schedule_of(group)
+		if schedule and group not in short:
+			lessons = len(bell.clock_of(group))
+			if lessons and cint(s.get("period")) > lessons:
+				short[group] = (schedule, lessons)
 	if not bad:
 		return ""
+	if short:
+		group, (schedule, lessons) = next(iter(short.items()))
+		label = _group_labels({group}).get(group, group)
+		return (
+			f"{label} تتبع «{schedule}» وفيه {lessons} حصص فقط — "
+			f"لا توجد حصة {max(cint(s.get('period')) for s in proposed)} في يومها الدراسي. "
+			"عدّل التوقيت من شاشة «أوقات الدوام» أو ضع الحصة في خانة أخرى."
+		)
 	return (
 		"لا وقت محدّد لهذه الحصص: "
 		+ "، ".join(sorted(set(bad))[:6])
-		+ " — عرّف اليوم الدراسي من شاشة «البناء حسب الشعبة»."
+		+ " — عرّف اليوم الدراسي من شاشة «أوقات الدوام»."
 	)

@@ -118,6 +118,7 @@ MATRIX: dict[str, dict[str, dict]] = {
 	"MS Survey": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
 	# --- Specialist files: nursing, counselling, special needs, and the rest.
 	# The design is the back office's; filling one in is a teacher's work too.
+	"MS Bell Schedule": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ},
 	"MS Form Template": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ},
 	"MS Form Entry": {ADMIN: FULL, SECRETARY: FULL, TEACHER: WRITE},
 	"MS Survey Question": {ADMIN: FULL, SECRETARY: FULL, TEACHER: READ, STUDENT: READ, PARENT: READ},
