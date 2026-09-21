@@ -61,6 +61,21 @@ FIELD_TYPES = {
 LAYOUT_TYPES = ("Section", "Heading")
 
 
+def _teachers_key(category: str) -> str:
+	return f"ms_forms_teachers_may_fill:{category}"
+
+
+def _teachers_may_fill(category: str) -> bool:
+	"""Whether teachers may file forms in this file.
+
+	Set per file, because the answer differs: a school may want every teacher
+	writing counselling notes while the nursing record stays with the clinic.
+	Allowed unless the administration says otherwise.
+	"""
+	stored = frappe.db.get_default(_teachers_key(category))
+	return True if stored in (None, "") else bool(cint(stored))
+
+
 def _category(category: str) -> str:
 	if category not in CATEGORIES:
 		frappe.throw(frappe._("Unknown form category."), frappe.ValidationError)
@@ -108,7 +123,12 @@ def categories(persona: str = None):
 		counts[row.category] = counts.get(row.category, 0) + 1
 	return {
 		"categories": [
-			{"key": key, "label": label, "forms": counts.get(key, 0)}
+			{
+				"key": key,
+				"label": label,
+				"forms": counts.get(key, 0),
+				"teachersMayFill": _teachers_may_fill(key),
+			}
 			for key, label in CATEGORIES.items()
 		],
 		"fieldTypes": [{"value": k, "label": v} for k, v in FIELD_TYPES.items()],
@@ -150,6 +170,7 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 	return {
 		"category": category,
 		"label": CATEGORIES[category],
+		"teachersMayFill": _teachers_may_fill(category),
 		"templates": [
 			{
 				"name": r.name,
@@ -443,6 +464,11 @@ def save_entry(payload: str | dict, persona: str = None):
 		frappe.throw(frappe._("You are not allowed to file this form."), frappe.PermissionError)
 
 	template = frappe.get_doc("MS Form Template", data["template"])
+	if persona == ROLE_TEACHER and not _teachers_may_fill(template.category):
+		return fail(
+			"Teachers may not fill forms in this file.",
+			f"تعبئة نماذج {CATEGORIES.get(template.category, '')} مقصورة على الإدارة — راجع إعدادات القسم.",
+		)
 	values = data.get("values") or {}
 	if isinstance(values, str):
 		values = parse_json_arg(values) or {}
@@ -660,3 +686,13 @@ def preview_print(template: str, html: str = None, persona: str = None):
 			"The print template could not be rendered.",
 			f"خطأ في القالب: {reason[:200]}",
 		)
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*BACK_OFFICE)
+def set_category_settings(category: str, teachers_may_fill: int = 1, persona: str = None):
+	"""Who may file forms in one file. The design stays with the back office."""
+	_category(category)
+	frappe.db.set_default(_teachers_key(category), "1" if cint(teachers_may_fill) else "0")
+	frappe.db.commit()
+	return {"category": category, "teachersMayFill": _teachers_may_fill(category)}

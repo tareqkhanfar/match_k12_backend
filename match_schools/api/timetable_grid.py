@@ -795,6 +795,33 @@ def _resolve_range(student_group: str, from_date: str | None, to_date: str | Non
 	return from_date, to_date
 
 
+DEFAULT_DAILY_LIMIT = 2
+
+
+def _limit_key(group: str, course: str) -> str:
+	return f"ms_daily_limit:{group}:{course}"
+
+
+def _daily_limit(group: str, course: str, plan_value=None) -> int:
+	"""How many lessons of one subject a section may have in a day.
+
+	Set per section and subject, because the answer differs: a double period
+	of maths is normal where two periods of art are not. What the timetabler
+	set on the screen wins over the plan, and two is the fallback.
+	"""
+	stored = frappe.db.get_default(_limit_key(group, course))
+	if stored:
+		return cint(stored)
+	return cint(plan_value) or DEFAULT_DAILY_LIMIT
+
+
+def _save_daily_limits(limits: dict) -> None:
+	for key, value in (limits or {}).items():
+		group, _, course = str(key).partition("#")
+		if group and course and cint(value) > 0:
+			frappe.db.set_default(_limit_key(group, course), cint(value))
+
+
 def _group_labels(names: set[str]) -> dict:
 	if not names:
 		return {}
@@ -893,8 +920,18 @@ def _clock(student_group: str | None) -> list[dict]:
 
 	Everything that turns a period number into a time goes through here, so a
 	school with no plan at all still gets real times rather than blanks.
+
+	A class's own slots only cover the periods it already uses, so the school's
+	clock fills the rest: without that, putting a lesson in a period the class
+	has never used produced a slot with no time, and the clash check then broke
+	on an empty string rather than saying anything useful.
 	"""
-	return _periods(student_group) or _slot_clock(student_group) or school_grid()[0]
+	own = _periods(student_group) or _slot_clock(student_group)
+	if not own:
+		return school_grid()[0]
+	known = {cint(p["order"]) for p in own}
+	rest = [p for p in school_grid()[0] if cint(p["order"]) not in known]
+	return sorted(own + rest, key=lambda p: cint(p["order"])) if rest else own
 
 
 @frappe.whitelist()
@@ -1098,7 +1135,7 @@ def teacher_assignments(instructor: str, persona: str = None):
 			"studentGroup": plan.student_group,
 			"course": r.course,
 			"required": cint(r.periods_per_week),
-			"maxPerDay": cint(r.max_per_day) or 2,
+			"maxPerDay": _daily_limit(plan.student_group, r.course, r.max_per_day),
 			"room": r.preferred_room,
 			"placed": placed.get(key, 0),
 		})
@@ -1111,7 +1148,7 @@ def teacher_assignments(instructor: str, persona: str = None):
 				"studentGroup": group,
 				"course": course,
 				"required": count,
-				"maxPerDay": 2,
+				"maxPerDay": _daily_limit(group, course),
 				"room": None,
 				"placed": count,
 				"fromGrid": True,
@@ -1145,6 +1182,9 @@ def check_teacher_slots(instructor: str, slots: str | list = None, persona: str 
 		s["student_group"] = s.get("studentGroup")
 
 	problems = _teacher_clashes(instructor, proposed)
+	timeless = _timeless(proposed)
+	if timeless:
+		return {"problems": problems + [{"day": None, "period": None, "studentGroup": None, "message": timeless}], "quota": 0, "placed": len(proposed), "overQuota": False}
 	lessons = [
 		{
 			"day": s.get("day"),
@@ -1191,6 +1231,7 @@ def save_teacher_pattern(
 	slots: str | list,
 	academic_year: str = None,
 	academic_term: str = None,
+	limits: str | dict = None,
 	persona: str = None,
 ):
 	"""Replace one teacher's week, across every class they teach.
@@ -1211,6 +1252,10 @@ def save_teacher_pattern(
 
 	# A section already promised to another teacher in that period. The dated
 	# lessons below cannot catch this on a school that has not generated any.
+	timeless = _timeless(proposed)
+	if timeless:
+		return fail("Some periods have no time defined.", timeless)
+
 	problems = _teacher_clashes(instructor, proposed)
 	if problems:
 		return fail(
@@ -1284,7 +1329,8 @@ def save_teacher_pattern(
 		if group:
 			sync_group_instructors(group)
 
-	_sync_plans(instructor, proposed)
+	_save_daily_limits(parse_json_arg(limits, {}) or {})
+	_sync_plans(instructor, proposed, parse_json_arg(limits, {}) or {})
 
 	frappe.db.commit()
 	return {
@@ -1296,7 +1342,7 @@ def save_teacher_pattern(
 	}
 
 
-def _sync_plans(instructor: str, proposed: list[dict]) -> None:
+def _sync_plans(instructor: str, proposed: list[dict], limits: dict = None) -> None:
 	"""Write what was just placed back into each class's plan.
 
 	The class builder arranges a week from its plan — "four periods of maths
@@ -1319,15 +1365,22 @@ def _sync_plans(instructor: str, proposed: list[dict]) -> None:
 			continue
 		plan = frappe.get_doc("MS Timetable Plan", plan_name)
 		row = next((r for r in plan.subject_loads if r.course == course), None)
+		limit = cint((limits or {}).get(f"{group}#{course}")) or _daily_limit(group, course)
 		if row:
 			# Another teacher may own this subject in the plan; the grid is the
 			# newer decision, so it wins — for this subject only.
 			row.instructor = instructor
 			row.periods_per_week = count
+			row.max_per_day = limit
 		else:
 			plan.append(
 				"subject_loads",
-				{"course": course, "instructor": instructor, "periods_per_week": count, "max_per_day": 2},
+				{
+					"course": course,
+					"instructor": instructor,
+					"periods_per_week": count,
+					"max_per_day": limit,
+				},
 			)
 		plan.save(ignore_permissions=True)
 
@@ -1691,3 +1744,23 @@ def generate_teacher_lessons(
 	frappe.db.commit()
 	result["instructor"] = instructor
 	return result
+
+
+def _timeless(proposed: list[dict]) -> str:
+	"""Cells whose period has no time anywhere — named, not thrown.
+
+	Reaching the clash check with an empty time raised a parser error, which
+	the screen could only report as "something went wrong".
+	"""
+	bad = []
+	for s in proposed:
+		if not (_period_time(s, "from") and _period_time(s, "to")):
+			day = dict(sched.WEEKDAYS).get(s.get("day"), s.get("day"))
+			bad.append(f"{day} الحصة {cint(s.get('period'))}")
+	if not bad:
+		return ""
+	return (
+		"لا وقت محدّد لهذه الحصص: "
+		+ "، ".join(sorted(set(bad))[:6])
+		+ " — عرّف اليوم الدراسي من شاشة «البناء حسب الشعبة»."
+	)
