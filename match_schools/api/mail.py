@@ -243,6 +243,12 @@ def list_messages(
 	limit = min(max(cint(limit) or 50, 1), 200)
 	rows: list[dict] = []
 
+	from match_schools.api.moderation import hidden_authors
+
+	# Mail from someone this reader blocked is delivered — the record stands —
+	# but it is not shown to them, in this folder or any other.
+	hidden = hidden_authors(user)
+
 	if folder in ("sent", "drafts", "scheduled"):
 		filters = {"sender": user, "is_draft": 1 if folder == "drafts" else 0}
 		if folder == "sent":
@@ -292,6 +298,8 @@ def list_messages(
 			# but filtering here means it can never surface as a mystery mail.
 			if cint(doc.is_draft):
 				continue
+			if doc.sender in hidden:
+				continue
 			rows.append(_message_row(doc, user, m))
 
 	if search:
@@ -323,6 +331,15 @@ def get_message(message: str = None, persona: str = None):
 	if not _may_read(doc, user, persona):
 		frappe.throw(_("You are not part of this conversation."), frappe.PermissionError)
 
+	from match_schools.api.moderation import hidden_authors
+
+	hidden = hidden_authors(user)
+	if doc.sender in hidden:
+		return fail(
+			message_en="You have blocked the sender of this message.",
+			message_ar="لقد حظرت مُرسِل هذه الرسالة.",
+		)
+
 	mine = None
 	mine_name = frappe.db.get_value(
 		"MS Message Recipient", {"message": message, "user": user}, "name"
@@ -350,6 +367,8 @@ def get_message(message: str = None, persona: str = None):
 			limit_page_length=50,
 		):
 			other = frappe.get_doc("MS Message", n)
+			if other.sender in hidden:
+				continue
 			if _may_read(other, user, persona):
 				thread_rows.append(_message_row(other, user, preview_only=False))
 	row["thread_messages"] = thread_rows
@@ -657,7 +676,16 @@ def save_message(payload: str | dict = None, persona: str = None):
 
 
 def _deliver(doc, pairs: list[tuple[str, str]]) -> None:
-	"""Put one copy in each recipient's mailbox, then ring their phones."""
+	"""Put one copy in each recipient's mailbox, then ring their phones.
+
+	Someone who blocked the sender is dropped here rather than filtered on
+	read: no row, no unread count, no phone ringing at midnight. The sender is
+	told nothing — a block that announces itself invites the next message.
+	"""
+	from match_schools.api.moderation import blocked_between
+
+	undeliverable = blocked_between(doc.sender, [u for u, _k in pairs])
+	pairs = [(u, k) for u, k in pairs if u not in undeliverable]
 	for user, kind in pairs:
 		frappe.get_doc(
 			{

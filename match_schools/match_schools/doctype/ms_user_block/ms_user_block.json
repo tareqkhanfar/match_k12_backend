@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-21 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "blocked_user",
+  "blocked_user_name",
+  "blocked_on",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "الحاظر",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "blocked_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "المحظور",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "blocked_user_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "اسم المحظور",
+   "read_only": 1
+  },
+  {
+   "fieldname": "blocked_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ الحظر",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "السبب"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-21 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS User Block",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

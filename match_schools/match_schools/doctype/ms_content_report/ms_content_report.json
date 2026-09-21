@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-21 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "content_type",
+  "reference",
+  "reported_user",
+  "reported_user_name",
+  "col_who",
+  "reported_by",
+  "reported_by_name",
+  "reported_on",
+  "sec_what",
+  "reason",
+  "details",
+  "snapshot",
+  "sec_action",
+  "status",
+  "handled_by",
+  "handled_on",
+  "resolution"
+ ],
+ "fields": [
+  {
+   "fieldname": "content_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "نوع المحتوى",
+   "options": "Comment\nPost\nMessage",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "المرجع",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "reported_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "المُبلَّغ عنه",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reported_user_name",
+   "fieldtype": "Data",
+   "label": "اسم المُبلَّغ عنه",
+   "read_only": 1
+  },
+  {"fieldname": "col_who", "fieldtype": "Column Break"},
+  {
+   "fieldname": "reported_by",
+   "fieldtype": "Link",
+   "label": "المُبلِّغ",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "reported_by_name",
+   "fieldtype": "Data",
+   "label": "اسم المُبلِّغ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reported_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ البلاغ",
+   "read_only": 1
+  },
+  {"fieldname": "sec_what", "fieldtype": "Section Break", "label": "البلاغ"},
+  {
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "السبب",
+   "options": "Abuse\nHarassment\nSpam\nInappropriate\nPrivacy\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "details",
+   "fieldtype": "Small Text",
+   "label": "تفاصيل"
+  },
+  {
+   "fieldname": "snapshot",
+   "fieldtype": "Small Text",
+   "label": "نسخة من المحتوى وقت البلاغ",
+   "read_only": 1
+  },
+  {"fieldname": "sec_action", "fieldtype": "Section Break", "label": "المعالجة"},
+  {
+   "default": "New",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "الحالة",
+   "options": "New\nReviewed\nContent removed\nUser warned\nDismissed",
+   "reqd": 1
+  },
+  {
+   "fieldname": "handled_by",
+   "fieldtype": "Link",
+   "label": "عولج بواسطة",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "handled_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ المعالجة",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resolution",
+   "fieldtype": "Small Text",
+   "label": "ما الذي جرى"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-21 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Content Report",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "reference"
+}

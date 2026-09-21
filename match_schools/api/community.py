@@ -269,6 +269,9 @@ def get_post(post: str = None, persona: str = None):
 		# A hidden comment stays on record for staff and disappears for
 		# everyone else.
 		comment_filters["is_hidden"] = 0
+	from match_schools.api.moderation import hidden_authors
+
+	hidden = hidden_authors()
 	comments = frappe.get_all(
 		"MS Post Comment",
 		filters=comment_filters,
@@ -279,6 +282,11 @@ def get_post(post: str = None, persona: str = None):
 		order_by="posted_on asc",
 		limit_page_length=0,
 	)
+	# A blocked person's comment leaves no gap and no "comment hidden" line:
+	# a placeholder tells the blocked party they were blocked, which is how a
+	# block becomes an argument.
+	comments = [c for c in comments if c.author not in hidden]
+	row["comment_count"] = len(comments)
 	row["comments"] = [
 		{
 			"id": c.name,
@@ -290,6 +298,9 @@ def get_post(post: str = None, persona: str = None):
 			"is_hidden": bool(cint(c.is_hidden)),
 			"can_delete": persona in STAFF or c.author == frappe.session.user,
 			"can_hide": persona in STAFF,
+			# Reporting and blocking apply to what someone else wrote.
+			"can_report": c.author != frappe.session.user,
+			"can_block": c.author != frappe.session.user,
 		}
 		for c in comments
 	]
