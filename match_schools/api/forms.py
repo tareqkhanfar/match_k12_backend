@@ -21,6 +21,7 @@ import re
 import frappe
 from frappe.utils import cint, escape_html, now_datetime, nowdate
 
+from match_schools.api import forms_print
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_TEACHER,
@@ -58,8 +59,13 @@ FIELD_TYPES = {
 	"Rating": "تقييم",
 	"Table": "جدول",
 	"Attach": "مرفق",
+	"Student Table": "جدول طلاب",
+	"Text Block": "نص ثابت",
 }
 LAYOUT_TYPES = ("Section", "Heading")
+# Fields nobody answers: headings shape the form, a text block is printed as
+# written.
+NO_VALUE = LAYOUT_TYPES + ("Text Block",)
 
 
 def _teachers_key(category: str) -> str:
@@ -119,6 +125,9 @@ def _field_rows(doc) -> list[dict]:
 			"reqd": cint(f.reqd),
 			"width": f.width or "half",
 			"description": f.description or "",
+			"icon": f.get("icon") or "",
+			"tone": f.get("tone") or "",
+			"print_rows": cint(f.get("print_rows")),
 			"idx": f.idx,
 		}
 		for f in sorted(doc.fields_table, key=lambda r: r.idx)
@@ -135,6 +144,15 @@ def _template_payload(doc) -> dict:
 		"isActive": cint(doc.is_active),
 		"printTemplate": doc.print_template or "",
 		"printCss": doc.get("print_css") or "",
+		"entryFor": doc.get("entry_for") or "Student",
+		"printTheme": doc.get("print_theme") or "soft",
+		"printOrientation": doc.get("print_orientation") or "Portrait",
+		"printLogo": doc.get("print_logo") or "",
+		"printSchool": doc.get("print_school") or "",
+		"printDepartment": doc.get("print_department") or "",
+		"printMotto": doc.get("print_motto") or "",
+		"printSignatures": doc.get("print_signatures") or "",
+		"printFooter": doc.get("print_footer") or "",
 		"subjectsCount": len(doc.get("subjects_table") or []),
 		"fields": _field_rows(doc),
 	}
@@ -161,6 +179,12 @@ def categories(persona: str = None):
 			for key, label in CATEGORIES.items()
 		],
 		"fieldTypes": [{"value": k, "label": v} for k, v in FIELD_TYPES.items()],
+		"icons": [{"value": k, "label": v} for k, v in forms_print.ICON_LABELS.items()],
+		"tones": [
+			{"value": k, "label": v, "color": forms_print.TONES[k][2], "background": forms_print.TONES[k][0]}
+			for k, v in forms_print.TONE_LABELS.items()
+		],
+		"entryFor": [{"value": k, "label": v} for k, v in forms_print.ENTRY_FOR.items()],
 	}
 
 
@@ -176,7 +200,7 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 	rows = frappe.get_all(
 		"MS Form Template",
 		filters=filters,
-		fields=["name", "title", "description", "is_active", "modified"],
+		fields=["name", "title", "description", "is_active", "entry_for", "modified"],
 		order_by="title",
 		limit_page_length=0,
 	)
@@ -195,7 +219,7 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 		fields=["parent", "fieldtype"],
 		limit_page_length=0,
 	):
-		if f.fieldtype not in LAYOUT_TYPES:
+		if f.fieldtype not in NO_VALUE:
 			fields[f.parent] = fields.get(f.parent, 0) + 1
 	subjects: dict[str, int] = {}
 	for r in frappe.get_all(
@@ -216,6 +240,7 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 				"title": r.title,
 				"description": r.description or "",
 				"isActive": cint(r.is_active),
+				"entryFor": r.entry_for or "Student",
 				"fields": fields.get(r.name, 0),
 				"entries": counts.get(r.name, 0),
 				"subjects": subjects.get(r.name, 0),
@@ -231,6 +256,67 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 def get_template(template: str, persona: str = None):
 	doc = frappe.get_doc("MS Form Template", template)
 	return _template_payload(doc)
+
+
+PRINT_SETTINGS = {
+	"entryFor": ("entry_for", tuple(forms_print.ENTRY_FOR)),
+	"printTheme": ("print_theme", ("soft", "classic")),
+	"printOrientation": ("print_orientation", ("Portrait", "Landscape")),
+	"printLogo": ("print_logo", None),
+	"printSchool": ("print_school", None),
+	"printDepartment": ("print_department", None),
+	"printMotto": ("print_motto", None),
+	"printSignatures": ("print_signatures", None),
+	"printFooter": ("print_footer", None),
+}
+
+
+def _apply_template(doc, data: dict, category: str):
+	"""Write a design onto a template document — for saving, and for a preview
+	of a design not saved yet. Returns a failure, or None."""
+	doc.title = data.get("title") or doc.title or "نموذج"
+	doc.category = category
+	doc.description = data.get("description")
+	doc.is_active = cint(data.get("isActive", 1))
+	doc.print_template = data.get("printTemplate")
+	if "printCss" in data:
+		doc.print_css = data.get("printCss")
+	for key, (fieldname, allowed) in PRINT_SETTINGS.items():
+		if key in data:
+			value = data.get(key) or None
+			if allowed and value not in allowed:
+				value = allowed[0]
+			doc.set(fieldname, value)
+	if doc.meta.has_field("created_by_user") and not doc.created_by_user:
+		doc.created_by_user = frappe.session.user
+
+	taken: set[str] = set()
+	doc.set("fields_table", [])
+	for row in data.get("fields") or []:
+		fieldtype = row.get("fieldtype") or "Data"
+		if fieldtype not in FIELD_TYPES:
+			return fail(f"Unknown field type {fieldtype}.", f"نوع حقل غير معروف: {fieldtype}")
+		label = (row.get("label") or "").strip()
+		if not label:
+			return fail("Every field needs a label.", "كل حقل يحتاج عنواناً.")
+		tone = row.get("tone") or ""
+		doc.append(
+			"fields_table",
+			{
+				"fieldname": _clean_fieldname(label, taken, row.get("fieldname") or ""),
+				"label": label,
+				"fieldtype": fieldtype,
+				"options": row.get("options") or "",
+				"default_value": row.get("default") or "",
+				"reqd": cint(row.get("reqd")),
+				"width": row.get("width") or "half",
+				"description": row.get("description") or "",
+				"icon": row.get("icon") if row.get("icon") in forms_print.ICON_LABELS else "",
+				"tone": tone if tone in forms_print.TONES else "",
+				"print_rows": max(0, min(cint(row.get("print_rows")), 40)),
+			},
+		)
+	return None
 
 
 def _clean_fieldname(label: str, taken: set[str], given: str = "") -> str:
@@ -277,38 +363,9 @@ def save_template(payload: str | dict, persona: str = None):
 	if not doc.is_new():
 		# Moving a form out of the file it was allowed in is editing that file.
 		_assert_may_design(persona, doc.category)
-	doc.title = data["title"]
-	doc.category = category
-	doc.description = data.get("description")
-	doc.is_active = cint(data.get("isActive", 1))
-	doc.print_template = data.get("printTemplate")
-	if "printCss" in data:
-		doc.print_css = data.get("printCss")
-	if not doc.created_by_user:
-		doc.created_by_user = frappe.session.user
-
-	taken: set[str] = set()
-	doc.set("fields_table", [])
-	for row in data.get("fields") or []:
-		fieldtype = row.get("fieldtype") or "Data"
-		if fieldtype not in FIELD_TYPES:
-			return fail(f"Unknown field type {fieldtype}.", f"نوع حقل غير معروف: {fieldtype}")
-		label = (row.get("label") or "").strip()
-		if not label:
-			return fail("Every field needs a label.", "كل حقل يحتاج عنواناً.")
-		doc.append(
-			"fields_table",
-			{
-				"fieldname": _clean_fieldname(label, taken, row.get("fieldname") or ""),
-				"label": label,
-				"fieldtype": fieldtype,
-				"options": row.get("options") or "",
-				"default_value": row.get("default") or "",
-				"reqd": cint(row.get("reqd")),
-				"width": row.get("width") or "half",
-				"description": row.get("description") or "",
-			},
-		)
+	error = _apply_template(doc, data, category)
+	if error:
+		return error
 
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
@@ -368,6 +425,26 @@ def _teacher_students(persona: str) -> list[str]:
 			)
 		)
 	)
+
+
+def _teacher_groups(persona: str) -> list[str]:
+	from match_schools.api.utils import instructor_groups
+
+	return instructor_groups(resolve_scope(persona).get("instructor"), period=False) or []
+
+
+def _group_students(group: str) -> list[dict]:
+	"""A section's pupils, by name — the rows of a «جدول طلاب»."""
+	rows = frappe.db.sql(
+		"""SELECT sgs.student AS id, COALESCE(s.student_name, sgs.student) AS name
+		     FROM `tabStudent Group Student` sgs
+		     JOIN `tabStudent` s ON s.name = sgs.student
+		    WHERE sgs.parent = %s AND sgs.parenttype = 'Student Group' AND sgs.active = 1
+		    ORDER BY s.student_name""",
+		group,
+		as_dict=True,
+	)
+	return [{"id": r.id, "name": r.name, "image": None, "group": group, "groupLabel": ""} for r in rows]
 
 
 def _subjects(template: str) -> list[str]:
@@ -447,9 +524,15 @@ def _students(persona: str, search: str = "", limit: int = 50, template: str = N
 
 @frappe.whitelist()
 @ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
-def students(search: str = "", limit: int = 50, template: str = None, persona: str = None):
+def students(
+	search: str = "", limit: int = 50, template: str = None, group: str = None, persona: str = None
+):
 	"""Students to file a form on — only those the form applies to, when a
-	form is given."""
+	form is given; a section's pupils, when a section is."""
+	if group:
+		if persona == ROLE_TEACHER and group not in _teacher_groups(persona):
+			frappe.throw("هذه الشعبة ليست من شعبك.", frappe.PermissionError)
+		return {"students": _group_students(group)}
 	rows = _students(persona, search, limit, template)
 	out = {"students": rows}
 	if template:
@@ -461,6 +544,20 @@ def _may_see(persona: str, student: str) -> bool:
 	if persona in BACK_OFFICE:
 		return True
 	return student in set(_teacher_students(persona))
+
+
+def _may_see_entry(persona: str, doc) -> bool:
+	"""A filled form: on a student the teacher teaches, on one of their
+	sections, or one they filled themselves."""
+	if persona in BACK_OFFICE:
+		return True
+	if doc.get("filled_by") == frappe.session.user:
+		return True
+	if doc.get("student"):
+		return _may_see(persona, doc.student)
+	if doc.get("student_group"):
+		return doc.student_group in set(_teacher_groups(persona))
+	return False
 
 
 @frappe.whitelist()
@@ -577,6 +674,11 @@ def _entry_payload(doc) -> dict:
 		"student": doc.student,
 		"studentName": doc.student_name,
 		"studentGroup": doc.student_group,
+		"studentGroupLabel": (
+			frappe.db.get_value("Student Group", doc.student_group, "student_group_name") or doc.student_group
+			if doc.student_group
+			else ""
+		),
 		"status": doc.status,
 		"filledBy": doc.filled_by,
 		"filledOn": str(doc.filled_on or ""),
@@ -602,22 +704,37 @@ def list_entries(
 		filters["template"] = template
 	if student:
 		filters["student"] = student
+	or_filters = None
 	if persona == ROLE_TEACHER:
-		mine = resolve_scope(persona).get("students") or []
-		filters["student"] = ["in", mine or [""]]
+		# `resolve_scope` has no student list for a teacher; reading it here
+		# hid every filled form from every teacher.
+		mine = _teacher_students(persona)
 		if student and student not in mine:
 			return {"entries": []}
-		if student:
-			filters["student"] = student
+		if not student:
+			or_filters = [
+				["student", "in", mine or [""]],
+				["student_group", "in", _teacher_groups(persona) or [""]],
+				["filled_by", "=", frappe.session.user],
+			]
 	rows = frappe.get_all(
 		"MS Form Entry",
 		filters=filters,
+		or_filters=or_filters,
 		fields=[
 			"name", "template", "template_title", "category", "student", "student_name",
 			"student_group", "status", "filled_by", "filled_on", "modified",
 		],
 		order_by="modified desc",
 		limit=cint(limit) or 50,
+	)
+	labels = dict(
+		frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list({r.student_group for r in rows if r.student_group}) or [""]]},
+			fields=["name", "student_group_name"],
+			as_list=True,
+		)
 	)
 	return {
 		"entries": [
@@ -629,6 +746,7 @@ def list_entries(
 				"student": r.student,
 				"studentName": r.student_name,
 				"studentGroup": r.student_group,
+				"studentGroupLabel": labels.get(r.student_group) or r.student_group or "",
 				"status": r.status,
 				"filledBy": r.filled_by,
 				"filledOn": str(r.filled_on or ""),
@@ -643,7 +761,7 @@ def list_entries(
 @ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def get_entry(entry: str, persona: str = None):
 	doc = frappe.get_doc("MS Form Entry", entry)
-	if not _may_see(persona, doc.student):
+	if not _may_see_entry(persona, doc):
 		frappe.throw(frappe._("You are not allowed to open this form."), frappe.PermissionError)
 	return _entry_payload(doc)
 
@@ -660,19 +778,30 @@ def save_entry(payload: str | dict, persona: str = None):
 	data = parse_json_arg(payload) or {}
 	if not data.get("template"):
 		return fail("Choose a form.", "اختر النموذج.")
-	if not data.get("student"):
-		return fail("Choose a student.", "اختر الطالب.")
-	if not _may_see(persona, data["student"]):
-		frappe.throw(frappe._("You are not allowed to file this form."), frappe.PermissionError)
-
 	template = frappe.get_doc("MS Form Template", data["template"])
-	# A form is filed only on a student it applies to. Existing entries stay
-	# editable, so a student later removed from the list keeps their record.
-	if not data.get("name") and data["student"] not in set(_subjects(template.name)):
-		return fail(
-			"This student is not on this form's list.",
-			"هذا الطالب ليس من الطلاب الخاضعين لهذا النموذج — أضفه من تبويب «الطلاب الخاضعون».",
-		)
+	entry_for = template.get("entry_for") or "Student"
+	if data.get("name"):
+		existing = frappe.get_doc("MS Form Entry", data["name"])
+		if not _may_see_entry(persona, existing):
+			frappe.throw(frappe._("You are not allowed to edit this form."), frappe.PermissionError)
+
+	if entry_for == "Student":
+		if not data.get("student"):
+			return fail("Choose a student.", "اختر الطالب.")
+		if not _may_see(persona, data["student"]):
+			frappe.throw(frappe._("You are not allowed to file this form."), frappe.PermissionError)
+		# A form is filed only on a student it applies to. Existing entries
+		# stay editable, so a student later removed keeps their record.
+		if not data.get("name") and data["student"] not in set(_subjects(template.name)):
+			return fail(
+				"This student is not on this form's list.",
+				"هذا الطالب ليس من الطلاب الخاضعين لهذا النموذج — أضفه من تبويب «الطلاب الخاضعون».",
+			)
+	elif entry_for == "Section":
+		if not data.get("studentGroup"):
+			return fail("Choose a section.", "اختر الشعبة.")
+		if persona == ROLE_TEACHER and data["studentGroup"] not in set(_teacher_groups(persona)):
+			frappe.throw("هذه الشعبة ليست من شعبك.", frappe.PermissionError)
 	if persona == ROLE_TEACHER and not _teachers_may_fill(template.category):
 		return fail(
 			"Teachers may not fill forms in this file.",
@@ -686,7 +815,7 @@ def save_entry(payload: str | dict, persona: str = None):
 		f.label
 		for f in template.fields_table
 		if cint(f.reqd)
-		and f.fieldtype not in LAYOUT_TYPES
+		and f.fieldtype not in NO_VALUE
 		and not str(values.get(f.fieldname, "")).strip()
 	]
 	if missing and data.get("status") == "مكتمل":
@@ -703,9 +832,14 @@ def save_entry(payload: str | dict, persona: str = None):
 	doc.template = template.name
 	doc.template_title = template.title
 	doc.category = template.category
-	doc.student = data["student"]
-	doc.student_name = frappe.db.get_value("Student", data["student"], "student_name")
-	doc.student_group = data.get("studentGroup") or None
+	if entry_for == "Student":
+		doc.student = data["student"]
+		doc.student_name = frappe.db.get_value("Student", data["student"], "student_name")
+		doc.student_group = data.get("studentGroup") or None
+	else:
+		doc.student = None
+		doc.student_name = None
+		doc.student_group = (data.get("studentGroup") or None) if entry_for == "Section" else None
 	doc.status = data.get("status") or "مسودة"
 	doc.notes = data.get("notes")
 	doc.filled_by = doc.filled_by or frappe.session.user
@@ -715,7 +849,7 @@ def save_entry(payload: str | dict, persona: str = None):
 
 	doc.set("values_table", [])
 	for f in template.fields_table:
-		if f.fieldtype in LAYOUT_TYPES:
+		if f.fieldtype in NO_VALUE:
 			continue
 		value = values.get(f.fieldname, "")
 		if isinstance(value, (list, dict)):
@@ -746,119 +880,21 @@ def delete_entry(entry: str, persona: str = None):
 # --- Printing -----------------------------------------------------------------
 
 
-def _default_print_template() -> str:
-	"""What a form prints as before anyone designs it.
-
-	A school should be able to print the day it creates a form, not after
-	someone writes HTML — the designed template replaces this when there is one.
-	"""
-	return """<div class="ms-form">
-  <h1>{{ template.title }}</h1>
-  <table class="head">
-    <tr><td><b>الطالب:</b> {{ entry.student_name }}</td><td><b>الشعبة:</b> {{ entry.student_group or "—" }}</td></tr>
-    <tr><td><b>التاريخ:</b> {{ filled_on }}</td><td><b>عبّأه:</b> {{ entry.filled_by }}</td></tr>
-  </table>
-  {% for field in fields %}
-    {% if field.fieldtype == "Section" or field.fieldtype == "Heading" %}
-      <h2>{{ field.label }}</h2>
-    {% else %}
-      <div class="row"><span class="label">{{ field.label }}:</span>
-        <span class="value">{{ values.get(field.fieldname) or "—" }}</span></div>
-    {% endif %}
-  {% endfor %}
-  {% if entry.notes %}<h2>ملاحظات</h2><p>{{ entry.notes }}</p>{% endif %}
-</div>"""
+def _print_payload(template_doc, entry_doc, blank: bool = False) -> str:
+	return forms_print.render(template_doc, entry_doc, _field_rows(template_doc), blank)
 
 
-PRINT_STYLE = """<style>
-  @page { size: A4; margin: 14mm; }
-  body { font-family: "Tajawal", "Segoe UI", sans-serif; direction: rtl; color: #111; }
-  .ms-form h1 { font-size: 20px; text-align: center; margin: 0 0 12px; }
-  .ms-form h2 { font-size: 14px; background: #eef2f9; padding: 6px 8px; margin: 14px 0 6px; border-radius: 4px; }
-  .ms-form table.head { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 12px; }
-  .ms-form table.head td { border: 1px solid #ccd; padding: 5px 7px; }
-  .ms-form .row { display: flex; gap: 6px; padding: 4px 2px; border-bottom: 1px dotted #ccd; font-size: 12px; }
-  .ms-form .label { font-weight: 700; min-width: 160px; }
-  .ms-form table.grid { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
-  .ms-form table.grid th, .ms-form table.grid td { border: 1px solid #ccd; padding: 4px 6px; }
-  @media print { .no-print { display: none; } }
-</style>"""
-
-
-def _css(css: str | None) -> str:
-	"""A form's own print CSS, after the base style so it can override it.
-
-	A stray `</style>` would end the block and let the rest into the page as
-	markup, so it is taken out.
-	"""
-	css = (css or "").strip()
-	if not css:
-		return ""
-	return "<style>\n" + css.replace("</style", "") + "\n</style>"
-
-
-def _render(template_doc, entry_doc) -> str:
-	fields = _field_rows(template_doc)
-	values = {v.fieldname: v.value for v in entry_doc.values_table}
-	# Stored answers are text; a printed page should read as a page. A tick is
-	# "نعم", a rating is out of five, and a timestamp loses its microseconds.
-	pretty = dict(values)
-	for f in fields:
-		raw = values.get(f["fieldname"], "")
-		if f["fieldtype"] == "Checkbox":
-			pretty[f["fieldname"]] = "نعم" if cint(raw) else ("لا" if raw != "" else "")
-		elif f["fieldtype"] == "Rating":
-			pretty[f["fieldname"]] = f"{cint(raw)} / 5" if raw else ""
-		elif f["fieldtype"] == "Datetime" and raw:
-			pretty[f["fieldname"]] = str(raw)[:16]
-	for f in fields:
-		if f["fieldtype"] == "Table" and values.get(f["fieldname"]):
-			try:
-				rows = json.loads(values[f["fieldname"]])
-				columns = [c.strip() for c in (f["options"] or "").split("\n") if c.strip()]
-				head = "".join(f"<th>{frappe.utils.escape_html(c)}</th>" for c in columns)
-				body = "".join(
-					"<tr>"
-					+ "".join(
-						f"<td>{frappe.utils.escape_html(str(row.get(c, '')))}</td>" for c in columns
-					)
-					+ "</tr>"
-					for row in rows
-				)
-				pretty[f["fieldname"]] = f'<table class="grid"><tr>{head}</tr>{body}</table>'
-			except Exception:
-				pass
-	filled = entry_doc.filled_on
-	by_label = {f["label"]: f for f in fields}
-	by_name = {f["fieldname"]: f for f in fields}
-
-	def field(label, *_args, **_kwargs):
-		"""A field's answer in a design, found by its label — or its key.
-
-		The extra arguments (type, options) describe the field for «تحويل
-		التصميم إلى حقول»; printing ignores them.
-		"""
-		f = by_label.get(str(label).rstrip(" *")) or by_name.get(str(label))
-		if not f:
-			return ""
-		value = pretty.get(f["fieldname"])
-		return value if value not in (None, "") else "—"
-
-	def section(label, *_args, **_kwargs):
-		return f'<h2 class="section">{escape_html(str(label))}</h2>'
-
-	context = {
-		"filled_on": str(filled)[:16] if filled else "",
-		"entry": entry_doc,
-		"template": template_doc,
-		"fields": fields,
-		"values": pretty,
-		"school": frappe.db.get_default("company") or "",
-		"field": field,
-		"section": section,
-	}
-	html = template_doc.print_template or _default_print_template()
-	return frappe.render_template(html, context)
+def _render_or_fail(template_doc, entry_doc, blank: bool = False):
+	try:
+		return _print_payload(template_doc, entry_doc, blank), None
+	except Exception as exc:
+		# Jinja errors arrive as HTML with a traceback; a designer needs the
+		# sentence, not the page.
+		reason = re.sub(r"<[^>]+>", " ", str(exc)).strip()
+		return None, fail(
+			"The print design could not be rendered.",
+			f"خطأ في تصميم الطباعة: {reason[:220]}",
+		)
 
 
 @frappe.whitelist()
@@ -866,73 +902,95 @@ def _render(template_doc, entry_doc) -> str:
 def print_entry(entry: str, persona: str = None):
 	"""The filled form as printable HTML."""
 	doc = frappe.get_doc("MS Form Entry", entry)
-	if not _may_see(persona, doc.student):
+	if not _may_see_entry(persona, doc):
 		frappe.throw(frappe._("You are not allowed to print this form."), frappe.PermissionError)
 	template = frappe.get_doc("MS Form Template", doc.template)
-	try:
-		body = _render(template, doc)
-	except Exception as exc:
-		return fail(
-			"The print template could not be rendered.",
-			f"تعذّر تجهيز قالب الطباعة: {str(exc)[:160]}",
-		)
-	return {
-		"html": PRINT_STYLE + _css(template.get("print_css")) + body,
-		"title": f"{doc.template_title} — {doc.student_name}",
-	}
+	html, error = _render_or_fail(template, doc)
+	if error:
+		return error
+	who = doc.student_name or (
+		frappe.db.get_value("Student Group", doc.student_group, "student_group_name") if doc.student_group else ""
+	)
+	return {"html": html, "title": f"{doc.template_title}" + (f" — {who}" if who else "")}
+
+
+@frappe.whitelist()
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
+def print_blank(template: str, persona: str = None):
+	"""The form with no answers — dotted lines and empty boxes, to print and
+	fill by hand."""
+	doc = frappe.get_doc("MS Form Template", template)
+	html, error = _render_or_fail(doc, frappe.new_doc("MS Form Entry"), blank=True)
+	if error:
+		return error
+	return {"html": html, "title": doc.title}
 
 
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
-def preview_print(template: str, html: str = None, css: str = None, persona: str = None):
-	"""What a print design looks like, before it is saved or filled.
+def preview_print(
+	template: str = None,
+	html: str = None,
+	css: str = None,
+	payload: str | dict = None,
+	blank: int = 0,
+	persona: str = None,
+):
+	"""What a design looks like before it is saved.
 
-	Rendered against the latest filled copy when there is one, and against
-	sample answers when there is not, so a designer sees a real page rather
-	than a skeleton of empty rows.
+	With `payload` (the designer's whole draft) the preview follows every
+	unsaved change — fields, settings, design and CSS — and needs no saved
+	form at all. It is drawn on the latest filled copy when there is one, and
+	blank otherwise, which is how the paper form looks anyway.
 	"""
-	doc = frappe.get_doc("MS Form Template", template)
-	_assert_may_design(persona, doc.category)
+	data = parse_json_arg(payload) or {}
+	if template:
+		doc = frappe.get_doc("MS Form Template", template)
+	else:
+		doc = frappe.new_doc("MS Form Template")
+	category = data.get("category") or doc.get("category")
+	_assert_may_design(persona, category)
+	if data:
+		error = _apply_template(doc, data, _category(category))
+		if error:
+			return error
 	if html is not None:
 		doc.print_template = html
 	if css is not None:
 		doc.print_css = css
-	latest = frappe.get_all(
-		"MS Form Entry", filters={"template": template}, order_by="modified desc", limit=1, pluck="name"
-	)
-	if latest:
-		entry = frappe.get_doc("MS Form Entry", latest[0])
-	else:
-		entry = frappe.new_doc("MS Form Entry")
-		entry.student_name = "اسم الطالب"
-		entry.student_group = "الشعبة"
-		entry.filled_by = frappe.session.user
-		entry.filled_on = now_datetime()
-		entry.notes = "ملاحظات تجريبية"
-		for f in doc.fields_table:
-			if f.fieldtype in LAYOUT_TYPES:
-				continue
-			entry.append(
-				"values_table",
-				{
-					"fieldname": f.fieldname,
-					"label": f.label,
-					"fieldtype": f.fieldtype,
-					"value": "نموذج" if f.fieldtype not in ("Number", "Rating") else "3",
-				},
-			)
-	try:
-		return {"html": PRINT_STYLE + _css(doc.get("print_css")) + _render(doc, entry)}
-	except Exception as exc:
-		# Jinja errors arrive as HTML with a traceback; a designer needs the
-		# sentence, not the page.
-		import re as _re
-
-		reason = _re.sub(r"<[^>]+>", " ", str(exc)).strip()
-		return fail(
-			"The print template could not be rendered.",
-			f"خطأ في القالب: {reason[:200]}",
+	latest = (
+		frappe.get_all(
+			"MS Form Entry", filters={"template": template}, order_by="modified desc", limit=1, pluck="name"
 		)
+		if template and not cint(blank)
+		else []
+	)
+	entry = frappe.get_doc("MS Form Entry", latest[0]) if latest else frappe.new_doc("MS Form Entry")
+	out, error = _render_or_fail(doc, entry, blank=not latest)
+	if error:
+		return error
+	return {"html": out, "blank": not latest}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
+def upload_logo(persona: str = None):
+	"""A logo for a form's letterhead. Returned as a URL the design keeps; the
+	printed page carries the image itself, so it prints anywhere."""
+	upload = frappe.request.files.get("file") if frappe.request else None
+	if not upload:
+		return fail("No file.", "اختر صورة الشعار.")
+	name = upload.filename or "logo.png"
+	if not re.search(r"\.(png|jpe?g|webp|gif|svg)$", name, re.I):
+		return fail("Not an image.", "الشعار يجب أن يكون صورة (PNG أو JPG أو SVG).")
+	content = upload.stream.read()
+	if len(content) > 3 * 1024 * 1024:
+		return fail("Too large.", "حجم الشعار أكبر من 3 ميغابايت.")
+	f = frappe.get_doc(
+		{"doctype": "File", "file_name": name, "content": content, "is_private": 0, "folder": "Home"}
+	).insert(ignore_permissions=True)
+	frappe.db.commit()
+	return {"url": f.file_url}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -960,104 +1018,25 @@ def set_category_settings(
 
 # --- Converting between the fields and the print design -----------------------
 
-# `{{ field("الوزن", "Number") }}` / `{{ section("العلامات الحيوية") }}` — the
-# markup a design uses to place a field, and what «تحويل التصميم إلى حقول»
-# reads back. Up to three quoted arguments: label, type, options.
-_CALL = re.compile(
-	r"""\{\{\s*(field|section)\(\s*(["'])(.*?)\2"""
-	r"""(?:\s*,\s*(["'])(.*?)\4)?"""
-	r"""(?:\s*,\s*(["'])(.*?)\6)?\s*\)\s*\}\}""",
-	re.S,
-)
-# `{{ values.key }}` or `{{ values.get("key") }}` — an existing field by key.
-_VALUE = re.compile(r"""values(?:\.get\(\s*["']([a-z0-9_]+)["']|\.([a-z0-9_]+))""")
-
-DEFAULT_PRINT_CSS = """/* الألوان والخطوط — غيّرها كما تشاء */
-.ms-form { font-size: 12.5px; }
-.ms-form .ms-head { text-align: center; border-bottom: 2px solid #1a224b; padding-bottom: 8px; margin-bottom: 10px; }
-.ms-form .ms-head .school { font-size: 13px; color: #555; }
-.ms-form .ms-head h1 { margin: 4px 0 0; }
-.ms-form table.info, .ms-form table.fields { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
-.ms-form table.info td { border: 1px solid #ccd; padding: 5px 8px; }
-.ms-form table.fields th { width: 32%; background: #f5f7fb; text-align: right; font-weight: 700; }
-.ms-form table.fields th, .ms-form table.fields td { border: 1px solid #ccd; padding: 6px 8px; vertical-align: top; }
-.ms-form h2.section { font-size: 14px; background: #eef2f9; padding: 6px 8px; margin: 14px 0 6px; border-radius: 4px; }
-.ms-form .signatures { display: flex; justify-content: space-between; margin-top: 36px; }
-.ms-form .signatures div { width: 30%; text-align: center; border-top: 1px solid #333; padding-top: 4px; }
-"""
-
-
-def _quote(text: str) -> str:
-	return '"' + str(text).replace('"', "'") + '"'
-
-
-def _field_call(f: dict) -> str:
-	"""The design markup for one field — carrying its type and options, so the
-	design can be turned back into the same fields."""
-	args = [_quote(f["label"] + (" *" if cint(f.get("reqd")) else ""))]
-	fieldtype = f.get("fieldtype") or "Data"
-	options = [o.strip() for o in (f.get("options") or "").split("\n") if o.strip()]
-	if fieldtype != "Data" or options:
-		args.append(_quote(fieldtype))
-	if options:
-		args.append(_quote("|".join(options)))
-	return "{{ field(" + ", ".join(args) + ") }}"
-
-
-def _design_from_fields(fields: list[dict]) -> str:
-	lines = [
-		'<div class="ms-form">',
-		'  <header class="ms-head">',
-		'    <div class="school">{{ school }}</div>',
-		"    <h1>{{ template.title }}</h1>",
-		"  </header>",
-		'  <table class="info">',
-		'    <tr><td><b>الطالب:</b> {{ entry.student_name }}</td><td><b>الشعبة:</b> {{ entry.student_group or "—" }}</td></tr>',
-		"    <tr><td><b>التاريخ:</b> {{ filled_on }}</td><td><b>عبّأه:</b> {{ entry.filled_by }}</td></tr>",
-		"  </table>",
-	]
-	open_table = False
-	for f in fields:
-		fieldtype = f.get("fieldtype") or "Data"
-		if fieldtype in LAYOUT_TYPES:
-			if open_table:
-				lines.append("  </table>")
-				open_table = False
-			lines.append("  {{ section(" + _quote(f["label"]) + ") }}")
-			continue
-		if not open_table:
-			lines.append('  <table class="fields">')
-			open_table = True
-		lines.append(
-			f"    <tr><th>{escape_html(f['label'])}</th><td>{_field_call(f)}</td></tr>"
-		)
-	if open_table:
-		lines.append("  </table>")
-	lines += [
-		'  {% if entry.notes %}{{ section("ملاحظات") }}<p>{{ entry.notes }}</p>{% endif %}',
-		'  <div class="signatures">',
-		"    <div>توقيع المختص</div>",
-		"    <div>توقيع ولي الأمر</div>",
-		"    <div>ختم المدرسة</div>",
-		"  </div>",
-		"</div>",
-	]
-	return "\n".join(lines)
-
 
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def design_from_fields(
-	fields: str | list = None, template: str = None, category: str = None, persona: str = None
+	fields: str | list = None,
+	template: str = None,
+	category: str = None,
+	entry_for: str = None,
+	persona: str = None,
 ):
-	"""«تحويل الحقول إلى تصميم طباعة»: a ready print design from the fields.
+	"""«تحويل الحقول إلى تصميم طباعة»: a ready design from the fields.
 
-	Takes the fields as they stand in the designer (saved or not), and returns
-	a design plus a starting CSS. Nothing is saved: the designer shows it, and
-	the school edits and saves it like any design.
+	Takes the fields as they stand in the designer (saved or not). Nothing is
+	saved: the designer shows it, and the school edits and saves it like any
+	design. The look comes from the theme, so no CSS is needed to start.
 	"""
 	if template:
 		category = frappe.db.get_value("MS Form Template", template, "category")
+		entry_for = entry_for or frappe.db.get_value("MS Form Template", template, "entry_for")
 	_assert_may_design(persona, category)
 	rows = parse_json_arg(fields)
 	if rows is None and template:
@@ -1065,7 +1044,7 @@ def design_from_fields(
 	rows = [r for r in (rows or []) if (r.get("label") or "").strip()]
 	if not rows:
 		return fail("Add fields first.", "أضف حقولاً أولاً، ثم حوّلها إلى تصميم.")
-	return {"html": _design_from_fields(rows), "css": DEFAULT_PRINT_CSS}
+	return {"html": forms_print.design_from_fields(rows, entry_for or "Student"), "css": ""}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1075,10 +1054,11 @@ def fields_from_design(
 ):
 	"""«تحويل التصميم إلى حقول»: the fields a design places, in its order.
 
-	Reads `{{ field("…", "type", "a|b") }}` and `{{ section("…") }}`. A field
-	that already exists under the same label keeps its key, so the answers
-	already filed under it stay attached; `{{ values.key }}` keeps an existing
-	field by key. A label ending in `*` is a required field.
+	Reads `box`, `inline`, `checks` and `field` — `("label", "type", "a|b")` —
+	and `section("…")`. A field already there under the same label keeps its
+	key, colour, icon and width, so the answers filed under it stay attached;
+	`{{ values.key }}` keeps an existing field by key. A label ending in `*`
+	is required.
 	"""
 	_assert_may_design(persona, category)
 	current = [r for r in (parse_json_arg(fields) or []) if (r.get("label") or "").strip()]
@@ -1088,7 +1068,7 @@ def fields_from_design(
 	out: list[dict] = []
 	seen: set[str] = set()
 	unknown: list[str] = []
-	for m in _CALL.finditer(html or ""):
+	for m in forms_print.CALL.finditer(html or ""):
 		kind, label = m.group(1), (m.group(3) or "").strip()
 		if not label:
 			continue
@@ -1117,17 +1097,20 @@ def fields_from_design(
 				unknown.append(m.group(5))
 		existing = by_label.get(label)
 		options = "\n".join(o.strip() for o in (m.group(7) or "").split("|") if o.strip())
+		fieldtype = fieldtype or (existing or {}).get("fieldtype") or "Data"
+		if fieldtype in ("Text Block", "Student Table"):
+			options = (existing or {}).get("options") or options
 		out.append({
 			**(existing or {}),
 			"label": label,
-			"fieldtype": fieldtype or (existing or {}).get("fieldtype") or "Data",
+			"fieldtype": fieldtype,
 			"options": options or (existing or {}).get("options") or "",
 			# The design is the source: no `*`, not required.
 			"reqd": 1 if reqd else 0,
-			"width": (existing or {}).get("width") or "half",
+			"width": (existing or {}).get("width") or ("half" if kind == "inline" else "full"),
 		})
-	# Fields the design shows by key rather than through field().
-	for m in _VALUE.finditer(html or ""):
+	# Fields the design shows by key rather than through a helper.
+	for m in forms_print.VALUE.finditer(html or ""):
 		key = m.group(1) or m.group(2)
 		f = by_name.get(key)
 		if f and f["label"] not in seen:
@@ -1137,7 +1120,7 @@ def fields_from_design(
 	if not out:
 		return fail(
 			"No fields found in the design.",
-			'لم أجد حقولاً في التصميم. ضع كل حقل هكذا: {{ field("اسم الحقل", "Number") }} — راجع «مساعدة».',
+			'لم أجد حقولاً في التصميم. ضع كل حقل هكذا: {{ box("اسم الحقل", "Long Text") }} — راجع «مساعدة».',
 		)
 	kept = sum(1 for f in out if f.get("fieldname"))
 	dropped = [r["label"] for r in current if r["label"] not in seen and ("§" + r["label"]) not in seen]
