@@ -26,6 +26,7 @@
   "is_draft",
   "sender_deleted",
   "sender_archived",
+  "sender_starred",
   "section_context",
   "about_student",
   "sec_period",
@@ -150,6 +151,13 @@
    "fieldname": "sender_archived",
    "fieldtype": "Check",
    "label": "Archived by sender"
+  },
+  {
+   "default": "0",
+   "fieldname": "sender_starred",
+   "fieldtype": "Check",
+   "label": "Starred by sender",
+   "read_only": 1
   },
   {
    "fieldname": "audience_key",

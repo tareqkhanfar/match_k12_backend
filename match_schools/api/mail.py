@@ -156,15 +156,20 @@ def _message_row(doc, viewer: str, mine=None, preview_only: bool = True) -> dict
 				"is_read": bool(cint(mine.is_read)),
 				"is_starred": bool(cint(mine.is_starred)),
 				"is_archived": bool(cint(mine.is_archived)),
+				"is_deleted": bool(cint(mine.get("is_deleted"))),
 				"my_kind": mine.kind,
 			}
 		)
 	else:
+		# The sender's own copy keeps its folder state on the message itself.
+		# It was always reported unstarred, so a star on a sent message looked
+		# accepted and then vanished.
 		row.update(
 			{
 				"is_read": True,
-				"is_starred": False,
+				"is_starred": bool(cint(doc.get("sender_starred"))),
 				"is_archived": bool(cint(doc.sender_archived)),
+				"is_deleted": bool(cint(doc.sender_deleted)),
 				"my_kind": None,
 			}
 		)
@@ -197,23 +202,28 @@ def folders(persona: str = None):
 		"MS Message Recipient",
 		{"user": user, "is_read": 0, "is_archived": 0, "is_deleted": 0, "is_pending": 0},
 	)
+	sent_base = {"sender": user, "is_draft": 0, "is_scheduled": 0}
 	counts = {
 		"inbox": frappe.db.count(
 			"MS Message Recipient",
 			{"user": user, "is_archived": 0, "is_deleted": 0, "is_pending": 0},
 		),
+		# A message someone sent and then starred, archived or binned lives in
+		# that folder too — not only mail they received.
 		"starred": frappe.db.count(
 			"MS Message Recipient", {"user": user, "is_starred": 1, "is_deleted": 0, "is_pending": 0}
-		),
+		)
+		+ frappe.db.count("MS Message", {**sent_base, "sender_starred": 1, "sender_deleted": 0}),
 		"archive": frappe.db.count(
 			"MS Message Recipient", {"user": user, "is_archived": 1, "is_deleted": 0, "is_pending": 0}
-		),
+		)
+		+ frappe.db.count("MS Message", {**sent_base, "sender_archived": 1, "sender_deleted": 0}),
 		"trash": frappe.db.count(
 			"MS Message Recipient", {"user": user, "is_deleted": 1, "is_pending": 0}
-		),
+		)
+		+ frappe.db.count("MS Message", {**sent_base, "sender_deleted": 1}),
 		"sent": frappe.db.count(
-			"MS Message",
-			{"sender": user, "is_draft": 0, "sender_deleted": 0, "is_scheduled": 0},
+			"MS Message", {**sent_base, "sender_deleted": 0, "sender_archived": 0}
 		),
 		"drafts": frappe.db.count("MS Message", {"sender": user, "is_draft": 1}),
 		"scheduled": frappe.db.count("MS Message", {"sender": user, "is_scheduled": 1}),
@@ -253,8 +263,10 @@ def list_messages(
 		filters = {"sender": user, "is_draft": 1 if folder == "drafts" else 0}
 		if folder == "sent":
 			# A message waiting for its send time is not in the outbox yet; it
-			# has its own folder, where it can still be called back.
+			# has its own folder, where it can still be called back. One the
+			# sender archived has moved to the archive, so it leaves here.
 			filters["sender_deleted"] = 0
+			filters["sender_archived"] = 0
 			filters["is_scheduled"] = 0
 		elif folder == "scheduled":
 			filters["is_scheduled"] = 1
@@ -301,6 +313,29 @@ def list_messages(
 			if doc.sender in hidden:
 				continue
 			rows.append(_message_row(doc, user, m))
+
+		# The caller's own sent mail, where they filed it. Archiving or starring
+		# a sent message used to succeed on the server and show up nowhere, so
+		# on the phone it looked as if the button did nothing.
+		sender_filters = {
+			"archive": {"sender_archived": 1, "sender_deleted": 0},
+			"starred": {"sender_starred": 1, "sender_deleted": 0},
+			"trash": {"sender_deleted": 1},
+		}.get(folder)
+		if sender_filters and not cint(unread_only):
+			seen = {r["id"] for r in rows}
+			for n in frappe.get_all(
+				"MS Message",
+				filters={"sender": user, "is_draft": 0, "is_scheduled": 0, **sender_filters},
+				pluck="name",
+				order_by="sent_on desc, creation desc",
+				limit_page_length=limit,
+			):
+				if n in seen:
+					continue
+				rows.append(_message_row(frappe.get_doc("MS Message", n), user))
+			rows.sort(key=lambda r: r.get("sent_on") or "", reverse=True)
+			rows = rows[:limit]
 
 	if search:
 		needle = search.strip().lower()
@@ -782,11 +817,25 @@ def set_flags(
 		doc = frappe.get_doc("MS Message", message)
 		if doc.sender != user:
 			frappe.throw(_("You are not part of this conversation."), frappe.PermissionError)
+		if is_starred is not None:
+			doc.sender_starred = cint(is_starred)
 		if is_archived is not None:
 			doc.sender_archived = cint(is_archived)
 		if is_deleted is not None:
 			doc.sender_deleted = cint(is_deleted)
-		doc.save(ignore_permissions=True)
+		# Only the sender's own folder fields change. `save` would re-run the
+		# message's validation, which is about sending and has no business
+		# refusing a star on something sent weeks ago.
+		frappe.db.set_value(
+			"MS Message",
+			doc.name,
+			{
+				"sender_starred": cint(doc.get("sender_starred")),
+				"sender_archived": cint(doc.sender_archived),
+				"sender_deleted": cint(doc.sender_deleted),
+			},
+			update_modified=False,
+		)
 
 	frappe.db.commit()
 	return {
