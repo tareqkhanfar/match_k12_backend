@@ -412,7 +412,9 @@ def account(student: str) -> dict:
 				# out at the counter for it is the debit.
 				post({
 					"date": date, "kind": "return", "reference": v.voucher_no,
-					"description": "مرتجع / إشعار دائن" + (f" على {i['return_against']}" if i.get("return_against") else ""),
+					# The reversed invoice is shown in the detail, not in the title:
+					# a document number inside Arabic text breaks across lines.
+					"description": "مرتجع — " + ("، ".join(l["name"] for l in i.get("items", [])[:2]) or "إشعار دائن"),
 					"period": label, "period_key": period, "due_date": "",
 					"debit": 0.0, "credit": credit, "invoice": i,
 				})
