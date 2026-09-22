@@ -59,7 +59,7 @@ def _visible_filters(persona: str, scope: dict, student: str = None) -> dict | N
 		return {}
 
 	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import courses_of_instructor
+		from match_schools.api.gradeflow import courses_taught as courses_of_instructor
 
 		courses = courses_of_instructor(scope.get("instructor"))
 		return {"course": ["in", sorted(courses)]} if courses else None
@@ -305,7 +305,7 @@ def resource_options(persona: str = None):
 	"""Subjects and classes this persona may publish against."""
 	scope = resolve_scope(persona)
 	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import courses_of_instructor
+		from match_schools.api.gradeflow import courses_taught as courses_of_instructor
 
 		courses = sorted(courses_of_instructor(scope.get("instructor")))
 	else:

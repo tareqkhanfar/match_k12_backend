@@ -135,6 +135,12 @@ def list_students(
 
 	ctx = _bulk_context([r["name"] for r in rows])
 	items = [_student_row(r, ctx) for r in rows]
+	if persona == ROLE_TEACHER:
+		# A teacher's list is for teaching: fees are the office's business.
+		for i in items:
+			i["feeTotal"] = None
+			i["feePaid"] = None
+			i["status"] = None
 
 	# Payment status is derived, so filter after enrichment.
 	if payment_status and payment_status != "all":
@@ -458,7 +464,9 @@ def get_student(student: str, persona: str = None):
 		)
 
 	enrollment = _latest_enrollment(student)
-	fees = _fee_totals(student)
+	# A teacher opens a student to teach them; their fees are between the
+	# office and the family.
+	fees = _fee_totals(student) if persona != ROLE_TEACHER else None
 
 	return {
 		"profile": {
@@ -488,7 +496,9 @@ def get_student(student: str, persona: str = None):
 			"outstanding": fees["outstanding"],
 			"status": fees["status"],
 			"invoices": _fee_invoices(student),
-		},
+		}
+		if fees is not None
+		else None,
 		"groups": _groups_of_student(student),
 	}
 
@@ -770,7 +780,24 @@ def save_student(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def filter_options(persona: str = None):
-	"""Values for the directory's grade/section dropdowns."""
+	"""Values for the directory's grade/section dropdowns.
+
+	A teacher is offered only the grades and sections they teach: their list
+	holds nobody else, so every other grade in the dropdown filtered it down
+	to nothing.
+	"""
+	if persona == ROLE_TEACHER:
+		groups = instructor_groups(resolve_scope(persona).get("instructor"))
+		rows = frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", groups or [""]]},
+			fields=["program", "batch"],
+		)
+		return {
+			"grades": sorted({r.program for r in rows if r.program}),
+			"sections": sorted({r.batch for r in rows if r.batch}),
+			"statuses": [],
+		}
 	programs = frappe.get_all("Program", fields=["name", "program_name"], order_by="name")
 	batches = frappe.get_all("Student Batch Name", fields=["name"], order_by="name")
 	return {

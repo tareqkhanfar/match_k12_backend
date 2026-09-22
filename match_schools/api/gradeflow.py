@@ -102,6 +102,46 @@ def courses_of_instructor(instructor: str | None) -> set[str]:
 	return courses
 
 
+def courses_taught(instructor: str | None) -> set[str]:
+	"""The subjects this teacher teaches — and only those.
+
+	`courses_of_instructor` is the looser answer used for read access: it
+	counts every subject of a section the teacher is listed on, because a class
+	teacher follows the whole of their class. For "what does this teacher
+	teach" that is wrong — the class teacher of 11-أ does not teach its
+	biology — and it showed on the performance file (nine subjects for a
+	teacher of two) and in the community's subject channels.
+
+	Read from the timetable and the dated lessons, which name the teacher of
+	each lesson.
+	"""
+	if not instructor:
+		return set()
+	courses: set[str] = set()
+	if frappe.db.table_exists("MS Timetable Slot"):
+		courses |= {
+			c
+			for c in frappe.get_all(
+				"MS Timetable Slot",
+				filters={"instructor": instructor, "active": 1},
+				pluck="course",
+				limit_page_length=0,
+			)
+			if c
+		}
+	courses |= {
+		c
+		for c in frappe.get_all(
+			"Course Schedule",
+			filters={"instructor": instructor, "docstatus": ["<", 2]},
+			pluck="course",
+			limit_page_length=0,
+		)
+		if c
+	}
+	return courses
+
+
 def teacher_may_see_course(persona: str, course: str, scope: dict | None = None) -> bool:
 	"""Whether this persona may read marks for a given subject."""
 	if persona in BACK_OFFICE:

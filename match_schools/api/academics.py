@@ -56,15 +56,11 @@ def list_classes(
 		filters["student_group_name"] = ["like", f"%{search}%"]
 
 	if persona == ROLE_TEACHER:
-		scope = resolve_scope(persona)
-		names = [
-			r.parent
-			for r in frappe.get_all(
-				"Student Group Instructor",
-				filters={"instructor": scope.get("instructor"), "parenttype": "Student Group"},
-				fields=["parent"],
-			)
-		]
+		# Every section the teacher teaches, not only the one they are class
+		# teacher of — that roster names the class teacher alone.
+		from match_schools.api.utils import instructor_groups
+
+		names = instructor_groups(resolve_scope(persona).get("instructor"))
 		if not names:
 			return []
 		filters["name"] = ["in", names]

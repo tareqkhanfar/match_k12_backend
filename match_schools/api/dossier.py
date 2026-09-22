@@ -66,19 +66,9 @@ def _assert_can_see_student(persona: str, student: str):
 
 def _teacher_teaches_student(instructor: str, student: str) -> bool:
 	"""True when the student sits in any group this instructor teaches."""
-	return bool(
-		frappe.db.sql(
-			"""
-			SELECT 1
-			  FROM `tabStudent Group Student` sgs
-			  JOIN `tabStudent Group Instructor` sgi ON sgi.parent = sgs.parent
-			 WHERE sgs.student = %(student)s
-			   AND sgi.instructor = %(instructor)s
-			 LIMIT 1
-			""",
-			{"student": student, "instructor": instructor},
-		)
-	)
+	from match_schools.api.utils import instructor_teaches_student
+
+	return instructor_teaches_student(instructor, student)
 
 
 def _table_exists(doctype: str) -> bool:
@@ -224,13 +214,20 @@ def _attendance(student: str) -> dict:
 	excused = by_status.get("Excused", 0) + by_status.get("Leave", 0)
 	total = present + absent + late
 
+	fields = ["name", "date", "status", "student_group", "course_schedule"]
+	# The reason given for an excused absence: "بعذر" alone tells a parent
+	# nothing and a report less.
+	has_reason = frappe.db.has_column("Student Attendance", "ms_absence_reason")
+	if has_reason:
+		fields.append("ms_absence_reason")
 	recent = _rows(
 		"Student Attendance",
 		{"student": student, "docstatus": ["<", 2]},
-		["name", "date", "status", "student_group", "course_schedule"],
+		fields,
 		"date desc",
 		limit=30,
 	)
+	from match_schools.api.attendance import STATUS_AR
 
 	return {
 		"present": present,
@@ -244,6 +241,8 @@ def _attendance(student: str) -> dict:
 				"id": r.name,
 				"date": str(r.date or ""),
 				"status": r.status,
+				"status_label": STATUS_AR.get(r.status, r.status),
+				"reason": (r.get("ms_absence_reason") or "").strip() or None,
 				"group": r.student_group,
 				"lesson": r.course_schedule,
 			}
@@ -851,7 +850,9 @@ def student_dossier(student: str, persona: str = None):
 		"health": _health(student),
 		"assignments": _assignments(student),
 		"quizzes": _quizzes(student),
-		"billing": _billing(student),
+		# Money is between the school's office and the family. A teacher opens a
+		# student to teach them, and their fees are not the teacher's business.
+		"billing": _billing(student) if persona != ROLE_TEACHER else None,
 		"services": _services(student),
 		"alerts": _alerts(student),
 		# `timetable` stays the array of dated lessons that the previous build

@@ -149,20 +149,9 @@ def _assert_can_write(persona: str, doctype: str, name: str):
 
 
 def _teaches(instructor: str | None, student: str) -> bool:
-	if not instructor:
-		return False
-	return bool(
-		frappe.db.sql(
-			"""
-			SELECT 1
-			  FROM `tabStudent Group Student` sgs
-			  JOIN `tabStudent Group Instructor` sgi ON sgi.parent = sgs.parent
-			 WHERE sgs.student = %(student)s AND sgi.instructor = %(instructor)s
-			 LIMIT 1
-			""",
-			{"student": student, "instructor": instructor},
-		)
-	)
+	from match_schools.api.utils import instructor_teaches_student
+
+	return instructor_teaches_student(instructor, student)
 
 
 def _extension(filename: str) -> str:

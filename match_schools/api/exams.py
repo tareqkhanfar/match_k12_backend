@@ -283,7 +283,7 @@ def form_options(persona: str = None):
 		group_filters["name"] = ["in", groups]
 
 	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import courses_of_instructor
+		from match_schools.api.gradeflow import courses_taught as courses_of_instructor
 
 		courses = sorted(courses_of_instructor(scope.get("instructor")))
 	else:

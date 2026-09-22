@@ -631,6 +631,13 @@ def channels(persona: str = None):
 	# children's; a teacher's are what they teach; the office sees everything.
 	if persona in BACK_OFFICE:
 		course_names = None
+	elif persona == ROLE_TEACHER:
+		# What this teacher teaches — not every subject of every section they
+		# walk into. Reading the sections' whole timetable gave the English
+		# teacher of 11-أ channels for its biology and PE.
+		from match_schools.api.gradeflow import courses_taught
+
+		course_names = sorted(courses_taught(scope.get("instructor")))
 	else:
 		rows = frappe.get_all(
 			"MS Timetable Slot",

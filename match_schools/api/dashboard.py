@@ -283,12 +283,11 @@ def _teacher_dashboard(scope: dict) -> dict:
 def _instructor_groups(instructor: str | None) -> list[dict]:
 	if not instructor:
 		return []
-	rows = frappe.get_all(
-		"Student Group Instructor",
-		filters={"instructor": instructor, "parenttype": "Student Group"},
-		fields=["parent"],
-	)
-	names = [r.parent for r in rows]
+	# Every section the teacher teaches — by roster, timetable or lessons —
+	# not just the one they are class teacher of.
+	from match_schools.api.utils import instructor_groups
+
+	names = instructor_groups(instructor)
 	if not names:
 		return []
 	return frappe.get_all(

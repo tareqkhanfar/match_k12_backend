@@ -101,7 +101,7 @@ def list_quizzes(
 	filters = {}
 
 	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import courses_of_instructor
+		from match_schools.api.gradeflow import courses_taught as courses_of_instructor
 
 		courses = courses_of_instructor(scope.get("instructor"))
 		if not courses:

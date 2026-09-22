@@ -1471,13 +1471,13 @@ def term_grades(
 		order_by="course, entry_date",
 	)
 
-	from match_schools.api.gradeflow import courses_of_instructor, term_is_published
+	from match_schools.api.gradeflow import courses_taught, term_is_published
 
 	# A teacher sees only the subjects they teach — never a student's marks in
 	# someone else's subject.
 	own_courses = None
 	if persona == ROLE_TEACHER:
-		own_courses = courses_of_instructor(resolve_scope(persona).get("instructor"))
+		own_courses = courses_taught(resolve_scope(persona).get("instructor"))
 		entries = [e for e in entries if e.course in own_courses]
 
 	# A draft mark is the teacher's working copy. Families see a component only

@@ -800,6 +800,32 @@ def instructor_groups(
 	return frappe.get_all("Student Group", filters=filters, pluck="name", limit_page_length=0)
 
 
+def instructor_teaches_student(instructor: str | None, student: str | None) -> bool:
+	"""Whether this student sits in any section this teacher teaches.
+
+	Every "may this teacher see this student" check goes through here, so it
+	agrees with `instructor_groups`. Several checks used to read the section's
+	instructor table alone — which on most schools names only the class
+	teacher — so a teacher could list a student and then be refused when
+	opening them.
+
+	Not narrowed to the header's term: permission follows the teacher's live
+	sections, and a term switch in the header should not turn a student the
+	teacher plainly teaches into a permission error.
+	"""
+	if not instructor or not student:
+		return False
+	groups = instructor_groups(instructor, period=False)
+	if not groups:
+		return False
+	return bool(
+		frappe.db.exists(
+			"Student Group Student",
+			{"parent": ["in", groups], "parenttype": "Student Group", "student": student},
+		)
+	)
+
+
 def apply_period(
 	filters: dict,
 	doctype: str,

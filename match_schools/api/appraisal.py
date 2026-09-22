@@ -360,18 +360,14 @@ def performance_file(instructor: str = None, persona: str = None):
 		previous = scored[1]
 		trend = "up" if recent > previous else "down" if recent < previous else "flat"
 
-	groups = {
-		r.parent
-		for r in frappe.get_all(
-			"Student Group Instructor",
-			filters={"instructor": instructor, "parenttype": "Student Group"},
-			fields=["parent"],
-		)
-	}
+	# What the teacher teaches this term: every section they take a lesson
+	# in, and the subjects they teach there — not every subject of the one
+	# section they are class teacher of.
+	from match_schools.api.gradeflow import courses_taught
+	from match_schools.api.utils import instructor_groups
 
-	from match_schools.api.gradeflow import courses_of_instructor
-
-	courses = courses_of_instructor(instructor)
+	groups = set(instructor_groups(instructor))
+	courses = courses_taught(instructor)
 
 	students = 0
 	if groups:

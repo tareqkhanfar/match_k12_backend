@@ -31,6 +31,7 @@ STATUS_AR = {
 	"Absent": "غائب",
 	"Excused": "غائب بعذر",
 	"Leave": "غائب بعذر",
+	"Late": "متأخر",
 }
 
 # Statuses that do not count against a student anywhere.
@@ -104,11 +105,10 @@ def _assert_group_access(student_group: str, persona: str):
 	instructor = scope.get("instructor")
 	if not instructor:
 		frappe.throw(_("No instructor is linked to your account."), frappe.PermissionError)
-	assigned = frappe.db.exists(
-		"Student Group Instructor",
-		{"parent": student_group, "parenttype": "Student Group", "instructor": instructor},
-	)
-	if not assigned:
+	# The same sections `my_groups` offers. Checking the section's instructor
+	# table alone refused every section but the one the teacher is class
+	# teacher of — the screen listed four and threw on three.
+	if student_group not in instructor_groups(instructor, period=False):
 		frappe.throw(_("You are not assigned to this group."), frappe.PermissionError)
 
 
