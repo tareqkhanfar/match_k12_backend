@@ -56,7 +56,14 @@ TYPE_AR = {
 	"Announcement": "إعلان",
 	"General": "عام",
 }
-AUDIENCE_AR = {"School": "المدرسة كاملة", "Class": "شعبة محدّدة", "Student": "طالب محدّد"}
+AUDIENCE_AR = {
+	"School": "المدرسة كاملة",
+	"Class": "شعبة محدّدة",
+	"Grade": "صف كامل",
+	"Student": "طالب محدّد",
+	"Students": "طلاب محدّدون",
+	"Teachers": "المعلمون فقط",
+}
 
 
 def _my_groups(persona: str) -> list[str]:
@@ -81,6 +88,22 @@ def _my_groups(persona: str) -> list[str]:
 	)
 
 
+def _my_programs(persona: str) -> list[str]:
+	"""The grades of this caller's sections — what a «صف» audience matches."""
+	groups = _my_groups(persona)
+	if not groups:
+		return []
+	return sorted(
+		{
+			p
+			for p in frappe.get_all(
+				"Student Group", filters={"name": ["in", groups]}, pluck="program"
+			)
+			if p
+		}
+	)
+
+
 def _visible_filter(persona: str) -> list | None:
 	"""An `or_filters` list describing what this caller may see.
 
@@ -92,16 +115,25 @@ def _visible_filter(persona: str) -> list | None:
 		return None
 
 	groups = _my_groups(persona)
+	programs = _my_programs(persona)
 	clauses: list[list] = [["audience", "=", "School"]]
 	if groups:
 		clauses.append(["student_group", "in", groups])
+	if programs:
+		# A post to a whole grade, matched through the grade of the sections
+		# this caller belongs to. Filtering on `audience` too keeps a section
+		# post, which also carries its grade, from reaching the whole grade.
+		clauses.append(["program", "in", programs])
 
 	if persona in (ROLE_STUDENT, ROLE_PARENT):
 		students = resolve_scope(persona).get("students") or []
 		if students:
 			clauses.append(["student", "in", students])
+			# Addressed to a handful of students by name.
+			clauses.append(["MS Post Audience", "student", "in", students])
 	elif persona == ROLE_TEACHER:
-		# A teacher also sees what they wrote, wherever it was aimed.
+		# Staff-only posts, and what this teacher wrote wherever it was aimed.
+		clauses.append(["audience", "=", "Teachers"])
 		clauses.append(["author", "=", frappe.session.user])
 
 	return clauses
@@ -117,6 +149,15 @@ def _may_see(persona: str, doc) -> bool:
 		return False
 	if doc.audience == "School":
 		return True
+	if doc.audience == "Teachers":
+		return persona == ROLE_TEACHER
+	if doc.audience == "Grade":
+		return bool(doc.program) and doc.program in _my_programs(persona)
+	if doc.audience == "Students":
+		targets = {r.student for r in (doc.get("audience_students") or [])}
+		if persona == ROLE_TEACHER:
+			return False
+		return bool(targets & set(resolve_scope(persona).get("students") or []))
 	if doc.audience == "Class":
 		return doc.student_group in _my_groups(persona)
 	if doc.audience == "Student":
@@ -167,6 +208,11 @@ def _post_row(doc, persona: str, liked: set[str] | None = None) -> dict:
 		"student_name": (
 			frappe.db.get_value("Student", doc.student, "student_name") if doc.student else None
 		),
+		"program": doc.get("program"),
+		"audience_students": [
+			{"student": r.student, "student_name": r.student_name}
+			for r in (doc.get("audience_students") or [])
+		],
 		"author_name": doc.author_name,
 		"posted_on": str(doc.posted_on or ""),
 		"is_published": bool(cint(doc.is_published)),
@@ -335,6 +381,34 @@ def save_post(payload: str | dict = None, persona: str = None):
 	if not (doc.title or "").strip():
 		return fail(message_en="A title is required.", message_ar="عنوان المنشور مطلوب.")
 
+	# Several named students.
+	if "students" in data:
+		chosen = [s for s in dict.fromkeys(data.get("students") or []) if s]
+		doc.set("audience_students", [{"student": s} for s in chosen])
+
+	# Each audience keeps only the field it is addressed through. A section
+	# post that also carried its grade would otherwise match the grade's
+	# audience clause, and the counts on the channel tabs would disagree with
+	# the feed underneath them.
+	audience = doc.audience or "School"
+	if audience != "Class":
+		doc.student_group = None
+	if audience != "Grade":
+		doc.program = None
+	if audience != "Student":
+		doc.student = None
+	if audience != "Students":
+		doc.set("audience_students", [])
+
+	if audience == "Class" and not doc.student_group:
+		return fail(message_en="Choose a section.", message_ar="اختر الشعبة.")
+	if audience == "Grade" and not doc.program:
+		return fail(message_en="Choose a grade.", message_ar="اختر الصف.")
+	if audience == "Student" and not doc.student:
+		return fail(message_en="Choose a student.", message_ar="اختر الطالب.")
+	if audience == "Students" and not doc.get("audience_students"):
+		return fail(message_en="Choose at least one student.", message_ar="اختر طالباً واحداً على الأقل.")
+
 	# A teacher may only post to a class they teach, or about a student in one.
 	# Without this a teacher could address the whole school, or another
 	# teacher's class, from a request the screen never offers.
@@ -348,6 +422,21 @@ def save_post(payload: str | dict = None, persona: str = None):
 				{"student": doc.student, "parent": ["in", groups or [""]], "active": 1},
 			):
 				frappe.throw(_("This student is not in your class."), frappe.PermissionError)
+		if doc.audience == "Grade" and doc.program not in _my_programs(persona):
+			frappe.throw(_("هذا الصف ليس من صفوفك."), frappe.PermissionError)
+		if doc.audience == "Students":
+			from match_schools.api.utils import instructor_teaches_student
+
+			instructor = resolve_scope(persona).get("instructor")
+			strangers = [
+				r.student
+				for r in doc.get("audience_students") or []
+				if not instructor_teaches_student(instructor, r.student)
+			]
+			if strangers:
+				frappe.throw(
+					_("بعض هؤلاء الطلاب ليسوا في شعبك."), frappe.PermissionError
+				)
 		if doc.audience == "School":
 			frappe.throw(
 				_("Only the administration posts to the whole school."),

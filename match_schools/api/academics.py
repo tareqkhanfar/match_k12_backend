@@ -91,6 +91,34 @@ def list_classes(
 			{"id": i.instructor, "name": i.instructor_name} for i in instructors
 		]
 		g["subjects"] = _courses_of_program(g["program"])
+
+	# The subjects each section is actually taught, from its timetable and
+	# lessons — and for a teacher, only the ones they teach there. The screens
+	# that open one subject in one section offer these, not the whole
+	# programme's list.
+	names = [g["name"] for g in groups]
+	instructor = resolve_scope(persona).get("instructor") if persona == ROLE_TEACHER else None
+	taught: dict[str, set] = {}
+	slot_filters = {"student_group": ["in", names or [""]], "active": 1}
+	lesson_filters = {"student_group": ["in", names or [""]], "docstatus": ["<", 2]}
+	if instructor:
+		slot_filters["instructor"] = instructor
+		lesson_filters["instructor"] = instructor
+	for r in frappe.get_all(
+		"MS Timetable Slot", filters=slot_filters, fields=["student_group", "course"],
+		group_by="student_group, course", limit_page_length=0,
+	):
+		if r.course:
+			taught.setdefault(r.student_group, set()).add(r.course)
+	# Distinct pairs only: a year of lessons is tens of thousands of rows.
+	for r in frappe.get_all(
+		"Course Schedule", filters=lesson_filters, fields=["student_group", "course"],
+		group_by="student_group, course", limit_page_length=0,
+	):
+		if r.course:
+			taught.setdefault(r.student_group, set()).add(r.course)
+	for g in groups:
+		g["taught_subjects"] = sorted(taught.get(g["name"], set()))
 	return groups
 
 

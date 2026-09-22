@@ -266,10 +266,27 @@ def save_activity(payload: str | dict, persona: str = None):
 		else frappe.new_doc("MS Activity")
 	)
 
-	# A teacher may run an activity but not decide the school's audience rules.
+	# A teacher runs activities for the classes they teach: they supervise it
+	# themselves, aim it at one of their sections or grades, and may change
+	# only the activities they run. The whole school is the office's call.
 	if persona == ROLE_TEACHER:
-		scope = resolve_scope(persona)
-		data["supervisor"] = data.get("supervisor") or scope.get("instructor")
+		instructor = resolve_scope(persona).get("instructor")
+		if not instructor:
+			frappe.throw(_("No instructor is linked to your account."), frappe.PermissionError)
+		if activity_id and doc.supervisor != instructor and doc.owner != frappe.session.user:
+			frappe.throw(_("هذا النشاط ليس من أنشطتك."), frappe.PermissionError)
+		data["supervisor"] = instructor
+		groups, programs = _teacher_reach(instructor)
+		audience = data.get("target_audience") or doc.target_audience or "Student Group"
+		if audience == "Student Group":
+			if data.get("student_group") not in groups:
+				frappe.throw(_("اختر إحدى شعبك."), frappe.PermissionError)
+		elif audience == "Program":
+			if data.get("program") not in programs:
+				frappe.throw(_("اختر أحد صفوفك."), frappe.PermissionError)
+		else:
+			frappe.throw(_("نشاط المدرسة كاملة تنشره الإدارة."), frappe.PermissionError)
+		data["target_audience"] = audience
 
 	for field in (
 		"title", "activity_type", "status", "start_date", "end_date", "from_time",
@@ -590,7 +607,37 @@ def mark_attendance(entries: str | list, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def form_options(persona: str = None):
-	"""Dropdown data for the activity form."""
+	"""Dropdown data for the activity form.
+
+	A teacher is offered their own sections and grades, and themselves as the
+	supervisor — the server accepts nothing else from them anyway.
+	"""
+	if persona == ROLE_TEACHER:
+		instructor = resolve_scope(persona).get("instructor")
+		groups, programs = _teacher_reach(instructor)
+		labels = dict(
+			frappe.get_all(
+				"Student Group",
+				filters={"name": ["in", groups or [""]]},
+				fields=["name", "student_group_name"],
+				as_list=True,
+			)
+		)
+		return {
+			"types": [{"code": c, "label": l} for c, l in TYPE_AR.items()],
+			"statuses": [{"code": c, "label": l} for c, l in STATUS_AR.items()],
+			"programs": programs,
+			"groups": [{"id": g, "name": labels.get(g) or g} for g in groups],
+			"supervisors": [
+				{
+					"id": instructor,
+					"name": frappe.db.get_value("Instructor", instructor, "instructor_name") or instructor,
+				}
+			]
+			if instructor
+			else [],
+			"audiences": ["Student Group", "Program"],
+		}
 	return {
 		"types": [{"code": c, "label": l} for c, l in TYPE_AR.items()],
 		"statuses": [{"code": c, "label": l} for c, l in STATUS_AR.items()],
@@ -616,4 +663,22 @@ def form_options(persona: str = None):
 				limit=200,
 			)
 		],
+		"audiences": ["All", "Program", "Student Group"],
 	}
+
+
+def _teacher_reach(instructor: str | None) -> tuple[list[str], list[str]]:
+	"""The sections a teacher teaches, and the grades those sections are in."""
+	from match_schools.api.utils import instructor_groups
+
+	groups = instructor_groups(instructor)
+	programs = sorted(
+		{
+			p
+			for p in frappe.get_all(
+				"Student Group", filters={"name": ["in", groups or [""]]}, pluck="program"
+			)
+			if p
+		}
+	)
+	return groups, programs

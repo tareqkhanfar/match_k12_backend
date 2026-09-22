@@ -16,6 +16,7 @@
   "course",
   "student",
   "program",
+  "audience_students",
   "section_body",
   "body",
   "photos",
@@ -63,7 +64,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Audience",
-   "options": "School\nClass\nStudent",
+   "options": "School\nClass\nGrade\nStudent\nStudents\nTeachers",
    "default": "Class",
    "reqd": 1
   },
@@ -84,6 +85,13 @@
    "fieldtype": "Link",
    "label": "Grade",
    "options": "Program"
+  },
+  {
+   "fieldname": "audience_students",
+   "fieldtype": "Table",
+   "label": "الطلاب المستهدفون",
+   "options": "MS Post Audience",
+   "depends_on": "eval:doc.audience=='Students'"
   },
   {
    "fieldname": "section_body",

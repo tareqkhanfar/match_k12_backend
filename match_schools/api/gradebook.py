@@ -2397,3 +2397,103 @@ def transfer_assignment_marks(
 		"message_en": f"Carried {len(marks)} mark(s) into {component_name}.",
 		"message_ar": f"تم ترحيل علامات {len(marks)} طالباً إلى «{component_name}»{note}.",
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def subject_overview(student_group: str, course: str, academic_term: str = None, persona: str = None):
+	"""One subject in one section: every student, every assessment, the result.
+
+	What a teacher reads when they ask "how is my class doing in my subject":
+	the marks of each component side by side, the subject mark they add up to,
+	and where the class stands — average, best, weakest, who is at risk and
+	who has not been marked yet. A teacher sees only a subject they teach in
+	that section; draft marks are theirs, so they are included.
+	"""
+	from match_schools.api.gradeflow import assert_teacher_teaches
+
+	assert_teacher_teaches(persona, student_group, course)
+
+	group = frappe.db.get_value(
+		"Student Group", student_group, ["academic_year", "academic_term"], as_dict=True
+	) or frappe._dict()
+	academic_year = group.academic_year or get_default_academic_year()
+	academic_term = academic_term or group.academic_term
+
+	roster = frappe.get_all(
+		"Student Group Student",
+		filters={"parent": student_group, "parenttype": "Student Group", "active": 1},
+		fields=["student", "student_name"],
+		order_by="group_roll_number, student_name",
+	)
+	filters = {
+		"student": ["in", [r.student for r in roster] or [""]],
+		"course": course,
+		"academic_year": academic_year,
+	}
+	if academic_term:
+		filters["academic_term"] = academic_term
+	entries = frappe.get_all(
+		"MS Gradebook Entry",
+		filters=filters,
+		fields=[
+			"student", "component_name", "component_type", "score", "max_score",
+			"weight", "is_bonus", "course", "entry_date", "ms_is_published",
+		],
+		order_by="entry_date, creation",
+		limit_page_length=0,
+	)
+
+	# Columns in the order they were first marked.
+	components: list[dict] = []
+	seen: set[str] = set()
+	for e in entries:
+		name = e.component_name or "—"
+		if name not in seen:
+			seen.add(name)
+			components.append({"name": name, "max": flt(e.max_score), "weight": flt(e.weight)})
+
+	by_student: dict[str, list] = {}
+	for e in entries:
+		by_student.setdefault(e.student, []).append(e)
+
+	rows = []
+	for r in roster:
+		mine = by_student.get(r.student, [])
+		marks = {
+			(e.component_name or "—"): {
+				"score": flt(e.score),
+				"max": flt(e.max_score),
+				"published": bool(cint(e.ms_is_published)),
+			}
+			for e in mine
+		}
+		computed = _compute_subject_grade(mine) if mine else {"final": 0.0, **grade_for(0.0)}
+		rows.append({
+			"student": r.student,
+			"student_name": r.student_name,
+			"entries": len(mine),
+			"marks": marks,
+			**computed,
+		})
+
+	graded = [r for r in rows if r["entries"]]
+	finals = [flt(r["final"]) for r in graded]
+	return {
+		"student_group": student_group,
+		"course": course,
+		"academic_year": academic_year,
+		"academic_term": academic_term,
+		"components": components,
+		"rows": rows,
+		"stats": {
+			"students": len(rows),
+			"graded": len(graded),
+			"unmarked": len(rows) - len(graded),
+			"average": round(sum(finals) / len(finals), 1) if finals else 0.0,
+			"highest": round(max(finals), 1) if finals else 0.0,
+			"lowest": round(min(finals), 1) if finals else 0.0,
+			"passing": sum(1 for f in finals if f >= 50),
+			"at_risk": sum(1 for f in finals if f < 50),
+		},
+	}
