@@ -77,6 +77,31 @@ def _teachers_may_fill(category: str) -> bool:
 	return True if stored in (None, "") else bool(cint(stored))
 
 
+def _design_key(category: str) -> str:
+	return f"ms_forms_teachers_may_design:{category}"
+
+
+def _teachers_may_design(category: str) -> bool:
+	"""Whether teachers may add forms to this file and edit its forms.
+
+	Off unless the administration turns it on: a form's design decides what
+	every colleague records, so it is the office's until it says otherwise.
+	Deleting a form stays with the office either way.
+	"""
+	return bool(cint(frappe.db.get_default(_design_key(category)) or 0))
+
+
+def _assert_may_design(persona: str, category: str):
+	if persona in BACK_OFFICE:
+		return
+	if persona == ROLE_TEACHER and category in CATEGORIES and _teachers_may_design(category):
+		return
+	frappe.throw(
+		"تصميم نماذج هذا القسم مقصور على الإدارة. يمكن للإدارة السماح للمعلمين من إعدادات القسم.",
+		frappe.PermissionError,
+	)
+
+
 def _category(category: str) -> str:
 	if category not in CATEGORIES:
 		frappe.throw(frappe._("Unknown form category."), frappe.ValidationError)
@@ -131,6 +156,7 @@ def categories(persona: str = None):
 				"label": label,
 				"forms": counts.get(key, 0),
 				"teachersMayFill": _teachers_may_fill(key),
+				"teachersMayDesign": _teachers_may_design(key),
 			}
 			for key, label in CATEGORIES.items()
 		],
@@ -144,7 +170,8 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 	"""The forms in one file. Teachers see only the ones in use."""
 	_category(category)
 	filters = {"category": category}
-	if persona == ROLE_TEACHER or not cint(include_inactive):
+	may_design = persona != ROLE_TEACHER or _teachers_may_design(category)
+	if not may_design or not cint(include_inactive):
 		filters["is_active"] = 1
 	rows = frappe.get_all(
 		"MS Form Template",
@@ -182,6 +209,7 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 		"category": category,
 		"label": CATEGORIES[category],
 		"teachersMayFill": _teachers_may_fill(category),
+		"teachersMayDesign": _teachers_may_design(category),
 		"templates": [
 			{
 				"name": r.name,
@@ -227,7 +255,7 @@ def _clean_fieldname(label: str, taken: set[str], given: str = "") -> str:
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def save_template(payload: str | dict, persona: str = None):
 	"""Create or update one form's design.
 
@@ -239,12 +267,16 @@ def save_template(payload: str | dict, persona: str = None):
 	if not data.get("title"):
 		return fail("A form needs a name.", "اكتب اسم النموذج.")
 	category = _category(data.get("category"))
+	_assert_may_design(persona, category)
 
 	doc = (
 		frappe.get_doc("MS Form Template", data["name"])
 		if data.get("name")
 		else frappe.new_doc("MS Form Template")
 	)
+	if not doc.is_new():
+		# Moving a form out of the file it was allowed in is editing that file.
+		_assert_may_design(persona, doc.category)
 	doc.title = data["title"]
 	doc.category = category
 	doc.description = data.get("description")
@@ -299,9 +331,10 @@ def delete_template(template: str, persona: str = None):
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def duplicate_template(template: str, title: str = None, persona: str = None):
 	doc = frappe.get_doc("MS Form Template", template)
+	_assert_may_design(persona, doc.category)
 	copy = frappe.copy_doc(doc)
 	copy.title = title or f"{doc.title} (نسخة)"
 	copy.created_by_user = frappe.session.user
@@ -431,9 +464,11 @@ def _may_see(persona: str, student: str) -> bool:
 
 
 @frappe.whitelist()
-@ms_endpoint(*BACK_OFFICE)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def template_subjects(template: str, persona: str = None):
-	"""The students a form applies to, with their sections."""
+	"""The students a form applies to, with their sections. A teacher sees
+	the ones they teach."""
+	_assert_may_design(persona, frappe.db.get_value("MS Form Template", template, "category"))
 	rows = frappe.get_all(
 		"MS Form Subject",
 		filters={"parent": template, "parenttype": "MS Form Template"},
@@ -441,6 +476,9 @@ def template_subjects(template: str, persona: str = None):
 		order_by="idx",
 		limit_page_length=0,
 	)
+	if persona == ROLE_TEACHER:
+		mine = set(_teacher_students(persona))
+		rows = [r for r in rows if r.student in mine]
 	groups: dict[str, str] = {}
 	for r in frappe.get_all(
 		"Student Group Student",
@@ -483,7 +521,7 @@ def template_subjects(template: str, persona: str = None):
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def set_template_subjects(
 	template: str,
 	add: str | list = None,
@@ -494,6 +532,7 @@ def set_template_subjects(
 	"""Add or remove the students a form applies to — one by one, or a whole
 	section at once. A student removed keeps the forms already filed on them."""
 	doc = frappe.get_doc("MS Form Template", template)
+	_assert_may_design(persona, doc.category)
 	current = [r.student for r in doc.subjects_table]
 	adding = [x for x in (parse_json_arg(add) or []) if x]
 	if add_group:
@@ -504,6 +543,12 @@ def set_template_subjects(
 			limit_page_length=0,
 		)
 	removing = set(parse_json_arg(remove) or [])
+	if persona == ROLE_TEACHER:
+		# A teacher adds and removes only the pupils they teach — a colleague's
+		# students on the same form are left as they are.
+		mine = set(_teacher_students(persona))
+		adding = [x for x in adding if x in mine]
+		removing &= mine
 	added = 0
 	for st in dict.fromkeys(adding):
 		if st not in current and st not in removing and frappe.db.exists("Student", st):
@@ -838,7 +883,7 @@ def print_entry(entry: str, persona: str = None):
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
 def preview_print(template: str, html: str = None, css: str = None, persona: str = None):
 	"""What a print design looks like, before it is saved or filled.
 
@@ -847,6 +892,7 @@ def preview_print(template: str, html: str = None, css: str = None, persona: str
 	than a skeleton of empty rows.
 	"""
 	doc = frappe.get_doc("MS Form Template", template)
+	_assert_may_design(persona, doc.category)
 	if html is not None:
 		doc.print_template = html
 	if css is not None:
@@ -891,12 +937,25 @@ def preview_print(template: str, html: str = None, css: str = None, persona: str
 
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(*BACK_OFFICE)
-def set_category_settings(category: str, teachers_may_fill: int = 1, persona: str = None):
-	"""Who may file forms in one file. The design stays with the back office."""
+def set_category_settings(
+	category: str,
+	teachers_may_fill: int = None,
+	teachers_may_design: int = None,
+	persona: str = None,
+):
+	"""Who may file forms in one file, and who may add and edit its forms.
+	A setting left out is left as it is."""
 	_category(category)
-	frappe.db.set_default(_teachers_key(category), "1" if cint(teachers_may_fill) else "0")
+	if teachers_may_fill is not None:
+		frappe.db.set_default(_teachers_key(category), "1" if cint(teachers_may_fill) else "0")
+	if teachers_may_design is not None:
+		frappe.db.set_default(_design_key(category), "1" if cint(teachers_may_design) else "0")
 	frappe.db.commit()
-	return {"category": category, "teachersMayFill": _teachers_may_fill(category)}
+	return {
+		"category": category,
+		"teachersMayFill": _teachers_may_fill(category),
+		"teachersMayDesign": _teachers_may_design(category),
+	}
 
 
 # --- Converting between the fields and the print design -----------------------
@@ -987,14 +1046,19 @@ def _design_from_fields(fields: list[dict]) -> str:
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
-def design_from_fields(fields: str | list = None, template: str = None, persona: str = None):
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
+def design_from_fields(
+	fields: str | list = None, template: str = None, category: str = None, persona: str = None
+):
 	"""«تحويل الحقول إلى تصميم طباعة»: a ready print design from the fields.
 
 	Takes the fields as they stand in the designer (saved or not), and returns
 	a design plus a starting CSS. Nothing is saved: the designer shows it, and
 	the school edits and saves it like any design.
 	"""
+	if template:
+		category = frappe.db.get_value("MS Form Template", template, "category")
+	_assert_may_design(persona, category)
 	rows = parse_json_arg(fields)
 	if rows is None and template:
 		rows = _field_rows(frappe.get_doc("MS Form Template", template))
@@ -1005,8 +1069,10 @@ def design_from_fields(fields: str | list = None, template: str = None, persona:
 
 
 @frappe.whitelist(methods=["POST"])
-@ms_endpoint(*BACK_OFFICE)
-def fields_from_design(html: str, fields: str | list = None, persona: str = None):
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
+def fields_from_design(
+	html: str, fields: str | list = None, category: str = None, persona: str = None
+):
 	"""«تحويل التصميم إلى حقول»: the fields a design places, in its order.
 
 	Reads `{{ field("…", "type", "a|b") }}` and `{{ section("…") }}`. A field
@@ -1014,6 +1080,7 @@ def fields_from_design(html: str, fields: str | list = None, persona: str = None
 	already filed under it stay attached; `{{ values.key }}` keeps an existing
 	field by key. A label ending in `*` is a required field.
 	"""
+	_assert_may_design(persona, category)
 	current = [r for r in (parse_json_arg(fields) or []) if (r.get("label") or "").strip()]
 	by_label = {r["label"].strip(): r for r in current}
 	by_name = {r.get("fieldname"): r for r in current if r.get("fieldname")}
