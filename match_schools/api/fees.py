@@ -616,7 +616,10 @@ def statement(student: str = None, persona: str = None):
 		for i in mine:
 			amount = flt(i.grand_total)
 			label = "، ".join(items.get(i.name, [])[:3])
-			period = " — ".join(x for x in (i.ms_academic_term, i.ms_academic_year) if x)
+			# Term names often carry their year already ("2025-2026 (الفصل
+			# الثاني)"); naming the year twice pushes the due date off the line.
+			term, year = i.ms_academic_term or "", i.ms_academic_year or ""
+			period = term if (term and year and year in term) else " — ".join(x for x in (term, year) if x)
 			if amount >= 0:
 				events.append((str(i.posting_date or ""), 0, {
 					"date": str(i.posting_date or ""),
