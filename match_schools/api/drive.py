@@ -24,6 +24,7 @@ from match_schools.api.utils import (
 	ROLE_TEACHER,
 	apply_period,
 	fail,
+	instructor_groups,
 	ms_endpoint,
 	resolve_scope,
 )
@@ -566,9 +567,11 @@ def set_sharing(payload: str | dict = None, persona: str = None):
 
 	group = data.get("student_group")
 	if group and persona == ROLE_TEACHER:
-		# A teacher publishes to their own classes only.
-		mine = resolve_scope(persona).get("student_groups") or []
-		if mine and group not in mine:
+		# A teacher publishes to their own classes only. The scope carries no
+		# «student_groups», so reading it there left this check always empty
+		# and a file could be published to any class in the school.
+		mine = instructor_groups(resolve_scope(persona).get("instructor"))
+		if group not in mine:
 			frappe.throw(_("This class is not yours."), frappe.PermissionError)
 
 	doc.shared_with_staff = 1 if cint(data.get("shared_with_staff")) else 0
