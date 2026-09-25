@@ -59,6 +59,27 @@ def _assert_can_see(persona: str, student: str):
 		frappe.throw(_("You are not allowed to view this student."), frappe.PermissionError)
 
 
+def _may_change(persona: str, reported_by: str | None) -> bool:
+	"""The office may correct any behaviour record; a teacher only their own.
+
+	Without this any teacher could rewrite or delete what a colleague recorded
+	about any pupil in the school.
+	"""
+	if persona in BACK_OFFICE:
+		return True
+	if persona != ROLE_TEACHER:
+		return False
+	instructor = resolve_scope(persona).get("instructor")
+	return bool(instructor) and reported_by == instructor
+
+
+def _assert_may_change(persona: str, doc) -> None:
+	if not _may_change(persona, doc.get("reported_by")):
+		frappe.throw(
+			_("Only the teacher who recorded this may change it."), frappe.PermissionError
+		)
+
+
 # --- Health record ---------------------------------------------------------
 
 
@@ -167,6 +188,8 @@ def save_health_visit(payload: str | dict, persona: str = None):
 	data = parse_json_arg(payload) or {}
 	if not data.get("student"):
 		return fail(message_en="Student is required.", message_ar="الطالب مطلوب.")
+	# A teacher records behaviour for their own pupils only.
+	_assert_can_see(persona, data["student"])
 
 	fields = {
 		k: data.get(k)
@@ -272,7 +295,8 @@ def list_behaviour(
 	rows = frappe.db.sql(
 		f"""
 		SELECT name, student, student_name, record_date, record_type, points,
-			category, student_group, description, action_taken, parent_notified
+			category, student_group, description, action_taken, parent_notified,
+			reported_by
 		FROM `tabMS Behaviour Record`
 		WHERE {where}
 		ORDER BY {order_by}
@@ -310,6 +334,10 @@ def list_behaviour(
 				"description": r.description,
 				"action_taken": r.action_taken,
 				"parent_notified": bool(r.parent_notified),
+				"reported_by": r.reported_by,
+				# Said per row so a screen offers edit and delete only where
+				# save_behaviour and delete_behaviour will allow them.
+				"can_edit": _may_change(persona, r.reported_by),
 			}
 			for r in rows
 		],
@@ -331,6 +359,8 @@ def save_behaviour(payload: str | dict, persona: str = None):
 	data = parse_json_arg(payload) or {}
 	if not data.get("student"):
 		return fail(message_en="Student is required.", message_ar="الطالب مطلوب.")
+	# A teacher records behaviour for their own pupils only.
+	_assert_can_see(persona, data["student"])
 
 	fields = {
 		k: data.get(k)
@@ -351,6 +381,7 @@ def save_behaviour(payload: str | dict, persona: str = None):
 	record_id = data.get("id") or data.get("name")
 	if record_id:
 		doc = frappe.get_doc("MS Behaviour Record", record_id)
+		_assert_may_change(persona, doc)
 		doc.update(fields)
 		doc.save()
 		msg_en, msg_ar = "Behaviour record updated.", "تم تحديث السجل السلوكي."
@@ -372,6 +403,7 @@ def save_behaviour(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def delete_behaviour(record: str, persona: str = None):
+	_assert_may_change(persona, frappe.get_doc("MS Behaviour Record", record))
 	frappe.delete_doc("MS Behaviour Record", record)
 	frappe.db.commit()
 	return {
