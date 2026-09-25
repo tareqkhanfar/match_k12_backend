@@ -404,7 +404,10 @@ def save_behaviour(payload: str | dict, persona: str = None):
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def delete_behaviour(record: str, persona: str = None):
 	_assert_may_change(persona, frappe.get_doc("MS Behaviour Record", record))
-	frappe.delete_doc("MS Behaviour Record", record)
+	# The rule is the one above (the office, or the teacher who recorded it);
+	# the Teacher role has no delete permission on the doctype, so without
+	# this a teacher could never remove even their own record.
+	frappe.delete_doc("MS Behaviour Record", record, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,
