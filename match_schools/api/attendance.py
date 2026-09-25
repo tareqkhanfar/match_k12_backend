@@ -31,8 +31,9 @@ STATUS_AR = {
 	"Absent": "غائب",
 	"Excused": "غائب بعذر",
 	"Leave": "غائب بعذر",
-	"Late": "متأخر",
 }
+# There is no "Late": Student Attendance.status cannot hold it, so accepting it
+# here only turned a clean "invalid status" into a raw validation error.
 
 # Statuses that do not count against a student anywhere.
 EXCUSED = ("Excused", "Leave")
