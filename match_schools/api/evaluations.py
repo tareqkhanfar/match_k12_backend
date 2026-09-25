@@ -224,6 +224,11 @@ def list_forms(form_type: str = None, student_group: str = None, persona: str = 
 				"criteria_count": sizes.get(r.name, 0),
 				"entry_count": counts.get(r.name, 0),
 				"modified": str(r.modified or ""),
+				# The office edits any form; a teacher only the ones they made,
+				# which is what save_form and delete_form enforce. Said per row
+				# so a screen does not offer a button the server will refuse.
+				"can_edit": persona in BACK_OFFICE
+				or r.created_by_user == frappe.session.user,
 			}
 			for r in rows
 		],
@@ -426,7 +431,8 @@ def grid(form: str = None, student_group: str = None, course: str = None, person
 		limit_page_length=0,
 	)
 	if not roster:
-		return {"form": payload, "students": [], "rows": {}}
+		return {"form": payload, "student_group": student_group, "course": course,
+		        "students": [], "answers": {}}
 
 	students = [r.student for r in roster]
 	entries = frappe.get_all(
@@ -502,7 +508,10 @@ def _score_for(form_doc, criterion, value_label: str, raw_score) -> float:
 				return flt(option.score)
 		return 0.0
 	if form_doc.scale_type == "علامة رقمية":
-		value = flt(raw_score)
+		# The mark arrives as the answer's value (what the teacher typed);
+		# `score` is honoured when a client sends it. Reading only `score`
+		# made every numeric form total zero.
+		value = flt(raw_score if raw_score not in (None, "") else value_label)
 		ceiling = flt(criterion.max_score)
 		return min(value, ceiling) if ceiling else value
 	return 0.0
