@@ -290,7 +290,7 @@ def my_submissions(academic_term: str = None, persona: str = None):
 		instructor = scope.get("instructor")
 		if not instructor:
 			return {"rows": [], "academic_term": academic_term}
-		pairs = _teacher_class_courses(instructor)
+		pairs = _teacher_class_courses(instructor, academic_term)
 	else:
 		pairs = _all_class_courses(academic_term)
 
@@ -335,8 +335,14 @@ def my_submissions(academic_term: str = None, persona: str = None):
 	return {"rows": rows, "academic_term": academic_term}
 
 
-def _teacher_class_courses(instructor: str) -> list[tuple[str, str]]:
-	"""Every (class, subject) this teacher is responsible for."""
+def _teacher_class_courses(instructor: str, academic_term: str | None = None) -> list[tuple[str, str]]:
+	"""Every (class, subject) this teacher takes, in the chosen year.
+
+	The same pairing teacher_teaches_in_group enforces: the timetable, plus a
+	per-subject group that names the teacher. Being listed on a section is not
+	taking every subject in it — this list used to offer a maths teacher the
+	physics and Arabic of her sections, and every year's classes at once.
+	"""
 	pairs = {
 		(r.student_group, r.course)
 		for r in frappe.get_all(
@@ -356,17 +362,23 @@ def _teacher_class_courses(instructor: str) -> list[tuple[str, str]]:
 		course = frappe.db.get_value("Student Group", r.parent, "course")
 		if course:
 			pairs.add((r.parent, course))
-		else:
-			pairs |= {
-				(r.parent, cs.course)
-				for cs in frappe.get_all(
-					"Course Schedule",
-					filters={"student_group": r.parent},
-					fields=["course"],
-					limit=200,
-				)
-				if cs.course
-			}
+
+	# Only the classes of the year being worked on.
+	year = (
+		frappe.db.get_value("Academic Term", academic_term, "academic_year")
+		if academic_term
+		else None
+	) or get_default_academic_year()
+	if year and pairs:
+		years = {
+			g.name: g.academic_year
+			for g in frappe.get_all(
+				"Student Group",
+				filters={"name": ["in", list({p[0] for p in pairs})]},
+				fields=["name", "academic_year"],
+			)
+		}
+		pairs = {p for p in pairs if not years.get(p[0]) or years.get(p[0]) == year}
 	return sorted(pairs)
 
 
@@ -413,6 +425,9 @@ def submit_term(
 	scope = resolve_scope(persona)
 	if persona == ROLE_TEACHER:
 		assert_teacher_owns_course(persona, course)
+		# The subject in THAT class: a teacher listed on a section could
+		# otherwise hand in a colleague's marks for another subject.
+		assert_teacher_teaches(persona, student_group, course)
 
 	academic_term = academic_term or get_default_academic_term()
 	roster = frappe.get_all(
