@@ -112,6 +112,24 @@ def _visible_filters(persona: str, scope: dict, student: str = None) -> dict | N
 	}
 
 
+def _may_change(persona: str, instructor: str | None, scope: dict | None = None) -> bool:
+	"""The office may change any resource; a teacher only what they published."""
+	if persona in BACK_OFFICE:
+		return True
+	if persona != ROLE_TEACHER:
+		return False
+	mine = (scope or resolve_scope(persona)).get("instructor")
+	return bool(mine) and instructor == mine
+
+
+def _assert_may_change(persona: str, resource: str) -> None:
+	instructor = frappe.db.get_value("MS Resource", resource, "instructor")
+	if not _may_change(persona, instructor):
+		frappe.throw(
+			_("Only the teacher who published this may change it."), frappe.PermissionError
+		)
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def list_resources(
@@ -183,6 +201,9 @@ def list_resources(
 				"published_on": str(r.published_on or ""),
 				"views": cint(r.view_count),
 				"files": files.get(r.name, []),
+				# Said per row so a screen offers edit and delete only where
+				# save_resource and delete_resource will allow them.
+				"can_edit": _may_change(persona, r.instructor, scope),
 			}
 		)
 
@@ -215,11 +236,16 @@ def save_resource(payload: str | dict, persona: str = None):
 			message_ar="العنوان والمادة مطلوبان.",
 		)
 
-	# A teacher may only publish under a subject they teach.
+	# A teacher may only publish under a subject they teach — in that class,
+	# when the resource is aimed at one — and only edit what they published.
 	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import assert_teacher_owns_course
+		from match_schools.api.gradeflow import assert_teacher_owns_course, assert_teacher_teaches
 
 		assert_teacher_owns_course(persona, data["course"])
+		if data.get("student_group"):
+			assert_teacher_teaches(persona, data["student_group"], data["course"])
+	if data.get("id"):
+		_assert_may_change(persona, data["id"])
 
 	doc = (
 		frappe.get_doc("MS Resource", data["id"])
@@ -266,11 +292,8 @@ def save_resource(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def delete_resource(resource: str, persona: str = None):
-	course = frappe.db.get_value("MS Resource", resource, "course")
-	if persona == ROLE_TEACHER:
-		from match_schools.api.gradeflow import assert_teacher_owns_course
-
-		assert_teacher_owns_course(persona, course)
+	# Teaching the subject is not enough: a colleague's material is theirs.
+	_assert_may_change(persona, resource)
 
 	frappe.delete_doc("MS Resource", resource, ignore_permissions=True)
 	frappe.db.commit()
