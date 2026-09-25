@@ -74,12 +74,20 @@ def _is_open(quiz) -> bool:
 	return True
 
 
-def _assert_teacher_owns(persona: str, course: str):
+def _assert_teacher_owns(persona: str, course: str, student_group: str | None = None):
+	"""A teacher works only on quizzes of a subject they take in that class.
+
+	The subject alone is not enough: a maths teacher of 12-أ is not the maths
+	teacher of 12-ب, and being listed on a section does not make every
+	subject of it theirs.
+	"""
 	if persona in BACK_OFFICE:
 		return
-	from match_schools.api.gradeflow import assert_teacher_owns_course
+	from match_schools.api.gradeflow import assert_teacher_owns_course, assert_teacher_teaches
 
 	assert_teacher_owns_course(persona, course)
+	if student_group:
+		assert_teacher_teaches(persona, student_group, course)
 
 
 @frappe.whitelist()
@@ -232,10 +240,13 @@ def save_quiz(payload: str | dict, persona: str = None):
 				message_ar="العنوان والمادة والشعبة مطلوبة.",
 			)
 
-	_assert_teacher_owns(persona, data["course"])
+	_assert_teacher_owns(persona, data["course"], data["student_group"])
 
 	quiz_id = data.get("id")
 	doc = frappe.get_doc("MS Quiz", quiz_id) if quiz_id else frappe.new_doc("MS Quiz")
+	# Editing: the quiz as it stands must be theirs too, not only what it becomes.
+	if quiz_id:
+		_assert_teacher_owns(persona, doc.course, doc.student_group)
 
 	# Editing a live quiz would change the paper under students already sitting it.
 	if quiz_id and doc.status == "Published" and data.get("questions") is not None:
@@ -303,7 +314,7 @@ def save_quiz(payload: str | dict, persona: str = None):
 def get_quiz(quiz: str, persona: str = None):
 	"""The full quiz including answers — staff only."""
 	doc = frappe.get_doc("MS Quiz", quiz)
-	_assert_teacher_owns(persona, doc.course)
+	_assert_teacher_owns(persona, doc.course, doc.student_group)
 
 	return {
 		"id": doc.name,
@@ -571,7 +582,7 @@ def submit_attempt(attempt: str, answers: str | list, persona: str = None):
 def quiz_results(quiz: str, persona: str = None):
 	"""Everyone's attempts, plus how each question performed."""
 	doc = frappe.get_doc("MS Quiz", quiz)
-	_assert_teacher_owns(persona, doc.course)
+	_assert_teacher_owns(persona, doc.course, doc.student_group)
 
 	attempts = frappe.get_all(
 		"MS Quiz Attempt",
@@ -674,7 +685,7 @@ def review_attempt(attempt: str, marks: str | list = None, persona: str = None):
 	"""
 	doc = frappe.get_doc("MS Quiz Attempt", attempt)
 	quiz = frappe.get_doc("MS Quiz", doc.quiz)
-	_assert_teacher_owns(persona, quiz.course)
+	_assert_teacher_owns(persona, quiz.course, quiz.student_group)
 
 	updates = {
 		cint(m.get("idx")): flt(m.get("marks_awarded"))
@@ -726,7 +737,7 @@ def get_attempt(attempt: str, persona: str = None):
 			quiz.show_answers_after == "After Close" and not _is_open(quiz)
 		)
 	else:
-		_assert_teacher_owns(persona, quiz.course)
+		_assert_teacher_owns(persona, quiz.course, quiz.student_group)
 		reveal = True
 
 	return {

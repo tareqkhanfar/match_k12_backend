@@ -268,6 +268,13 @@ def _assert_may_schedule(persona: str, student_group: str, course: str):
 			_("You can only schedule exams for your own classes."), frappe.PermissionError
 		)
 
+	# The subject in THAT class, as the timetable pairs them: being listed on a
+	# section is not teaching every subject in it. Without this a maths
+	# teacher on 12-أ could put a physics exam on the physics teacher's class.
+	from match_schools.api.gradeflow import assert_teacher_teaches
+
+	assert_teacher_teaches(persona, student_group, course)
+
 
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
