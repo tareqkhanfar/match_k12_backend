@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime, today
 
 from match_schools.api.utils import (
+	BACK_OFFICE,
 	apply_period,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -310,6 +311,14 @@ def save_announcement(payload: str | dict, persona: str = None):
 	announcement_id = data.get("id") or data.get("name")
 	if announcement_id:
 		doc = frappe.get_doc("MS Announcement", announcement_id)
+		# The Teacher role may write the doctype (to post), which let any
+		# teacher rewrite any announcement by id — the office's included.
+		# The office edits all; a teacher only what they posted.
+		if persona not in BACK_OFFICE and doc.owner != frappe.session.user:
+			frappe.throw(
+				_("Only the office or the author may edit this announcement."),
+				frappe.PermissionError,
+			)
 		doc.update(fields)
 		doc.save()
 		msg_en, msg_ar = "Announcement updated.", "تم تحديث الإعلان."
