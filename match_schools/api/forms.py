@@ -45,6 +45,15 @@ CATEGORIES = {
 	"school": "المدرسة",
 }
 
+# Categories whose forms are filled for any student, chosen when filling: a
+# school letter (a warning, a transfer certificate) is not kept for a fixed
+# list of children the way a nursing plan is.
+OPEN_CATEGORIES = {"school"}
+
+
+def _open_to_all(template: str) -> bool:
+	return frappe.db.get_value("MS Form Template", template, "category") in OPEN_CATEGORIES
+
 # What a field can be. `Section` and `Heading` carry no value; they shape the
 # form. Everything else is answered by whoever fills it in.
 FIELD_TYPES = {
@@ -237,6 +246,8 @@ def list_templates(category: str, include_inactive: int = 0, persona: str = None
 		"label": CATEGORIES[category],
 		"teachersMayFill": _teachers_may_fill(category),
 		"teachersMayDesign": _teachers_may_design(category),
+		# Filled for any student — no «الطلاب الخاضعون» list to keep.
+		"openToAll": category in OPEN_CATEGORIES,
 		"templates": [
 			{
 				"name": r.name,
@@ -482,7 +493,7 @@ def _students(persona: str, search: str = "", limit: int = 50, template: str = N
 			return []
 	# Filling a form: only the students it applies to. A nursing form for the
 	# children with asthma is not something to fill for the whole school.
-	if template:
+	if template and not _open_to_all(template):
 		subjects = set(_subjects(template))
 		allowed = subjects if allowed is None else (allowed & subjects)
 		if not allowed:
@@ -538,7 +549,9 @@ def students(
 		return {"students": _group_students(group)}
 	rows = _students(persona, search, limit, template)
 	out = {"students": rows}
-	if template:
+	if template and _open_to_all(template):
+		out["openToAll"] = True
+	elif template:
 		out["subjectsCount"] = len(_subjects(template))
 	return out
 
@@ -1054,7 +1067,11 @@ def save_entry(payload: str | dict, persona: str = None):
 			frappe.throw(frappe._("You are not allowed to file this form."), frappe.PermissionError)
 		# A form is filed only on a student it applies to. Existing entries
 		# stay editable, so a student later removed keeps their record.
-		if not data.get("name") and data["student"] not in set(_subjects(template.name)):
+		if (
+			not data.get("name")
+			and template.category not in OPEN_CATEGORIES
+			and data["student"] not in set(_subjects(template.name))
+		):
 			return fail(
 				"This student is not on this form's list.",
 				"هذا الطالب ليس من الطلاب الخاضعين لهذا النموذج — أضفه من تبويب «الطلاب الخاضعون».",
