@@ -583,6 +583,23 @@ def participants(activity: str, persona: str = None):
 def mark_attendance(entries: str | list, persona: str = None):
 	"""Record who actually turned up."""
 	rows = parse_json_arg(entries, []) or []
+	# A teacher records attendance for the activities they run, as with editing
+	# them; the office for any.
+	if persona == ROLE_TEACHER:
+		instructor = resolve_scope(persona).get("instructor")
+		ids = [r.get("id") for r in rows if r.get("id")]
+		activities = set(
+			frappe.get_all(
+				"MS Activity Enrolment", filters={"name": ["in", ids or [""]]}, pluck="activity"
+			)
+		)
+		for name in activities:
+			supervisor, owner = frappe.db.get_value("MS Activity", name, ["supervisor", "owner"])
+			if supervisor != instructor and owner != frappe.session.user:
+				return fail(
+					message_en="You can record attendance only for activities you run.",
+					message_ar="تسجيل الحضور لمشرف النشاط فقط.",
+				)
 	updated = 0
 	for row in rows:
 		if not row.get("id"):
