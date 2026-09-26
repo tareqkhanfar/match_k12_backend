@@ -27,6 +27,7 @@ from frappe.utils import cint, flt
 
 from match_schools.api.utils import (
 	BACK_OFFICE,
+	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_STUDENT,
 	ROLE_TEACHER,
@@ -74,6 +75,7 @@ ATTACHABLE = {
 	"Course": "المادة",
 	"Program": "الصف",
 	"MS Lesson Plan": "تحضير الحصة",
+	"MS Staff Member": "ملف الموظف",
 }
 
 
@@ -123,6 +125,11 @@ def _student_of(doctype: str, name: str) -> str | None:
 def _assert_can_read(persona: str, doctype: str, name: str):
 	"""Who may see the documents on a record."""
 	_assert_attachable(doctype)
+	if doctype == "MS Staff Member":
+		# A staff file is the principal's; a secretary sees only their own.
+		if persona == ROLE_ADMIN or frappe.db.get_value("MS Staff Member", name, "user") == frappe.session.user:
+			return
+		frappe.throw(_("ملفات الموظفين يطّلع عليها مدير المدرسة فقط."), frappe.PermissionError)
 	if persona in BACK_OFFICE:
 		return
 	if doctype == "MS Lesson Plan":
@@ -163,6 +170,11 @@ def _assert_can_write(persona: str, doctype: str, name: str):
 	what was submitted.
 	"""
 	_assert_attachable(doctype)
+	if doctype == "MS Staff Member":
+		# A staff file is the principal's; a secretary sees only their own.
+		if persona == ROLE_ADMIN or frappe.db.get_value("MS Staff Member", name, "user") == frappe.session.user:
+			return
+		frappe.throw(_("ملفات الموظفين يطّلع عليها مدير المدرسة فقط."), frappe.PermissionError)
 	if persona in BACK_OFFICE:
 		return
 

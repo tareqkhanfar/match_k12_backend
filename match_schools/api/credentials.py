@@ -251,7 +251,23 @@ CREDENTIAL_SOURCES = {
 	"Student": (ROLE_STUDENT, "الطالب"),
 	"Instructor": (ROLE_TEACHER, "المعلم"),
 	"Guardian": (ROLE_PARENT, "ولي الأمر"),
+	"MS Staff Member": (ROLE_SECRETARY, "السكرتير"),
 }
+
+# Where each record keeps the person's name.
+NAME_FIELD = {
+	"Student": "student_name",
+	"Instructor": "instructor_name",
+	"Guardian": "guardian_name",
+	"MS Staff Member": "full_name",
+}
+
+
+def _assert_may_manage(persona: str, doctype: str):
+	"""Office staff accounts are the principal's to manage — a secretary does
+	not reset a colleague's password."""
+	if doctype == "MS Staff Member" and persona != ROLE_ADMIN:
+		frappe.throw(_("حسابات السكرتارية يديرها مدير المدرسة فقط."), frappe.PermissionError)
 
 
 def _user_of(doctype: str, name: str) -> str | None:
@@ -261,7 +277,7 @@ def _user_of(doctype: str, name: str) -> str | None:
 	through Employee, and falls back to matching on the full name for schools
 	that run without the HR module.
 	"""
-	if doctype in ("Student", "Guardian"):
+	if doctype in ("Student", "Guardian", "MS Staff Member"):
 		return frappe.db.get_value(doctype, name, "user")
 
 	if doctype == "Instructor":
@@ -278,7 +294,7 @@ def _user_of(doctype: str, name: str) -> str | None:
 
 def _link_user(doctype: str, name: str, user: str):
 	"""Record the new User on the person's own record."""
-	if doctype in ("Student", "Guardian"):
+	if doctype in ("Student", "Guardian", "MS Staff Member"):
 		frappe.db.set_value(doctype, name, "user", user, update_modified=False)
 	elif doctype == "Instructor":
 		employee = frappe.db.get_value("Instructor", name, "employee")
@@ -300,6 +316,7 @@ def account_for(doctype: str = None, name: str = None, persona: str = None):
 			message_en="Unsupported record type.",
 			message_ar="نوع السجل غير مدعوم.",
 		)
+	_assert_may_manage(persona, doctype)
 	if not frappe.db.exists(doctype, name):
 		return fail(
 			message_en="That record no longer exists.",
@@ -352,6 +369,7 @@ def issue_account(doctype: str = None, name: str = None, persona: str = None):
 			message_en="Unsupported record type.",
 			message_ar="نوع السجل غير مدعوم.",
 		)
+	_assert_may_manage(persona, doctype)
 	if not frappe.db.exists(doctype, name):
 		return fail(
 			message_en="That record no longer exists.",
@@ -364,11 +382,7 @@ def issue_account(doctype: str = None, name: str = None, persona: str = None):
 		)
 
 	role, label = CREDENTIAL_SOURCES[doctype]
-	name_field = {
-		"Student": "student_name",
-		"Instructor": "instructor_name",
-		"Guardian": "guardian_name",
-	}[doctype]
+	name_field = NAME_FIELD[doctype]
 	full_name = frappe.db.get_value(doctype, name, name_field) or name
 
 	credentials = create_account(role, name, full_name)
@@ -394,6 +408,7 @@ def reset_account_password(doctype: str = None, name: str = None, persona: str =
 			message_en="Unsupported record type.",
 			message_ar="نوع السجل غير مدعوم.",
 		)
+	_assert_may_manage(persona, doctype)
 
 	user = _user_of(doctype, name)
 	if not user:
@@ -434,34 +449,215 @@ def _protected_user(user: str) -> bool:
 	return "System Manager" in frappe.get_roles(user)
 
 
+# How each kind of person is named in the bulk tool and on its sheet.
+BULK_NOUN = {
+	"Instructor": ("المعلم", "المعلمين"),
+	"Student": ("الطالب", "الطلاب"),
+	"Guardian": ("ولي الأمر", "أولياء الأمور"),
+	"MS Staff Member": ("السكرتير", "السكرتارية"),
+}
+
+
+def _group_labels(doctype: str, names: list[str]) -> dict[str, str]:
+	"""A second column for the sheet: a student's section, a parent's children.
+
+	Slips are handed out class by class, so the sheet has to say where each
+	one goes.
+	"""
+	if not names:
+		return {}
+	if doctype == "Student":
+		rows = frappe.get_all(
+			"Student Group Student",
+			filters={"student": ["in", names], "active": 1, "parenttype": "Student Group"},
+			fields=["student", "parent"],
+			limit_page_length=0,
+		)
+		labels = {
+			g.name: g.student_group_name or g.name
+			for g in frappe.get_all(
+				"Student Group",
+				filters={"name": ["in", list({r.parent for r in rows}) or [""]], "disabled": 0},
+				fields=["name", "student_group_name"],
+			)
+		}
+		out: dict[str, str] = {}
+		for r in rows:
+			if r.parent in labels and r.student not in out:
+				out[r.student] = labels[r.parent]
+		return out
+	if doctype == "Guardian":
+		rows = frappe.get_all(
+			"Student Guardian",
+			filters={"guardian": ["in", names], "parenttype": "Student"},
+			fields=["guardian", "parent"],
+			limit_page_length=0,
+		)
+		kids = {
+			s.name: s.student_name
+			for s in frappe.get_all(
+				"Student", filters={"name": ["in", list({r.parent for r in rows}) or [""]]},
+				fields=["name", "student_name"],
+			)
+		}
+		out = {}
+		for r in rows:
+			if r.parent in kids:
+				out.setdefault(r.guardian, []).append(kids[r.parent])
+		return {g: "، ".join(v) for g, v in out.items()}
+	return {}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def account_candidates(doctype: str = None, group: str = None, persona: str = None):
+	"""Everyone of one kind the bulk tool may issue to, with whether they
+	already have a login — narrowed to one section for students and parents."""
+	if doctype not in BULK_NOUN:
+		return fail("Unsupported record type.", "نوع السجل غير مدعوم.")
+	_assert_may_manage(persona, doctype)
+
+	names: list[str] | None = None
+	if group and doctype in ("Student", "Guardian"):
+		students = frappe.get_all(
+			"Student Group Student",
+			filters={"parent": group, "parenttype": "Student Group", "active": 1},
+			pluck="student",
+			limit_page_length=0,
+		)
+		if doctype == "Student":
+			names = students
+		else:
+			names = list(
+				dict.fromkeys(
+					frappe.get_all(
+						"Student Guardian",
+						filters={"parent": ["in", students or [""]], "parenttype": "Student"},
+						pluck="guardian",
+						limit_page_length=0,
+					)
+				)
+			)
+
+	filters: dict = {}
+	if names is not None:
+		filters["name"] = ["in", names or [""]]
+	if doctype == "Student":
+		filters["enabled"] = 1
+	elif doctype == "Instructor":
+		filters["status"] = "Active"
+	elif doctype == "MS Staff Member":
+		_sync_staff()
+	field = NAME_FIELD[doctype]
+	rows = frappe.get_all(doctype, filters=filters, fields=["name", field], order_by=f"{field} asc", limit_page_length=3000)
+	labels = _group_labels(doctype, [r.name for r in rows])
+
+	out = []
+	for r in rows:
+		user = _user_of(doctype, r.name)
+		out.append(
+			{
+				"id": r.name,
+				"name": r.get(field) or r.name,
+				"hint": labels.get(r.name, ""),
+				"hasAccount": bool(user),
+			}
+		)
+
+	groups = []
+	if doctype in ("Student", "Guardian"):
+		from match_schools.api.utils import apply_period
+
+		groups = [
+			{"id": g.name, "label": g.student_group_name or g.name}
+			for g in frappe.get_all(
+				"Student Group",
+				filters=apply_period({"disabled": 0}, "Student Group"),
+				fields=["name", "student_group_name"],
+				order_by="student_group_name",
+				limit_page_length=500,
+			)
+		]
+	singular, plural = BULK_NOUN[doctype]
+	return {"people": out, "groups": groups, "noun": singular, "nounPlural": plural}
+
+
+def _sync_staff():
+	"""A file for every secretary account that has none yet.
+
+	Secretaries used to be bare Users; each gets their file the first time
+	the office looks, so nobody is missing from the list.
+	"""
+	role = FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY]
+	users = frappe.get_all("Has Role", filters={"role": role, "parenttype": "User"}, pluck="parent")
+	have = set(frappe.get_all("MS Staff Member", filters={"user": ["is", "set"]}, pluck="user"))
+	for u in users:
+		if u in have or u in ("Administrator", "Guest") or not frappe.db.exists("User", u):
+			continue
+		if "System Manager" in frappe.get_roles(u):
+			continue
+		info = frappe.db.get_value("User", u, ["full_name", "mobile_no", "enabled", "email", "creation"], as_dict=True)
+		doc = frappe.new_doc("MS Staff Member")
+		doc.full_name = info.full_name or u.split("@")[0]
+		doc.user = u
+		doc.phone = info.mobile_no
+		doc.status = "Active" if cint(info.enabled) else "Inactive"
+		if info.email and not info.email.endswith("@" + login_domain()):
+			doc.email = info.email
+		doc.joining_date = str(info.creation)[:10]
+		doc.flags.ignore_links = True
+		doc.insert(ignore_permissions=True)
+
+
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
-def issue_teacher_accounts(names: str | list = None, mode: str = "all", persona: str = None):
-	"""Logins for the chosen teachers, returned once as an Excel sheet.
+def issue_accounts(doctype: str = None, names: str | list = None, mode: str = "all", persona: str = None):
+	"""Logins for the chosen people of one kind, returned once as an Excel sheet.
 
-	`mode` "all" creates an account for a teacher without one and issues a new
-	password to a teacher who has one; "missing" only creates, leaving working
+	`mode` "all" creates an account for whoever has none and issues a new
+	password to whoever has one; "missing" only creates, leaving working
 	logins alone. The sheet is built here rather than on the screen because
 	this is the only moment the passwords are readable.
 	"""
 	from match_schools.api.utils import parse_json_arg
 
+	if doctype not in BULK_NOUN:
+		return fail("Unsupported record type.", "نوع السجل غير مدعوم.")
+	_assert_may_manage(persona, doctype)
+	singular, plural = BULK_NOUN[doctype]
+	role = CREDENTIAL_SOURCES[doctype][0]
+	field = NAME_FIELD[doctype]
+
 	names = list(dict.fromkeys(parse_json_arg(names) or []))
 	if not names:
-		return fail("Choose at least one teacher.", "اختر معلماً واحداً على الأقل.")
-	if len(names) > 500:
-		return fail("Too many at once.", "الحد الأقصى 500 معلم في المرة الواحدة.")
+		return fail("Choose at least one person.", "اختر شخصاً واحداً على الأقل.")
+	if len(names) > 1500:
+		return fail("Too many at once.", "الحد الأقصى 1500 في المرة الواحدة.")
 	mode = "missing" if mode == "missing" else "all"
+	labels = _group_labels(doctype, names)
 
 	rows = []
 	for name in names:
-		if not frappe.db.exists("Instructor", name):
+		if not frappe.db.exists(doctype, name):
 			continue
-		full_name = frappe.db.get_value("Instructor", name, "instructor_name") or name
-		row = {"teacher": name, "name": full_name, "user": "", "username": "", "password": ""}
-		user = _user_of("Instructor", name)
+		full_name = frappe.db.get_value(doctype, name, field) or name
+		row = {
+			"teacher": name,
+			"name": full_name,
+			"hint": labels.get(name, ""),
+			"user": "",
+			"username": "",
+			"password": "",
+		}
+		user = _user_of(doctype, name)
 		if user and mode == "missing":
-			row.update(status="skipped", note="لديه حساب — لم يُغيَّر")
+			# Listed with their existing login, so the sheet covers the whole class.
+			row.update(
+				user=user,
+				username=frappe.db.get_value("User", user, "username") or user.split("@")[0],
+				status="skipped",
+				note="لديه حساب — كلمة المرور لم تتغير",
+			)
 		elif user and _protected_user(user):
 			row.update(user=user, status="skipped", note="حساب مدير النظام — لم يُغيَّر")
 		elif user:
@@ -478,26 +674,34 @@ def issue_teacher_accounts(names: str | list = None, mode: str = "all", persona:
 				note="" if cint(u.enabled) else "الحساب معطّل — فعّله ليتمكن من الدخول",
 			)
 		else:
-			creds = create_account(ROLE_TEACHER, name, full_name)
-			_link_user("Instructor", name, creds["user"])
+			creds = create_account(role, name, full_name)
+			_link_user(doctype, name, creds["user"])
 			row.update(user=creds["user"], username=creds["username"], password=creds["password"], status="created", note="")
 		rows.append(row)
 	frappe.db.commit()
 
 	created = sum(r["status"] == "created" for r in rows)
 	reset = sum(r["status"] == "reset" for r in rows)
+	hint_label = {"Student": "الشعبة", "Guardian": "الأبناء"}.get(doctype)
 	return {
 		"rows": rows,
 		"created": created,
 		"reset": reset,
 		"skipped": len(rows) - created - reset,
-		"file": _accounts_sheet(rows),
-		"filename": f"حسابات المعلمين-{frappe.utils.today()}.xlsx",
+		"file": _accounts_sheet(rows, singular, f"حسابات {plural}", hint_label),
+		"filename": f"حسابات {plural}-{frappe.utils.today()}.xlsx",
 	}
 
 
-def _accounts_sheet(rows: list[dict]) -> str:
-	"""The issued logins as a base64 .xlsx, one teacher per row."""
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def issue_teacher_accounts(names: str | list = None, mode: str = "all", persona: str = None):
+	"""The teachers' form of `issue_accounts`, kept for screens already calling it."""
+	return issue_accounts.__wrapped__(doctype="Instructor", names=names, mode=mode, persona=persona)
+
+
+def _accounts_sheet(rows: list[dict], noun: str = "المعلم", title: str = "حسابات المعلمين", hint_label: str | None = None) -> str:
+	"""The issued logins as a base64 .xlsx, one person per row."""
 	import base64
 	import io
 
@@ -505,10 +709,12 @@ def _accounts_sheet(rows: list[dict]) -> str:
 	from openpyxl.styles import Alignment, Font, PatternFill
 
 	status = {"created": "حساب جديد", "reset": "كلمة مرور جديدة", "skipped": "لم يُغيَّر"}
-	header = ["#", "المعلم", "اسم المستخدم", "المستخدم (البريد)", "كلمة المرور الجديدة", "الحالة", "ملاحظة"]
+	header = ["#", noun] + ([hint_label] if hint_label else []) + [
+		"اسم المستخدم", "المستخدم (البريد)", "كلمة المرور الجديدة", "الحالة", "ملاحظة"
+	]
 	wb = Workbook()
 	ws = wb.active
-	ws.title = "حسابات المعلمين"
+	ws.title = title[:31]
 	ws.sheet_view.rightToLeft = True
 	ws.append(header)
 	for cell in ws[1]:
@@ -516,13 +722,20 @@ def _accounts_sheet(rows: list[dict]) -> str:
 		cell.fill = PatternFill("solid", fgColor="0550AE")
 		cell.alignment = Alignment(horizontal="center", vertical="center")
 	for i, r in enumerate(rows, 1):
-		ws.append([i, r["name"], r["username"], r["user"], r["password"], status[r["status"]], r.get("note") or ""])
-	for col, width in zip("ABCDEFG", (5, 30, 16, 32, 20, 16, 36)):
-		ws.column_dimensions[col].width = width
+		ws.append(
+			[i, r["name"]] + ([r.get("hint") or ""] if hint_label else [])
+			+ [r["username"], r["user"], r["password"], status[r["status"]], r.get("note") or ""]
+		)
+	from openpyxl.utils import get_column_letter
+
+	widths = [5, 30] + ([30] if hint_label else []) + [16, 32, 20, 16, 36]
+	for idx, width in enumerate(widths, 1):
+		ws.column_dimensions[get_column_letter(idx)].width = width
 	# Passwords are typed from this sheet: a monospaced face tells 8 from B.
-	for row in ws.iter_rows(min_row=2, min_col=3, max_col=5):
+	first = 4 if hint_label else 3
+	for row in ws.iter_rows(min_row=2, min_col=first, max_col=first + 2):
 		for cell in row:
-			cell.font = Font(name="Consolas", bold=cell.column == 5)
+			cell.font = Font(name="Consolas", bold=cell.column == first + 2)
 	ws.freeze_panes = "A2"
 	buffer = io.BytesIO()
 	wb.save(buffer)
