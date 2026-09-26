@@ -1,0 +1,75 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:template_name",
+ "creation": "2026-09-26 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "description",
+  "column_break_1",
+  "quarter_totals",
+  "section_break_1",
+  "plan"
+ ],
+ "fields": [
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "label": "اسم النموذج",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "الوصف"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "quarter_totals",
+   "fieldtype": "Data",
+   "label": "علامات الأرباع",
+   "description": "JSON list, e.g. [40, 60] — the quarter totals the template was written for.",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "plan",
+   "fieldtype": "Long Text",
+   "label": "الخطة",
+   "description": "JSON list of categories: {q, name, type, weight, children: [{name, maxScore}]}; q is the quarter's position, starting at 0.",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Assessment Plan Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -339,7 +339,29 @@ def save_plan(
 
 		assert_teacher_owns_course(persona, course)
 
-	quarters_info = get_quarters(academic_term=academic_term, persona=persona)
+	return _write_plan(
+		course=course,
+		program=program,
+		academic_term=academic_term,
+		scheme_name=scheme_name,
+		rows=rows,
+		persona=persona,
+	)
+
+
+def _write_plan(
+	course: str,
+	program: str | None,
+	academic_term: str | None,
+	scheme_name: str | None,
+	rows: list,
+	persona: str = None,
+) -> dict:
+	"""Validate a plan and write it — shared by `save_plan` and templates.
+
+	The caller has already decided this persona may write this course's plan.
+	"""
+	quarters_info = _read_quarters(academic_term=academic_term, persona=persona)
 	quarters = (quarters_info.get("data") or quarters_info).get("quarters", [])
 	quarter_names = {q["name"] for q in quarters}
 	if not quarter_names:
@@ -485,6 +507,332 @@ def save_plan(
 		"categories": len(rows),
 		"assessments": sum(len(c.get("children") or []) for c in rows),
 		"message_ar": "تم حفظ خطة التقييم.",
+	}
+
+
+# --- Plan templates --------------------------------------------------------
+#
+# Writing each subject's plan by hand repeats the same structure dozens of
+# times. A template holds that structure once — categories, their marks, and
+# the assessments inside them — and is applied to one subject from the editor
+# or to many at once. Quarters are referenced by position (`q`: 0 for the
+# first), so a template outlives the term it was written in.
+
+
+def _template_rows(doc) -> list[dict]:
+	rows = parse_json_arg(doc.plan, []) or []
+	return rows if isinstance(rows, list) else []
+
+
+def _template_totals(doc) -> list[float]:
+	totals = parse_json_arg(doc.quarter_totals, []) or []
+	return [flt(t) for t in totals] if isinstance(totals, list) else []
+
+
+def _template_summary(doc) -> dict:
+	rows = _template_rows(doc)
+	return {
+		"id": doc.name,
+		"name": doc.template_name,
+		"description": doc.description or "",
+		"quarterTotals": _template_totals(doc),
+		"categories": len(rows),
+		"assessments": sum(len(r.get("children") or []) for r in rows),
+		"modified": str(doc.modified or ""),
+		"owner": doc.owner,
+	}
+
+
+def _materialise(doc, academic_term: str | None) -> dict:
+	"""The template's categories written against a term's actual quarters.
+
+	A category's weight is in its quarter's marks. When the term's quarter is
+	worth a different total than the template was written for, weights are
+	scaled so the quarter still adds up — and the note says so, so nobody is
+	surprised by a 12.5 where the template said 10.
+	"""
+	quarters = (_read_quarters(academic_term=academic_term) or {}).get("quarters", [])
+	template_totals = _template_totals(doc)
+	rows = _template_rows(doc)
+	problems: list[str] = []
+	notes: list[str] = []
+	out: list[dict] = []
+
+	by_q: dict[int, list[dict]] = {}
+	for r in rows:
+		by_q.setdefault(cint(r.get("q")), []).append(r)
+
+	for qi, cats in sorted(by_q.items()):
+		if qi >= len(quarters):
+			problems.append(
+				f"النموذج يحتوي على الربع رقم {qi + 1} والفصل مقسّم إلى {len(quarters)} فقط."
+			)
+			continue
+		target = flt(quarters[qi]["totalMarks"])
+		source = template_totals[qi] if qi < len(template_totals) else 0
+		source = source or sum(flt(c.get("weight")) for c in cats)
+		factor = target / source if source and target else 1
+		scaled = [round(flt(c.get("weight")) * factor, 2) for c in cats]
+		if factor != 1 and scaled:
+			# Put the rounding remainder on the largest category so the
+			# quarter adds up to its exact total.
+			drift = round(target - sum(scaled), 2)
+			if drift:
+				big = max(range(len(scaled)), key=lambda i: scaled[i])
+				scaled[big] = round(scaled[big] + drift, 2)
+			notes.append(
+				f"{quarters[qi]['name']}: حُوّلت الأوزان من {source:g} إلى {target:g} علامة."
+			)
+		for c, w in zip(cats, scaled):
+			out.append(
+				{
+					"quarter": quarters[qi]["name"],
+					"name": (c.get("name") or "").strip(),
+					"type": c.get("type") or "Exam",
+					"weight": w,
+					"children": [
+						{"name": (ch.get("name") or "").strip(), "maxScore": flt(ch.get("maxScore"))}
+						for ch in (c.get("children") or [])
+						if (ch.get("name") or "").strip()
+					],
+				}
+			)
+
+	return {"categories": out, "problems": problems, "notes": notes, "quarters": quarters}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def list_plan_templates(persona: str = None):
+	"""Every template, newest first."""
+	docs = frappe.get_all(
+		"MS Assessment Plan Template",
+		fields=["name", "template_name", "description", "quarter_totals", "plan", "modified", "owner"],
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+	return {
+		"templates": [_template_summary(frappe._dict(d)) for d in docs],
+		"canEdit": persona in BACK_OFFICE,
+	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def get_plan_template(template: str = None, academic_term: str = None, persona: str = None):
+	"""A template as written, and as it would be applied to this term."""
+	if not template or not frappe.db.exists("MS Assessment Plan Template", template):
+		return fail(message_en="Template not found.", message_ar="لم يتم العثور على النموذج.")
+	doc = frappe.get_doc("MS Assessment Plan Template", template)
+	return {
+		**_template_summary(doc),
+		"rows": _template_rows(doc),
+		"applied": _materialise(doc, academic_term or get_default_academic_term()),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*BACK_OFFICE)
+def save_plan_template(
+	template: str = None,
+	name: str = None,
+	description: str = None,
+	quarter_totals: str | list = None,
+	categories: str | list = None,
+	persona: str = None,
+):
+	"""Create or update a template.
+
+	`categories`: [{q, name, type, weight, children: [{name, maxScore}]}], with
+	`q` the quarter's position. `quarter_totals`: what each quarter is worth in
+	the template ([40, 60]). Checked like a plan — a template that does not
+	add up would only produce plans that fail later, one subject at a time.
+	"""
+	name = (name or "").strip()
+	if not name:
+		return fail(message_en="A name is required.", message_ar="اسم النموذج مطلوب.")
+	totals = [flt(t) for t in (parse_json_arg(quarter_totals, []) or [])]
+	rows = parse_json_arg(categories, []) or []
+	if not totals:
+		return fail(
+			message_en="The quarter totals are required.",
+			message_ar="يجب تحديد علامات الأرباع في النموذج.",
+		)
+	if not rows:
+		return fail(
+			message_en="At least one category is required.",
+			message_ar="يجب تعريف تصنيف واحد على الأقل.",
+		)
+
+	problems: list[str] = []
+	weight_by_q: dict[int, float] = {}
+	names_by_q: dict[int, set] = {}
+	assessment_names: set[str] = set()
+	cleaned: list[dict] = []
+	for cat in rows:
+		cname = (cat.get("name") or "").strip()
+		q = cint(cat.get("q"))
+		weight = flt(cat.get("weight"))
+		if not cname:
+			problems.append("تصنيف بدون اسم")
+			continue
+		if q < 0 or q >= len(totals):
+			problems.append(f"{cname}: ربع غير معرّف في النموذج")
+			continue
+		if weight <= 0:
+			problems.append(f"{cname}: الوزن يجب أن يكون أكبر من صفر")
+		seen = names_by_q.setdefault(q, set())
+		if cname in seen:
+			problems.append(f"{cname}: التصنيف مكرر في الربع {q + 1}")
+		seen.add(cname)
+		weight_by_q[q] = weight_by_q.get(q, 0) + weight
+		children = []
+		child_names: set[str] = set()
+		for child in cat.get("children") or []:
+			ch = (child.get("name") or "").strip()
+			if not ch:
+				continue
+			if ch in child_names or ch in assessment_names:
+				problems.append(f"«{ch}» مكرر — اسم الامتحان يجب أن يكون فريداً في الخطة كلها")
+			child_names.add(ch)
+			assessment_names.add(ch)
+			if flt(child.get("maxScore")) <= 0:
+				problems.append(f"{ch}: العلامة العظمى يجب أن تكون أكبر من صفر")
+			children.append({"name": ch, "maxScore": flt(child.get("maxScore"))})
+		cleaned.append(
+			{
+				"q": q,
+				"name": cname,
+				"type": cat.get("type") or "Exam",
+				"weight": weight,
+				"children": children,
+			}
+		)
+	for q, used in weight_by_q.items():
+		if abs(used - totals[q]) >= 0.01:
+			problems.append(
+				f"الربع {q + 1}: مجموع علامات التصنيفات {round(used, 2)} — يجب أن يكون {totals[q]:g}"
+			)
+	if problems:
+		return fail(
+			message_en=f"{len(problems)} problem(s) in the template. Nothing was saved.",
+			message_ar="لم يُحفظ النموذج. صحّح ما يلي:\n" + "\n".join(f"• {p}" for p in problems[:8]),
+			data={"problems": problems},
+		)
+
+	if template:
+		doc = frappe.get_doc("MS Assessment Plan Template", template)
+		if doc.template_name != name:
+			if frappe.db.exists("MS Assessment Plan Template", name):
+				return fail(
+					message_en="A template with this name exists.",
+					message_ar="يوجد نموذج بهذا الاسم.",
+				)
+			doc = frappe.get_doc("MS Assessment Plan Template", frappe.rename_doc(
+				"MS Assessment Plan Template", template, name, force=True
+			))
+	else:
+		if frappe.db.exists("MS Assessment Plan Template", name):
+			return fail(
+				message_en="A template with this name exists.",
+				message_ar="يوجد نموذج بهذا الاسم.",
+			)
+		doc = frappe.new_doc("MS Assessment Plan Template")
+	doc.template_name = name
+	doc.description = (description or "").strip()
+	doc.quarter_totals = frappe.as_json(totals, indent=None)
+	doc.plan = frappe.as_json(cleaned, indent=None)
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": _template_summary(doc),
+		"message_en": "Template saved.",
+		"message_ar": "تم حفظ النموذج.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*BACK_OFFICE)
+def delete_plan_template(template: str = None, persona: str = None):
+	"""Remove a template. Plans already made from it are theirs and stay."""
+	if not template or not frappe.db.exists("MS Assessment Plan Template", template):
+		return fail(message_en="Template not found.", message_ar="لم يتم العثور على النموذج.")
+	frappe.delete_doc("MS Assessment Plan Template", template, ignore_permissions=True)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"id": template},
+		"message_en": "Template deleted.",
+		"message_ar": "تم حذف النموذج — الخطط التي بُنيت منه باقية.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(*BACK_OFFICE)
+def apply_plan_template(
+	template: str = None,
+	courses: str | list = None,
+	academic_term: str = None,
+	overwrite: int = 0,
+	persona: str = None,
+):
+	"""Write a template's plan for many subjects at once.
+
+	A subject that already has a plan is left alone unless `overwrite` — a
+	plan with marks entered against it is not something to replace by
+	accident. Each subject is written through the same validation as the plan
+	editor, and each succeeds or fails on its own.
+	"""
+	if not template or not frappe.db.exists("MS Assessment Plan Template", template):
+		return fail(message_en="Template not found.", message_ar="لم يتم العثور على النموذج.")
+	course_list = [c for c in (parse_json_arg(courses, []) or []) if c]
+	if not course_list:
+		return fail(message_en="Choose at least one subject.", message_ar="اختر مادة واحدة على الأقل.")
+
+	academic_term = academic_term or get_default_academic_term()
+	doc = frappe.get_doc("MS Assessment Plan Template", template)
+	applied = _materialise(doc, academic_term)
+	if applied["problems"]:
+		return fail(
+			message_en="The template does not fit this term.",
+			message_ar="النموذج لا يناسب أرباع هذا الفصل:\n" + "\n".join(applied["problems"]),
+		)
+
+	results = []
+	for course in course_list:
+		if not frappe.db.exists("Course", course):
+			results.append({"course": course, "status": "failed", "message": "المادة غير موجودة"})
+			continue
+		existing = frappe.db.get_value(
+			"MS Grade Scheme", {"course": course, "academic_term": academic_term}, "name"
+		)
+		if existing and not cint(overwrite):
+			results.append({"course": course, "status": "skipped", "message": "لها خطة — لم تُستبدل"})
+			continue
+		res = _write_plan(
+			course=course,
+			program=None,
+			academic_term=academic_term,
+			scheme_name=f"خطة {course} ({doc.template_name})",
+			rows=applied["categories"],
+			persona=persona,
+		)
+		if res.get("success") is False:
+			results.append(
+				{"course": course, "status": "failed", "message": res.get("message_ar") or "تعذّر الحفظ"}
+			)
+		else:
+			results.append(
+				{"course": course, "status": "applied", "message": "طُبّق" if not existing else "استُبدلت الخطة"}
+			)
+
+	done = sum(1 for r in results if r["status"] == "applied")
+	return {
+		"success": True,
+		"data": {"results": results, "applied": done, "notes": applied["notes"]},
+		"message_en": f"Applied to {done} subject(s).",
+		"message_ar": f"طُبّق النموذج على {done} مادة.",
 	}
 
 
