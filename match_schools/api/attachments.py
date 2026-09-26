@@ -73,7 +73,27 @@ ATTACHABLE = {
 	"Assessment Result": "نتيجة التقييم",
 	"Course": "المادة",
 	"Program": "الصف",
+	"MS Lesson Plan": "تحضير الحصة",
 }
+
+
+def _lesson_plan_access(persona: str, name: str) -> tuple[bool, bool]:
+	"""(may read, may write) the files on a lesson preparation.
+
+	They follow the plan itself: its teacher and the office handle them, and
+	the class's students and families read them once the plan is published —
+	a worksheet attached to Sunday's lesson is for the children in it.
+	"""
+	from match_schools.api import lesson_plans
+
+	plan = frappe.db.get_value("MS Lesson Plan", name, ["course_schedule", "is_published"], as_dict=True)
+	lesson = lesson_plans._lesson(plan.course_schedule) if plan else None
+	if not lesson:
+		return False, False
+	may_read = lesson_plans._may_see(persona, lesson) and (
+		persona not in (ROLE_STUDENT, ROLE_PARENT) or bool(cint(plan.is_published))
+	)
+	return may_read, lesson_plans._may_edit(persona, lesson)
 
 
 def _assert_attachable(doctype: str):
@@ -105,6 +125,10 @@ def _assert_can_read(persona: str, doctype: str, name: str):
 	_assert_attachable(doctype)
 	if persona in BACK_OFFICE:
 		return
+	if doctype == "MS Lesson Plan":
+		if _lesson_plan_access(persona, name)[0]:
+			return
+		frappe.throw(_("لا تملك صلاحية الاطلاع على مرفقات هذا السجل."), frappe.PermissionError)
 
 	student = _student_of(doctype, name)
 
@@ -136,6 +160,9 @@ def _assert_can_write(persona: str, doctype: str, name: str):
 	"""
 	_assert_attachable(doctype)
 	if persona in BACK_OFFICE:
+		return
+
+	if doctype == "MS Lesson Plan" and _lesson_plan_access(persona, name)[1]:
 		return
 
 	if persona == ROLE_TEACHER:

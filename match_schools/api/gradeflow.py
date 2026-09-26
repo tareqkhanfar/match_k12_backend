@@ -180,6 +180,14 @@ def teacher_teaches_in_group(persona: str, student_group: str, course: str) -> b
 		},
 	):
 		return True
+	# The weekly timetable pairs them before any dated lesson is generated from
+	# it — the same source `courses_taught` offers the subject from, so a form
+	# never lists a subject this check then refuses.
+	if frappe.db.table_exists("MS Timetable Slot") and frappe.db.exists(
+		"MS Timetable Slot",
+		{"instructor": instructor, "student_group": student_group, "course": course, "active": 1},
+	):
+		return True
 	# A per-subject group names its own course and its own instructors, and may
 	# have no timetable yet.
 	named = frappe.db.get_value("Student Group", student_group, "course")
@@ -195,6 +203,33 @@ def teacher_teaches_in_group(persona: str, student_group: str, course: str) -> b
 			)
 		)
 	return False
+
+
+def teaching_pairs(instructor: str | None) -> dict[str, list[str]]:
+	"""Section -> the subjects this teacher takes in it, from the timetable and
+	the dated lessons — the pairs `teacher_teaches_in_group` accepts."""
+	pairs: dict[str, set[str]] = {}
+	if not instructor:
+		return {}
+	rows = frappe.get_all(
+		"Course Schedule",
+		filters={"instructor": instructor, "docstatus": ["<", 2]},
+		fields=["student_group", "course"],
+		distinct=True,
+		limit_page_length=0,
+	)
+	if frappe.db.table_exists("MS Timetable Slot"):
+		rows += frappe.get_all(
+			"MS Timetable Slot",
+			filters={"instructor": instructor, "active": 1},
+			fields=["student_group", "course"],
+			distinct=True,
+			limit_page_length=0,
+		)
+	for r in rows:
+		if r.student_group and r.course:
+			pairs.setdefault(r.student_group, set()).add(r.course)
+	return {g: sorted(c) for g, c in pairs.items()}
 
 
 def assert_teacher_teaches(persona: str, student_group: str, course: str):

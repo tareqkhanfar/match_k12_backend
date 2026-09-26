@@ -110,6 +110,31 @@ def generate_password(length: int = PASSWORD_LENGTH) -> str:
 			return pw
 
 
+def free_username(username: str) -> str:
+	"""The username itself, or the next number up when it is taken.
+
+	Records named by a person's name rather than a numbered series (a school
+	that names teachers «أ. رانيا سمير») carry no digits, so every one of them
+	would build the same `t1260001` and two people would share a login name.
+	"""
+	def taken(u: str) -> bool:
+		return bool(
+			frappe.db.exists("User", {"username": u}) or frappe.db.exists("User", f"{u}@{login_domain()}")
+		)
+
+	if not taken(username):
+		return username
+	m = re.match(r"^(\D+\d{3})(\d+)$", username)
+	if not m:
+		return username
+	head, number = m[1], m[2]
+	for n in range(int(number) + 1, int(number) + 10000):
+		candidate = f"{head}{str(n).zfill(len(number))}"
+		if not taken(candidate):
+			return candidate
+	return username
+
+
 def unique_login(username: str) -> str:
 	"""Append a suffix if the login is somehow taken."""
 	domain = login_domain()
@@ -136,7 +161,7 @@ def create_account(
 	The returned password is the only time it is readable. Callers hand it
 	straight to the registrar; nothing persists it.
 	"""
-	username = build_username(persona, docname, year)
+	username = free_username(build_username(persona, docname, year))
 	login = unique_login(username)
 	password = generate_password()
 
@@ -395,3 +420,110 @@ def reset_account_password(doctype: str = None, name: str = None, persona: str =
 		},
 		"message_ar": "تم إنشاء كلمة مرور جديدة — انسخها الآن، لن تظهر مرة أخرى.",
 	}
+
+
+def _protected_user(user: str) -> bool:
+	"""Accounts a bulk reset must never touch: the site's own administrators.
+
+	A teacher record can end up linked to one (a principal who also teaches,
+	or the name fallback matching the wrong User), and a new password there
+	would lock the school out of its own system.
+	"""
+	if user == "Administrator":
+		return True
+	return "System Manager" in frappe.get_roles(user)
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
+def issue_teacher_accounts(names: str | list = None, mode: str = "all", persona: str = None):
+	"""Logins for the chosen teachers, returned once as an Excel sheet.
+
+	`mode` "all" creates an account for a teacher without one and issues a new
+	password to a teacher who has one; "missing" only creates, leaving working
+	logins alone. The sheet is built here rather than on the screen because
+	this is the only moment the passwords are readable.
+	"""
+	from match_schools.api.utils import parse_json_arg
+
+	names = list(dict.fromkeys(parse_json_arg(names) or []))
+	if not names:
+		return fail("Choose at least one teacher.", "اختر معلماً واحداً على الأقل.")
+	if len(names) > 500:
+		return fail("Too many at once.", "الحد الأقصى 500 معلم في المرة الواحدة.")
+	mode = "missing" if mode == "missing" else "all"
+
+	rows = []
+	for name in names:
+		if not frappe.db.exists("Instructor", name):
+			continue
+		full_name = frappe.db.get_value("Instructor", name, "instructor_name") or name
+		row = {"teacher": name, "name": full_name, "user": "", "username": "", "password": ""}
+		user = _user_of("Instructor", name)
+		if user and mode == "missing":
+			row.update(status="skipped", note="لديه حساب — لم يُغيَّر")
+		elif user and _protected_user(user):
+			row.update(user=user, status="skipped", note="حساب مدير النظام — لم يُغيَّر")
+		elif user:
+			password = generate_password()
+			update_password(user, password)
+			if _force_change_enabled():
+				frappe.db.set_value("User", user, "ms_must_change_password", 1, update_modified=False)
+			u = frappe.db.get_value("User", user, ["username", "enabled"], as_dict=True)
+			row.update(
+				user=user,
+				username=u.username or user.split("@")[0],
+				password=password,
+				status="reset",
+				note="" if cint(u.enabled) else "الحساب معطّل — فعّله ليتمكن من الدخول",
+			)
+		else:
+			creds = create_account(ROLE_TEACHER, name, full_name)
+			_link_user("Instructor", name, creds["user"])
+			row.update(user=creds["user"], username=creds["username"], password=creds["password"], status="created", note="")
+		rows.append(row)
+	frappe.db.commit()
+
+	created = sum(r["status"] == "created" for r in rows)
+	reset = sum(r["status"] == "reset" for r in rows)
+	return {
+		"rows": rows,
+		"created": created,
+		"reset": reset,
+		"skipped": len(rows) - created - reset,
+		"file": _accounts_sheet(rows),
+		"filename": f"حسابات المعلمين-{frappe.utils.today()}.xlsx",
+	}
+
+
+def _accounts_sheet(rows: list[dict]) -> str:
+	"""The issued logins as a base64 .xlsx, one teacher per row."""
+	import base64
+	import io
+
+	from openpyxl import Workbook
+	from openpyxl.styles import Alignment, Font, PatternFill
+
+	status = {"created": "حساب جديد", "reset": "كلمة مرور جديدة", "skipped": "لم يُغيَّر"}
+	header = ["#", "المعلم", "اسم المستخدم", "المستخدم (البريد)", "كلمة المرور الجديدة", "الحالة", "ملاحظة"]
+	wb = Workbook()
+	ws = wb.active
+	ws.title = "حسابات المعلمين"
+	ws.sheet_view.rightToLeft = True
+	ws.append(header)
+	for cell in ws[1]:
+		cell.font = Font(bold=True, color="FFFFFF")
+		cell.fill = PatternFill("solid", fgColor="0550AE")
+		cell.alignment = Alignment(horizontal="center", vertical="center")
+	for i, r in enumerate(rows, 1):
+		ws.append([i, r["name"], r["username"], r["user"], r["password"], status[r["status"]], r.get("note") or ""])
+	for col, width in zip("ABCDEFG", (5, 30, 16, 32, 20, 16, 36)):
+		ws.column_dimensions[col].width = width
+	# Passwords are typed from this sheet: a monospaced face tells 8 from B.
+	for row in ws.iter_rows(min_row=2, min_col=3, max_col=5):
+		for cell in row:
+			cell.font = Font(name="Consolas", bold=cell.column == 5)
+	ws.freeze_panes = "A2"
+	buffer = io.BytesIO()
+	wb.save(buffer)
+	return base64.b64encode(buffer.getvalue()).decode()

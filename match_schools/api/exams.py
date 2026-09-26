@@ -271,9 +271,17 @@ def _assert_may_schedule(persona: str, student_group: str, course: str):
 	# The subject in THAT class, as the timetable pairs them: being listed on a
 	# section is not teaching every subject in it. Without this a maths
 	# teacher on 12-أ could put a physics exam on the physics teacher's class.
-	from match_schools.api.gradeflow import assert_teacher_teaches
+	from match_schools.api.gradeflow import teacher_teaches_in_group
 
-	assert_teacher_teaches(persona, student_group, course)
+	if not teacher_teaches_in_group(persona, student_group, course):
+		# Said plainly: this is nearly always a subject picked for the wrong
+		# section (English for grade 11 on a grade 12 section), not an attempt
+		# on someone else's class, and a bare "not allowed" left teachers stuck.
+		group_name = frappe.db.get_value("Student Group", student_group, "student_group_name") or student_group
+		frappe.throw(
+			f"مادة «{course}» لا تدرّسها لشعبة «{group_name}» حسب الجدول — اختر مادة من مواد هذه الشعبة.",
+			frappe.ValidationError,
+		)
 
 
 @frappe.whitelist()
@@ -293,8 +301,14 @@ def form_options(persona: str = None):
 		from match_schools.api.gradeflow import courses_taught as courses_of_instructor
 
 		courses = sorted(courses_of_instructor(scope.get("instructor")))
+		from match_schools.api.gradeflow import teaching_pairs
+
+		# Which of those subjects go with which section, so the form offers
+		# only the subjects of the section picked.
+		courses_by_group = teaching_pairs(scope.get("instructor"))
 	else:
 		courses = frappe.get_all("Course", pluck="name", limit=300)
+		courses_by_group = None
 
 	return {
 		"groups": [
@@ -316,6 +330,7 @@ def form_options(persona: str = None):
 			)
 		],
 		"courses": courses,
+		"coursesByGroup": courses_by_group,
 		"rooms": [
 			{
 				"id": r.name,

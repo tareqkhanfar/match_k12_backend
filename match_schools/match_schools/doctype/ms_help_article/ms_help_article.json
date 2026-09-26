@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-26 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "kind",
+  "topic",
+  "audience",
+  "column_break_1",
+  "is_published",
+  "sort_order",
+  "views",
+  "section_break_1",
+  "video_file",
+  "video_url",
+  "body"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "العنوان / السؤال",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "النوع",
+   "options": "Video\nQuestion",
+   "default": "Question",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "topic",
+   "fieldtype": "Data",
+   "label": "الموضوع",
+   "description": "يجمع المواد تحت عنوان واحد، مثل: العلامات، الحضور، الرسائل.",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "audience",
+   "fieldtype": "Small Text",
+   "label": "لمن",
+   "description": "Comma-separated personas (admin, secretary, teacher, student, parent). Empty = everyone."
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_published",
+   "fieldtype": "Check",
+   "label": "منشور",
+   "default": "1"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "الترتيب",
+   "default": "0"
+  },
+  {
+   "fieldname": "views",
+   "fieldtype": "Int",
+   "label": "المشاهدات",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "video_file",
+   "fieldtype": "Attach",
+   "label": "ملف الفيديو"
+  },
+  {
+   "fieldname": "video_url",
+   "fieldtype": "Data",
+   "label": "رابط الفيديو",
+   "description": "YouTube, Vimeo or Google Drive link, for videos too large to upload."
+  },
+  {
+   "fieldname": "body",
+   "fieldtype": "Long Text",
+   "label": "الجواب / الشرح"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Help Article",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
