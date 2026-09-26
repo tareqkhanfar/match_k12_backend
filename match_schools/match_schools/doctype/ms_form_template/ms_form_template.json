@@ -55,7 +55,7 @@
    "in_standard_filter": 1,
    "label": "الفئة",
    "reqd": 1,
-   "options": "nursing\ncounselling\nspecial_needs\nlearning_difficulties\nspeech_language"
+   "options": "nursing\ncounselling\nspecial_needs\nlearning_difficulties\nspeech_language\nschool"
   },
   {
    "fieldname": "entry_for",

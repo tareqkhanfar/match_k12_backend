@@ -19,7 +19,7 @@ import json
 import re
 
 import frappe
-from frappe.utils import cint, escape_html, now_datetime, nowdate
+from frappe.utils import cint, escape_html, flt, now_datetime, nowdate
 
 from match_schools.api import forms_print
 from match_schools.api.utils import (
@@ -40,6 +40,9 @@ CATEGORIES = {
 	"special_needs": "الاحتياجات الخاصة",
 	"learning_difficulties": "صعوبات التعلم",
 	"speech_language": "النطق واللغة",
+	# The school's own forms — the ones that are nobody's specialism:
+	# permission slips, meeting minutes, duty rosters, requests.
+	"school": "المدرسة",
 }
 
 # What a field can be. `Section` and `Heading` carry no value; they shape the
@@ -754,6 +757,265 @@ def list_entries(
 			}
 			for r in rows
 		]
+	}
+
+
+# --- Reports ---------------------------------------------------------------
+
+# Answers that can be counted: each has a closed set of values.
+_COUNTABLE = ("Select", "Multi Select", "Checkbox", "Rating")
+
+
+def _entry_scope(persona: str) -> list | None:
+	"""A teacher's `or_filters` on MS Form Entry; None for the back office."""
+	if persona != ROLE_TEACHER:
+		return None
+	return [
+		["student", "in", _teacher_students(persona) or [""]],
+		["student_group", "in", _teacher_groups(persona) or [""]],
+		["filled_by", "=", frappe.session.user],
+	]
+
+
+def _answers(field: dict, raw: str) -> list[str]:
+	"""The countable values in one answer."""
+	raw = (raw or "").strip()
+	if not raw:
+		return []
+	if field["fieldtype"] == "Multi Select":
+		return [v.strip() for v in raw.replace("\n", "، ").split("، ") if v.strip()]
+	if field["fieldtype"] == "Checkbox":
+		return ["نعم" if raw in ("1", "true", "True") else "لا"]
+	if field["fieldtype"] == "Rating":
+		return [raw] if flt(raw) > 0 else []
+	return [raw]
+
+
+@frappe.whitelist()
+@ms_endpoint(*BACK_OFFICE, ROLE_TEACHER)
+def template_report(
+	template: str = None,
+	date_from: str = None,
+	date_to: str = None,
+	status: str = None,
+	student_group: str = None,
+	program: str = None,
+	academic_term: str = None,
+	filled_by: str = None,
+	search: str = None,
+	field: str = None,
+	value: str = None,
+	page: int = 1,
+	page_size: int = 25,
+	persona: str = None,
+):
+	"""One form's filled copies, summarised and browsable.
+
+	Every filter narrows the whole report — the counts, the charts and the
+	list — so what is summarised is always what is listed. A teacher sees
+	only the copies they may open anyway.
+	"""
+	if not template or not frappe.db.exists("MS Form Template", template):
+		return fail("Choose a form.", "اختر النموذج.")
+	tdoc = frappe.get_doc("MS Form Template", template)
+	fields = [f for f in _field_rows(tdoc) if f["fieldtype"] not in NO_VALUE]
+
+	filters: dict = {"template": template}
+	if status:
+		filters["status"] = status
+	if academic_term:
+		filters["academic_term"] = academic_term
+	if filled_by:
+		filters["filled_by"] = filled_by
+	if date_from and date_to:
+		filters["filled_on"] = ["between", [f"{date_from} 00:00:00", f"{date_to} 23:59:59"]]
+	elif date_from:
+		filters["filled_on"] = [">=", f"{date_from} 00:00:00"]
+	elif date_to:
+		filters["filled_on"] = ["<=", f"{date_to} 23:59:59"]
+	if search:
+		filters["student_name"] = ["like", f"%{search.strip()}%"]
+
+	rows = frappe.get_all(
+		"MS Form Entry",
+		filters=filters,
+		or_filters=_entry_scope(persona),
+		fields=[
+			"name", "student", "student_name", "student_group", "status", "filled_by",
+			"filled_on", "academic_term", "notes", "modified",
+		],
+		order_by="filled_on desc, modified desc",
+		limit_page_length=0,
+	)
+
+	# A student's copy may carry no section: fall back on the section the
+	# student is in, so filtering and counting by section still find it.
+	students = list({r.student for r in rows if r.student and not r.student_group})
+	home: dict[str, str] = {}
+	for m in frappe.get_all(
+		"Student Group Student",
+		filters={"student": ["in", students or [""]], "parenttype": "Student Group", "active": 1},
+		fields=["student", "parent"],
+		limit_page_length=0,
+	):
+		home.setdefault(m.student, m.parent)
+	for r in rows:
+		r["group"] = r.student_group or home.get(r.student) or ""
+
+	group_info = {
+		g.name: g
+		for g in frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list({r.group for r in rows if r.group}) or [""]]},
+			fields=["name", "student_group_name", "program"],
+			limit_page_length=0,
+		)
+	}
+	if student_group:
+		rows = [r for r in rows if r.group == student_group]
+	if program:
+		rows = [r for r in rows if group_info.get(r.group) and group_info[r.group].program == program]
+
+	# Answers, one query for every copy in view.
+	values: dict[str, dict[str, str]] = {}
+	for v in frappe.get_all(
+		"MS Form Value",
+		filters={"parenttype": "MS Form Entry", "parent": ["in", [r.name for r in rows] or [""]]},
+		fields=["parent", "fieldname", "value"],
+		limit_page_length=0,
+	):
+		values.setdefault(v.parent, {})[v.fieldname] = v.value or ""
+
+	by_field = {f["fieldname"]: f for f in fields}
+	if field and value is not None and value != "" and field in by_field:
+		f = by_field[field]
+		rows = [r for r in rows if value in _answers(f, values.get(r.name, {}).get(field, ""))]
+
+	# --- Summary over everything in view.
+	users = list({r.filled_by for r in rows if r.filled_by})
+	names = dict(
+		frappe.get_all(
+			"User", filters={"name": ["in", users or [""]]}, fields=["name", "full_name"], as_list=True
+		)
+	)
+	by_month: dict[str, int] = {}
+	by_group: dict[str, int] = {}
+	by_filler: dict[str, int] = {}
+	for r in rows:
+		month = str(r.filled_on or r.modified or "")[:7]
+		if month:
+			by_month[month] = by_month.get(month, 0) + 1
+		if r.group:
+			by_group[r.group] = by_group.get(r.group, 0) + 1
+		if r.filled_by:
+			by_filler[r.filled_by] = by_filler.get(r.filled_by, 0) + 1
+
+	summaries = []
+	for f in fields:
+		answers = [values.get(r.name, {}).get(f["fieldname"], "") for r in rows]
+		answered = sum(1 for a in answers if str(a).strip() and not (f["fieldtype"] == "Checkbox" and a == "0"))
+		item = {
+			"fieldname": f["fieldname"],
+			"label": f["label"],
+			"fieldtype": f["fieldtype"],
+			"answered": answered if f["fieldtype"] != "Checkbox" else len([a for a in answers if a]),
+			"total": len(rows),
+		}
+		if f["fieldtype"] in _COUNTABLE:
+			counts: dict[str, int] = {}
+			for a in answers:
+				for x in _answers(f, a):
+					counts[x] = counts.get(x, 0) + 1
+			order = (
+				["نعم", "لا"]
+				if f["fieldtype"] == "Checkbox"
+				else [o.strip() for o in (f["options"] or "").split("\n") if o.strip()]
+			)
+			item["distribution"] = sorted(
+				[{"value": k, "count": c} for k, c in counts.items()],
+				key=lambda d: (order.index(d["value"]) if d["value"] in order else len(order), -d["count"]),
+			)
+			if f["fieldtype"] == "Rating":
+				nums = [flt(a) for a in answers if flt(a) > 0]
+				item["average"] = round(sum(nums) / len(nums), 2) if nums else None
+		elif f["fieldtype"] == "Number":
+			nums = [flt(a) for a in answers if str(a).strip() not in ("", None)]
+			if nums:
+				item["stats"] = {
+					"average": round(sum(nums) / len(nums), 2),
+					"min": min(nums),
+					"max": max(nums),
+					"sum": round(sum(nums), 2),
+				}
+		summaries.append(item)
+
+	page = max(cint(page) or 1, 1)
+	page_size = min(max(cint(page_size) or 25, 1), 100)
+	start = (page - 1) * page_size
+	listed = rows[start : start + page_size]
+
+	def group_label(name: str) -> str:
+		g = group_info.get(name)
+		return (g.student_group_name if g else name) or ""
+
+	return {
+		"template": {
+			"name": tdoc.name,
+			"title": tdoc.title,
+			"category": tdoc.category,
+			"categoryLabel": CATEGORIES.get(tdoc.category, tdoc.category),
+			"entryFor": tdoc.get("entry_for") or "Student",
+			"fields": fields,
+		},
+		"kpis": {
+			"entries": len(rows),
+			"completed": sum(1 for r in rows if r.status == "مكتمل"),
+			"drafts": sum(1 for r in rows if r.status != "مكتمل"),
+			"students": len({r.student for r in rows if r.student}),
+			"groups": len(by_group),
+			"fillers": len(by_filler),
+			"first": str(min((r.filled_on for r in rows if r.filled_on), default="") or ""),
+			"last": str(max((r.filled_on for r in rows if r.filled_on), default="") or ""),
+		},
+		"byMonth": [{"month": k, "count": v} for k, v in sorted(by_month.items())],
+		"byGroup": sorted(
+			[{"group": k, "label": group_label(k), "count": v} for k, v in by_group.items()],
+			key=lambda d: -d["count"],
+		),
+		"byFiller": sorted(
+			[{"user": k, "name": names.get(k) or k, "count": v} for k, v in by_filler.items()],
+			key=lambda d: -d["count"],
+		),
+		"fields": summaries,
+		"entries": [
+			{
+				"name": r.name,
+				"student": r.student,
+				"studentName": r.student_name or "",
+				"group": r.group,
+				"groupLabel": group_label(r.group),
+				"status": r.status,
+				"filledBy": r.filled_by,
+				"filledByName": names.get(r.filled_by) or r.filled_by or "",
+				"filledOn": str(r.filled_on or ""),
+				"academicTerm": r.academic_term or "",
+				"values": values.get(r.name, {}),
+			}
+			for r in listed
+		],
+		"total": len(rows),
+		"page": page,
+		"pageSize": page_size,
+		"filterOptions": {
+			"groups": sorted(
+				[{"value": k, "label": group_label(k)} for k in by_group],
+				key=lambda d: d["label"],
+			),
+			"programs": sorted({g.program for g in group_info.values() if g.program}),
+			"fillers": [{"value": k, "label": names.get(k) or k} for k in by_filler],
+			"terms": sorted({r.academic_term for r in rows if r.academic_term}),
+			"statuses": ["مكتمل", "مسودة"],
+		},
 	}
 
 
