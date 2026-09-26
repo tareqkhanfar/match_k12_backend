@@ -1177,14 +1177,28 @@ def _sync_course_programs(course: str, programs: list[str]):
 	wanted = {p for p in programs if p}
 
 	for program in wanted - current:
-		doc = frappe.get_doc("Program", program)
+		doc = _program_with_live_courses(program)
 		doc.append("courses", {"course": course, "required": 1})
 		doc.save()
 
 	for program in current - wanted:
-		doc = frappe.get_doc("Program", program)
+		doc = _program_with_live_courses(program)
 		doc.set("courses", [c for c in doc.courses if c.course != course])
 		doc.save()
+
+
+def _program_with_live_courses(program: str):
+	"""The Program, minus rows whose Course no longer exists.
+
+	A row left pointing at a deleted Course fails link validation on every
+	later save, which would lock the whole grade out of subject changes.
+	"""
+	doc = frappe.get_doc("Program", program)
+	live = set(
+		frappe.get_all("Course", filters={"name": ["in", [c.course for c in doc.courses]]}, pluck="name")
+	)
+	doc.set("courses", [c for c in doc.courses if c.course in live])
+	return doc
 
 
 @frappe.whitelist()
@@ -1196,7 +1210,22 @@ def delete_subject(course: str, persona: str = None):
 			message_en="This subject is used by a class.",
 			message_ar="لا يمكن الحذف: المادة مستخدمة في شعبة.",
 		)
-	frappe.delete_doc("Course", course)
+	if not frappe.db.exists("Course", course):
+		return fail(message_en="Subject not found.", message_ar="المادة غير موجودة.")
+	# The grades a subject is taught in are only its curriculum map: take it
+	# off them first. Anything else still pointing at it (timetable, plans,
+	# marks) keeps it, and the grades are put back.
+	frappe.db.savepoint("delete_subject")
+	try:
+		_sync_course_programs(course, [])
+		frappe.delete_doc("Course", course)
+	except frappe.LinkExistsError as e:
+		frappe.db.rollback(save_point="delete_subject")
+		frappe.clear_messages()
+		return fail(
+			message_en=str(e) or "This subject is linked to other records.",
+			message_ar="لا يمكن حذف المادة: هي مرتبطة بسجلات أخرى (جدول أو خطة تقييم أو علامات).",
+		)
 	frappe.db.commit()
 	return {
 		"success": True,
