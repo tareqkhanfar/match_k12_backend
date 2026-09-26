@@ -142,13 +142,12 @@ def list_requests(status: str = None, mine: int = 0, persona: str = None):
 		"MS Print Request",
 		filters=filters,
 		pluck="name",
-		order_by="requested_on asc",
+		order_by="requested_on desc, creation desc",
 		limit_page_length=200,
 	)
+	# Newest first, as the school asked — an urgent request still stands out
+	# by its red badge rather than by jumping the order.
 	rows = [_row(frappe.get_doc("MS Print Request", n), persona) for n in names]
-	# Urgent first, then oldest: the office works a queue, not a stack. Sorted
-	# here because Frappe's query builder rejects SQL functions in order_by.
-	rows.sort(key=lambda r: (not r["urgent"], r["requested_on"]))
 
 	# Counted per status for the tabs. Frappe's builder rejects SQL functions
 	# written as strings, so this counts rows rather than aggregating in SQL —
