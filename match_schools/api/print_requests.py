@@ -324,19 +324,31 @@ def delete_request(request: str = None, persona: str = None):
 		)
 
 	# The files were uploaded for this request alone; leaving them behind is
-	# storage nobody can find again.
+	# storage nobody can find again. A file that will not delete (already gone
+	# from disk) must not keep the request itself alive.
 	for a in doc.attachments or []:
-		name = frappe.db.get_value("File", {"file_url": a.file_url}, "name")
-		if name:
-			frappe.delete_doc("File", name, ignore_permissions=True, force=True)
+		for name in frappe.get_all(
+			"File",
+			filters={"file_url": a.file_url, "attached_to_doctype": ["in", ["MS Print Request", "", None]]},
+			pluck="name",
+		):
+			try:
+				frappe.delete_doc("File", name, ignore_permissions=True, force=True, delete_permanently=True)
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), f"print request {request}: file {name}")
 
-	frappe.delete_doc("MS Print Request", request, ignore_permissions=True, force=True)
+	# Permanently — no copy in «Deleted Documents»: an exam paper the principal
+	# removed is removed for the teacher, the office and the mobile app alike.
+	frappe.delete_doc(
+		"MS Print Request", request, ignore_permissions=True, force=True, delete_permanently=True
+	)
 	frappe.db.commit()
+	office = persona in BACK_OFFICE
 	return {
 		"success": True,
 		"data": {"deleted": request},
-		"message_en": "Request withdrawn.",
-		"message_ar": "تم سحب الطلب.",
+		"message_en": "Request deleted." if office else "Request withdrawn.",
+		"message_ar": "تم حذف الطلب نهائياً لدى الجميع." if office else "تم سحب الطلب.",
 	}
 
 
