@@ -175,7 +175,9 @@ def save_record_fields(doctype: str, name: str, values=None, persona: str = None
 			value = flt(value)
 		doc.set(fieldname, value)
 
-	doc.save()
+	# The office (the endpoint's gate) edits these files; which fields is
+	# decided by `_editable` above, not by the secretary's desk role.
+	doc.save(ignore_permissions=True)
 	return _layout(doc)
 
 
