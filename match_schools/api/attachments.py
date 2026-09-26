@@ -143,6 +143,10 @@ def _assert_can_read(persona: str, doctype: str, name: str):
 		# A teacher's own record, and the teaching material they own.
 		if doctype == "Instructor" and name == instructor:
 			return
+		# The documents of a student's file (birth certificate, ID copies,
+		# enrolment papers, medical notes) are the office's alone.
+		if doctype in ("Student", "Program Enrollment", "MS Health Record", "Student Applicant"):
+			frappe.throw(_("ملف الطالب ووثائقه متاحة لإدارة المدرسة والسكرتاريا فقط."), frappe.PermissionError)
 		if doctype in ("MS Assignment", "Course", "Program", "Student Group"):
 			return
 		if student and _teaches(instructor, student):

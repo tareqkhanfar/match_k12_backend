@@ -442,6 +442,9 @@ def _fee_totals(student: str) -> dict:
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT)
 def get_student(student: str, persona: str = None):
 	"""Full student profile: personal, guardians, academics, attendance, fees."""
+	if persona == ROLE_TEACHER:
+		# A student's file is for the office alone (the school's decision).
+		frappe.throw("ملف الطالب متاح لإدارة المدرسة والسكرتاريا فقط.", frappe.PermissionError)
 	scope = resolve_scope(persona)
 	allowed = _allowed_student_ids(persona, scope)
 	if allowed is not None and student not in allowed:

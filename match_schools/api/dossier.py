@@ -39,6 +39,9 @@ SECTION_LIMIT = 40
 # --- Access ----------------------------------------------------------------
 
 
+TEACHER_NO_FILE = "ملف الطالب متاح لإدارة المدرسة والسكرتاريا فقط."
+
+
 def _assert_can_see_student(persona: str, student: str):
 	"""A dossier is the widest view of a person in the system.
 
@@ -55,9 +58,10 @@ def _assert_can_see_student(persona: str, student: str):
 		if student in get_guardian_students(get_linked_guardian()):
 			return
 	elif persona == ROLE_TEACHER:
-		instructor = get_linked_instructor()
-		if instructor and _teacher_teaches_student(instructor, student):
-			return
+		# The school's decision (2026-09-26): a student's file is for the office
+		# alone. Teachers keep their class lists, marks and attendance; the
+		# file itself — family, health, documents, fees — is not theirs.
+		frappe.throw(TEACHER_NO_FILE, frappe.PermissionError)
 
 	frappe.throw(
 		frappe._("You are not allowed to view this student."), frappe.PermissionError
