@@ -174,6 +174,95 @@ def save_quarters(academic_term: str = None, quarters: str | list = None, person
 	}
 
 
+# --- What a subject is out of ----------------------------------------------
+#
+# Two numbers per subject plan, and they are not the same thing:
+#
+#   * ms_term_total — what the subject is marked out of during the term
+#     (100, 150, 200). The term's quarters are shares of it: a 40/60 term gives
+#     a 200-mark subject quarters of 80 and 120.
+#   * ms_certificate_max — what the subject prints as on the certificate. A
+#     subject worked out of 200 may still print out of 100, or 150.
+#
+# Everything in between travels as a percentage, so a subject's mark on the
+# certificate is its percentage of its certificate maximum, rounded to a whole
+# mark — and the overall result is the certificate marks' total over the
+# certificate maxima's total, so a subject worth 200 weighs twice one worth
+# 100.
+
+
+def scale_quarters(quarters: list[dict], total: float) -> list[dict]:
+	"""The term's quarters as shares of a subject worth `total`."""
+	base = sum(flt(q.get("totalMarks")) for q in quarters)
+	if not total or not base or abs(flt(total) - base) < 0.005:
+		return [dict(q) for q in quarters]
+	out = []
+	for q in quarters:
+		out.append({**q, "totalMarks": round(flt(q.get("totalMarks")) * flt(total) / base, 2)})
+	# Rounding must not leave the subject a fraction short of its total.
+	drift = round(flt(total) - sum(q["totalMarks"] for q in out), 2)
+	if out and drift:
+		out[-1]["totalMarks"] = round(out[-1]["totalMarks"] + drift, 2)
+	return out
+
+
+def _plan_scheme(course: str, program: str = None, academic_term: str = None):
+	filters = {"course": course}
+	if program:
+		filters["program"] = program
+	if academic_term:
+		filters["academic_term"] = academic_term
+	return frappe.db.get_value(
+		"MS Grade Scheme",
+		filters,
+		["name", "scheme_name", "ms_term_total", "ms_certificate_max"],
+		as_dict=True,
+	)
+
+
+def certificate_max_for(course: str, academic_term: str = None, program: str = None) -> float:
+	"""What `course` prints as on the certificate; 100 unless its plan says otherwise.
+
+	Looks for the term's own plan first, then any plan of the course, so a
+	subject configured once keeps its weight in a term whose plan is missing.
+	"""
+	if not course:
+		return 100.0
+	academic_term = academic_term or get_default_academic_term()
+	for filters in (
+		{"course": course, "program": program, "academic_term": academic_term},
+		{"course": course, "academic_term": academic_term},
+		{"course": course},
+	):
+		clean = {k: v for k, v in filters.items() if v}
+		value = frappe.db.get_value(
+			"MS Grade Scheme", clean, "ms_certificate_max", order_by="modified desc"
+		)
+		if flt(value) > 0:
+			return flt(value)
+	return 100.0
+
+
+def certificate_mark(percent: float, certificate_max: float) -> int:
+	"""A percentage as a whole certificate mark (half rounds up)."""
+	return int(flt(percent) * flt(certificate_max) / 100 + 0.5 + 1e-9)
+
+
+def weighted_overall(subjects: list[dict]) -> dict:
+	"""The certificate total: marks over maxima, each subject by its own weight.
+
+	Each item needs `percent` (0–100) and `certificate_max`.
+	"""
+	total = 0
+	out_of = 0.0
+	for sub in subjects:
+		cm = flt(sub.get("certificate_max")) or 100.0
+		total += certificate_mark(sub.get("percent"), cm)
+		out_of += cm
+	exact = total / out_of * 100 if out_of else 0.0
+	return {"total": total, "outOf": out_of, "percent": exact}
+
+
 # --- The plan --------------------------------------------------------------
 
 
@@ -238,17 +327,16 @@ def _read_plan(
 	"""
 	academic_term = academic_term or get_default_academic_term()
 
-	filters = {"course": course}
-	if program:
-		filters["program"] = program
-	if academic_term:
-		filters["academic_term"] = academic_term
-
-	scheme = frappe.db.get_value(
-		"MS Grade Scheme", filters, ["name", "scheme_name"], as_dict=True
-	)
+	scheme = _plan_scheme(course, program, academic_term)
 	quarters_info = _read_quarters(academic_term=academic_term, persona=persona)
-	quarters = (quarters_info.get("data") or quarters_info).get("quarters", [])
+	term_quarters = (quarters_info.get("data") or quarters_info).get("quarters", [])
+	base_total = sum(flt(q.get("totalMarks")) for q in term_quarters)
+	term_total = flt(scheme.ms_term_total) if scheme and flt(scheme.ms_term_total) else base_total
+	certificate_max = (
+		flt(scheme.ms_certificate_max) if scheme and flt(scheme.ms_certificate_max) else 100.0
+	)
+	# This subject's quarters: the term's shares of what the subject is out of.
+	quarters = scale_quarters(term_quarters, term_total)
 
 	components = []
 	if scheme:
@@ -292,6 +380,9 @@ def _read_plan(
 		"academicTerm": academic_term,
 		"scheme": scheme.name if scheme else None,
 		"schemeName": scheme.scheme_name if scheme else None,
+		"termTotal": term_total,
+		"termBaseTotal": base_total,
+		"certificateMax": certificate_max,
 		"quarters": by_quarter,
 		"unassigned": unassigned,
 		"orphans": orphans,
@@ -307,6 +398,8 @@ def save_plan(
 	academic_term: str = None,
 	scheme_name: str = None,
 	categories: str | list = None,
+	term_total: float = None,
+	certificate_max: float = None,
 	persona: str = None,
 ):
 	"""Write a subject's plan.
@@ -345,6 +438,8 @@ def save_plan(
 		academic_term=academic_term,
 		scheme_name=scheme_name,
 		rows=rows,
+		term_total=term_total,
+		certificate_max=certificate_max,
 		persona=persona,
 	)
 
@@ -356,13 +451,31 @@ def _write_plan(
 	scheme_name: str | None,
 	rows: list,
 	persona: str = None,
+	term_total: float = None,
+	certificate_max: float = None,
 ) -> dict:
 	"""Validate a plan and write it — shared by `save_plan` and templates.
 
 	The caller has already decided this persona may write this course's plan.
+	`term_total` / `certificate_max` left out keep what the plan already had.
 	"""
 	quarters_info = _read_quarters(academic_term=academic_term, persona=persona)
-	quarters = (quarters_info.get("data") or quarters_info).get("quarters", [])
+	term_quarters = (quarters_info.get("data") or quarters_info).get("quarters", [])
+	current = _plan_scheme(course, program, academic_term)
+	base_total = sum(flt(q.get("totalMarks")) for q in term_quarters)
+	if term_total in (None, "") or flt(term_total) == 0:
+		term_total = flt(current.ms_term_total) if current and flt(current.ms_term_total) else base_total
+	if certificate_max in (None, "") or flt(certificate_max) == 0:
+		certificate_max = (
+			flt(current.ms_certificate_max) if current and flt(current.ms_certificate_max) else 100
+		)
+	term_total, certificate_max = flt(term_total), flt(certificate_max)
+	if term_total <= 0 or certificate_max <= 0:
+		return fail(
+			message_en="The subject's totals must be greater than zero.",
+			message_ar="مجموع المادة وعلامتها على الشهادة يجب أن يكونا أكبر من صفر.",
+		)
+	quarters = scale_quarters(term_quarters, term_total)
 	quarter_names = {q["name"] for q in quarters}
 	if not quarter_names:
 		return fail(
@@ -457,7 +570,11 @@ def _write_plan(
 	if academic_term:
 		doc.academic_term = academic_term
 		doc.academic_year = frappe.db.get_value("Academic Term", academic_term, "academic_year")
-	doc.scheme_name = scheme_name or f"خطة {course}"
+	doc.scheme_name = scheme_name or doc.get("scheme_name") or f"خطة {course}"
+	# Stored even when it equals the term's own total, so the plan says what
+	# it was built for if the term's quarters are changed later.
+	doc.ms_term_total = term_total
+	doc.ms_certificate_max = certificate_max
 
 	doc.set("components", [])
 	for cat in rows:
@@ -536,6 +653,8 @@ def _template_summary(doc) -> dict:
 		"name": doc.template_name,
 		"description": doc.description or "",
 		"quarterTotals": _template_totals(doc),
+		"termTotal": sum(_template_totals(doc)),
+		"certificateMax": flt(doc.get("certificate_max")) or 100.0,
 		"categories": len(rows),
 		"assessments": sum(len(r.get("children") or []) for r in rows),
 		"modified": str(doc.modified or ""),
@@ -551,8 +670,13 @@ def _materialise(doc, academic_term: str | None) -> dict:
 	scaled so the quarter still adds up — and the note says so, so nobody is
 	surprised by a 12.5 where the template said 10.
 	"""
-	quarters = (_read_quarters(academic_term=academic_term) or {}).get("quarters", [])
 	template_totals = _template_totals(doc)
+	# The subject the template describes is out of what its quarters add up
+	# to; the term's quarters are shares of that.
+	quarters = scale_quarters(
+		(_read_quarters(academic_term=academic_term) or {}).get("quarters", []),
+		sum(template_totals),
+	)
 	rows = _template_rows(doc)
 	problems: list[str] = []
 	notes: list[str] = []
@@ -598,7 +722,14 @@ def _materialise(doc, academic_term: str | None) -> dict:
 				}
 			)
 
-	return {"categories": out, "problems": problems, "notes": notes, "quarters": quarters}
+	return {
+		"categories": out,
+		"problems": problems,
+		"notes": notes,
+		"quarters": quarters,
+		"termTotal": sum(template_totals),
+		"certificateMax": flt(doc.get("certificate_max")) or 100.0,
+	}
 
 
 @frappe.whitelist()
@@ -639,6 +770,7 @@ def save_plan_template(
 	description: str = None,
 	quarter_totals: str | list = None,
 	categories: str | list = None,
+	certificate_max: float = None,
 	persona: str = None,
 ):
 	"""Create or update a template.
@@ -741,6 +873,7 @@ def save_plan_template(
 	doc.template_name = name
 	doc.description = (description or "").strip()
 	doc.quarter_totals = frappe.as_json(totals, indent=None)
+	doc.certificate_max = flt(certificate_max) or flt(doc.get("certificate_max")) or 100
 	doc.plan = frappe.as_json(cleaned, indent=None)
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
@@ -817,6 +950,8 @@ def apply_plan_template(
 			scheme_name=f"خطة {course} ({doc.template_name})",
 			rows=applied["categories"],
 			persona=persona,
+			term_total=applied["termTotal"],
+			certificate_max=applied["certificateMax"],
 		)
 		if res.get("success") is False:
 			results.append(

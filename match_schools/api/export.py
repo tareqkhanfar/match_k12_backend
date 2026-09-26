@@ -378,9 +378,15 @@ def _render_report_card_html(data: dict) -> str:
 		# Gradebook subjects carry `final`/`course`; legacy ones `percentage`/`subject`.
 		name = s.get("course") or s.get("subject") or ""
 		pct = flt(s.get("final") if s.get("final") is not None else s.get("percentage"))
+		# The subject as the certificate prints it: a whole mark out of what
+		# the subject is worth (100, 150, 200…).
+		cert_max = flt(s.get("certificate_max")) or 100
+		cert_mark = s.get("certificate_mark")
+		if cert_mark is None:
+			cert_mark = int(pct * cert_max / 100 + 0.5 + 1e-9)
 		return f"""<tr>
 			<td class="txt">{frappe.utils.escape_html(str(name))}</td>
-			<td class="num">{pct:g} / 100</td>
+			<td class="num">{cert_mark:g} / {cert_max:g}</td>
 			<td>{frappe.utils.escape_html(str(s.get('grade') or '—'))}</td>
 			<td>{_compare(pct, s.get('section_average'))}</td>
 			<td>{_compare(pct, s.get('grade_average'))}</td>
@@ -390,6 +396,10 @@ def _render_report_card_html(data: dict) -> str:
 	rows = "".join(_row(s) for s in data["subjects"])
 	average = flt(data.get("overall") if data.get("overall") is not None else data.get("average"))
 	verdict = "ناجح" if average >= 50 else "راسب"
+	if data.get("overall_total") is not None and data.get("overall_out_of"):
+		total_line = f"{flt(data['overall_total']):g} / {flt(data['overall_out_of']):g}"
+	else:
+		total_line = "—"
 
 	body = f"""
   <table class="data">
@@ -404,6 +414,8 @@ def _render_report_card_html(data: dict) -> str:
     <div class="panel-head">النتيجة النهائية</div>
     <table class="panel-body">
       <tr>
+        <td><div class="panel-k">المجموع</div>
+            <div class="panel-v num">{total_line}</div></td>
         <td><div class="panel-k">المعدل العام</div>
             <div class="panel-v num">{average:g}%</div></td>
         <td><div class="panel-k">التقدير</div>
@@ -453,7 +465,7 @@ def export_quarter_report_card(
 			message_ar="يجب تحديد الطالب والربع.",
 		)
 
-	from match_schools.api.assessment_plan import compute_marks
+	from match_schools.api.assessment_plan import certificate_max_for, compute_marks
 
 	groups = [student_group] if student_group else [
 		r.parent
@@ -517,16 +529,23 @@ def export_quarter_report_card(
 			# not examined yet — and would drag the average down with it.
 			if not any(c.get("counted") or c.get("dropped") for c in q.get("categories") or []):
 				continue
+			# Printed on the certificate scale: the subject's quarter is its
+			# share of what the subject is worth on the certificate, and the
+			# mark is whole. A 200-mark subject printed out of 100 has an
+			# 80-mark quarter printed out of 40.
+			scale = certificate_max_for(course, academic_term) / (flt(row.get("totalMarks")) or 100)
+			printed_total = round(flt(q["totalMarks"]) * scale, 2)
+			printed_marks = int(flt(q["marks"]) * scale + 0.5 + 1e-9)
 			subjects.append(
 				{
 					"course": course,
-					"marks": flt(q["marks"]),
-					"totalMarks": flt(q["totalMarks"]),
+					"marks": printed_marks,
+					"totalMarks": printed_total,
 					"percent": flt(q["percent"]),
 				}
 			)
-			quarter_total += flt(q["totalMarks"])
-			earned_total += flt(q["marks"])
+			quarter_total += printed_total
+			earned_total += printed_marks
 			break
 
 	if not subjects:
@@ -662,7 +681,7 @@ def quarter_results(
 			message_ar="يجب تحديد الشعبة والربع.",
 		)
 
-	from match_schools.api.assessment_plan import compute_marks
+	from match_schools.api.assessment_plan import certificate_max_for, compute_marks
 
 	courses = [course] if course else sorted(
 		{
@@ -696,11 +715,17 @@ def quarter_results(
 		payload = res.get("data") if isinstance(res, dict) and "data" in res else res
 		if not payload or not payload.get("students"):
 			continue
+		cert_max = certificate_max_for(c, academic_term)
 		for row in payload["students"]:
 			q = next((x for x in row["quarters"] if x["quarter"] == quarter), None)
 			if not q:
 				continue
 			quarter_total = flt(q["totalMarks"])
+			# On the certificate the subject is out of its certificate mark, so
+			# its quarter is that share of it: 80 of a 200-mark subject printed
+			# out of 100 is a quarter out of 40. Printed marks are whole.
+			subject_total = flt(row.get("totalMarks")) or 100
+			scale = cert_max / subject_total
 			entry = by_student.setdefault(
 				row["student"],
 				{"student": row["student"], "studentName": row["studentName"], "subjects": {}},
@@ -709,12 +734,16 @@ def quarter_results(
 				"marks": flt(q["marks"]),
 				"totalMarks": flt(q["totalMarks"]),
 				"percent": flt(q["percent"]),
+				"certificateMarks": int(flt(q["marks"]) * scale + 0.5 + 1e-9),
+				"certificateTotal": round(flt(q["totalMarks"]) * scale, 2),
 			}
 
 	students = []
 	for entry in by_student.values():
-		marks = sum(s["marks"] for s in entry["subjects"].values())
-		total = sum(s["totalMarks"] for s in entry["subjects"].values())
+		# Summed on the certificate scale, so a subject weighs what it is
+		# worth on the certificate and the total matches the printed marks.
+		marks = sum(s["certificateMarks"] for s in entry["subjects"].values())
+		total = sum(s["certificateTotal"] for s in entry["subjects"].values())
 		students.append(
 			{
 				**entry,

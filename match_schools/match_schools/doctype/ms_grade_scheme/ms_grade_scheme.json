@@ -17,7 +17,11 @@
   "is_default",
   "sec_components",
   "components",
-  "total_weight"
+  "total_weight",
+  "sec_scale",
+  "ms_term_total",
+  "col_scale",
+  "ms_certificate_max"
  ],
  "fields": [
   {
@@ -91,6 +95,27 @@
    "fieldtype": "Float",
    "label": "مجموع الأوزان %",
    "read_only": 1
+  },
+  {
+   "fieldname": "sec_scale",
+   "fieldtype": "Section Break",
+   "label": "العلامة"
+  },
+  {
+   "fieldname": "ms_term_total",
+   "fieldtype": "Float",
+   "label": "مجموع علامات المادة في الفصل",
+   "description": "ما تُرصد عليه المادة خلال الفصل (100، 150، 200…). فارغ = مجموع أرباع الفصل."
+  },
+  {
+   "fieldname": "col_scale",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ms_certificate_max",
+   "fieldtype": "Float",
+   "label": "علامة المادة على الشهادة",
+   "description": "العلامة التي تُطبع للمادة على الشهادة (100، 150، 200…). فارغ = 100."
   }
  ],
  "index_web_pages_for_search": 1,

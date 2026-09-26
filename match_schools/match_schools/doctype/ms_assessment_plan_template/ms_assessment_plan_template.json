@@ -11,6 +11,7 @@
   "description",
   "column_break_1",
   "quarter_totals",
+  "certificate_max",
   "section_break_1",
   "plan"
  ],
@@ -39,6 +40,12 @@
    "description": "JSON list, e.g. [40, 60] — the quarter totals the template was written for.",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "certificate_max",
+   "fieldtype": "Float",
+   "label": "علامة المادة على الشهادة",
+   "default": "100"
   },
   {
    "fieldname": "section_break_1",

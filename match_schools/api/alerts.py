@@ -240,7 +240,10 @@ def _term_grades_by_student(students: list[str]) -> dict[str, list]:
 		entries.setdefault(e.student, {}).setdefault(e.course, []).append(e)
 
 	return {
-		student: [_compute_subject_grade(rows) for rows in courses.values()]
+		student: [
+			{**_compute_subject_grade(rows), "course": course}
+			for course, rows in courses.items()
+		]
 		for student, courses in entries.items()
 	}
 
@@ -263,8 +266,24 @@ def _measure_subject_below_mark(students: list[str], rule) -> dict[str, float]:
 
 
 def _measure_overall_average(students: list[str], rule) -> dict[str, float]:
+	# The same overall the certificate prints: each subject weighed by what
+	# it is worth there.
+	from match_schools.api.assessment_plan import certificate_max_for, weighted_overall
+
+	maxima: dict[str, float] = {}
+
+	def cm(course):
+		if course not in maxima:
+			maxima[course] = certificate_max_for(course)
+		return maxima[course]
+
 	return {
-		s: round(sum(g["final"] for g in subjects) / len(subjects), 1)
+		s: round(
+			weighted_overall(
+				[{"percent": g["final"], "certificate_max": cm(g.get("course"))} for g in subjects]
+			)["percent"],
+			1,
+		)
 		for s, subjects in _term_grades_by_student(students).items()
 		if subjects
 	}

@@ -13,6 +13,11 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate, today
 
+from match_schools.api.assessment_plan import (
+	certificate_mark,
+	certificate_max_for,
+	weighted_overall,
+)
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -1519,6 +1524,14 @@ def term_grades(
 		computed = _planned_subject_grade(student, course, academic_term) or (
 			_compute_subject_grade(rows)
 		)
+		# What the subject prints as on the certificate (100, 150, 200…) and
+		# the whole mark it earns there.
+		cert_max = certificate_max_for(course, academic_term)
+		computed = {
+			**computed,
+			"certificate_max": cert_max,
+			"certificate_mark": certificate_mark(computed.get("final"), cert_max),
+		}
 		subjects.append(
 			{
 				"course": course,
@@ -1555,10 +1568,16 @@ def term_grades(
 	# rounded to a whole number. Subject finals and individual marks keep their
 	# decimals: rounding them would compound across components and change a
 	# result the teacher actually entered.
-	overall_exact = (
-		sum(s["final"] for s in subjects) / len(subjects) if subjects else 0.0
+	# Each subject weighs by what it is worth on the certificate: a subject out
+	# of 200 counts twice one out of 100. The total is of whole certificate
+	# marks, so the percentage matches the figures printed beside it.
+	weighted = weighted_overall(
+		[{"percent": s["final"], "certificate_max": s["certificate_max"]} for s in subjects]
 	)
-	overall = round(overall_exact) if subjects else 0
+	overall_exact = weighted["percent"] if subjects else 0.0
+	# Half rounds up (46.5 → 47), as on a printed certificate; Python's round()
+	# would send it to the even neighbour.
+	overall = int(overall_exact + 0.5 + 1e-9) if subjects else 0
 	# Kept so a screen can show the working, and so a borderline case is
 	# auditable rather than looking arbitrary.
 	overall_precise = round(overall_exact, 2) if subjects else 0.0
@@ -1592,6 +1611,8 @@ def term_grades(
 	if show_overall:
 		result["overall"] = overall
 		result["overall_precise"] = overall_precise
+		result["overall_total"] = weighted["total"]
+		result["overall_out_of"] = weighted["outOf"]
 		result["overall_grade"] = grade_for(overall)
 	else:
 		result["overall"] = None
@@ -1660,6 +1681,8 @@ def academic_record(student: str = None, persona: str = None):
 				"subjects": data["subjects"],
 				"overall": data["overall"],
 				"overall_grade": data["overall_grade"],
+				"overall_total": data.get("overall_total"),
+				"overall_out_of": data.get("overall_out_of"),
 				"published": data.get("published", False),
 				"shows_overall": data.get("shows_overall", False),
 			}
@@ -1733,12 +1756,14 @@ def class_term_grades(
 			by_course: dict[str, list] = {}
 			for e in entries:
 				by_course.setdefault(e.course, []).append(e)
-			per_subject = [_compute_subject_grade(v) for v in by_course.values()]
-			average = (
-				round(sum(p["final"] for p in per_subject) / len(per_subject), 1)
-				if per_subject
-				else 0.0
-			)
+			per_subject = [
+				{
+					"percent": _compute_subject_grade(v)["final"],
+					"certificate_max": certificate_max_for(c, academic_term),
+				}
+				for c, v in by_course.items()
+			]
+			average = round(weighted_overall(per_subject)["percent"], 1) if per_subject else 0.0
 			computed = {
 				"percentage": average,
 				"bonus": 0.0,

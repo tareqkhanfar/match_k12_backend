@@ -47,7 +47,9 @@ class MSGradeScheme(Document):
 		expected_by_quarter = self._quarter_totals()
 
 		for quarter, total in by_quarter.items():
-			expected = expected_by_quarter.get(quarter, 100 if not quarter else None)
+			expected = expected_by_quarter.get(
+				quarter, (flt(self.get("ms_term_total")) or 100) if not quarter else None
+			)
 			if expected is None:
 				# The quarter no longer exists on the term; the API reports this
 				# more clearly, so the doctype does not block the save here.
@@ -69,8 +71,17 @@ class MSGradeScheme(Document):
 			"MS Term Quarter",
 			filters={"parent": self.academic_term, "parenttype": "Academic Term"},
 			fields=["quarter_name", "total_marks"],
+			order_by="idx",
 		)
-		return {r.quarter_name: flt(r.total_marks) for r in rows}
+		# A subject marked out of 200 has the term's quarters as shares of 200
+		# (80 and 120 for a 40/60 term), not the term's own 40 and 60.
+		from match_schools.api.assessment_plan import scale_quarters
+
+		scaled = scale_quarters(
+			[{"name": r.quarter_name, "totalMarks": flt(r.total_marks)} for r in rows],
+			flt(self.get("ms_term_total")),
+		)
+		return {q["name"]: flt(q["totalMarks"]) for q in scaled}
 
 		for c in self.components:
 			if flt(c.max_score) <= 0:

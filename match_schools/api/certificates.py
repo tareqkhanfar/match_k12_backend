@@ -228,6 +228,15 @@ def enrolment_letter(student: str, persona: str = None):
 	_pdf_response(_wrap(DOCUMENTS["enrolment"], inner, code), f"شهادة-قيد-{s['name']}.pdf")
 
 
+def _cert(sub: dict) -> str:
+	"""A subject's certificate mark, «85 / 100»."""
+	cert_max = flt(sub.get("certificate_max")) or 100
+	mark = sub.get("certificate_mark")
+	if mark is None:
+		mark = int(flt(sub.get("final")) * cert_max / 100 + 0.5 + 1e-9)
+	return f"{mark:g} / {cert_max:g}"
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_STUDENT, ROLE_PARENT)
 def transcript(student: str, persona: str = None):
@@ -257,17 +266,26 @@ def transcript(student: str, persona: str = None):
 
 	blocks = []
 	for period in data["periods"]:
+		# Each subject as a whole mark out of what it is worth on the
+		# certificate (100, 150, 200…), and the term as their total.
 		rows = "".join(
 			f"<tr><td>{frappe.utils.escape_html(sub['course'])}</td>"
-			f'<td class="num">{sub["final"]}</td>'
+			f'<td class="num">{_cert(sub)}</td>'
 			f'<td class="num">{sub["grade"]}</td>'
 			f"<td>{frappe.utils.escape_html(sub['label'])}</td></tr>"
 			for sub in period["subjects"]
 		)
 		overall = period.get("overall")
-		total = (
+		sum_row = (
+			f'<tr class="total"><td>المجموع</td>'
+			f'<td class="num">{period["overall_total"]:g} / {period["overall_out_of"]:g}</td>'
+			"<td></td><td></td></tr>"
+			if overall is not None and period.get("overall_out_of")
+			else ""
+		)
+		total = sum_row + (
 			f'<tr class="total"><td>معدل الفصل</td>'
-			f'<td class="num">{overall}</td>'
+			f'<td class="num">{overall}%</td>'
 			f'<td class="num">{(period.get("overall_grade") or {}).get("grade", "")}</td>'
 			f'<td>{frappe.utils.escape_html((period.get("overall_grade") or {}).get("label", ""))}</td></tr>'
 			if overall is not None
