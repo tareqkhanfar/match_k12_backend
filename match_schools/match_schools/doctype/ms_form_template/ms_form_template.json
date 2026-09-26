@@ -121,7 +121,7 @@
    "fieldname": "print_theme",
    "fieldtype": "Select",
    "label": "Print Theme",
-   "options": "soft\nclassic",
+   "options": "soft\nclassic\nletter",
    "default": "soft"
   },
   {

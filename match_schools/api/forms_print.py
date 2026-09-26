@@ -190,6 +190,12 @@ PRINT_STYLE = (
   .ms-page { position: relative; font-size: 12.5px; }
   .theme-soft { border: 1.5px solid #c9cde0; border-radius: 16px; padding: 12px 18px 10px; min-height: 276mm; }
   .theme-soft.landscape { min-height: 189mm; }
+  /* An official letter: the school's own letterhead across the top, inside
+     the double rule its paper documents carry. */
+  .theme-letter { border: 3.5px double #1f2433; padding: 7mm 9mm 8mm; min-height: 279mm; font-size: 15px; line-height: 1.9; }
+  .theme-letter.landscape { min-height: 192mm; }
+  .ms-banner { margin: 0 0 4mm; }
+  .ms-banner img { display: block; width: 100%; max-height: 42mm; object-fit: contain; }
   .deco { position: absolute; width: 54px; height: 54px; }
   .deco.tr { top: 3px; right: 3px; transform: scaleX(-1); }
   .deco.tl { top: 3px; left: 3px; }
@@ -561,6 +567,76 @@ class Page:
 			"</header>"
 		)
 
+	def banner(self):
+		"""The letterhead as one image — the school's own, across the page.
+
+		For letters that must look like the school's paper: the form's logo is
+		the whole letterhead (Arabic side, crest, English side), printed at full
+		width. Without one, the ordinary letterhead is drawn instead.
+		"""
+		url = self.t.get("print_logo")
+		if not url:
+			return self.letterhead()
+		return f'<div class="ms-banner"><img src="{file_data_uri(url)}" alt=""></div>'
+
+	def weekday(self, label):
+		"""The Arabic weekday of a date answer («الأحد»), or '' when unanswered."""
+		f = self._find(label)
+		raw = self.raw.get(f["fieldname"]) if f else None
+		m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(raw or ""))
+		if not m:
+			return ""
+		import datetime
+
+		days = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+		return days[datetime.date(int(m[1]), int(m[2]), int(m[3])).weekday()]
+
+	def chosen(self, label) -> list[str]:
+		"""A multiple choice's picks, in the order the form lists them."""
+		f = self._find(label)
+		if not f:
+			return []
+		picked = self._chosen(f)
+		return [o.rstrip(":") for o in options_of(f) if o in picked or o.rstrip(":") in picked] + sorted(
+			x for x in picked if x not in options_of(f) and x + ":" not in options_of(f)
+		)
+
+	def _student(self) -> dict:
+		"""What the student's record already says, for a design to fall back on."""
+		sid = None if self.blank else self.e.get("student")
+		if not sid or not frappe.db.exists("Student", sid):
+			return {}
+		st = frappe.db.get_value(
+			"Student",
+			sid,
+			["student_name", "date_of_birth", "joining_date", "city", "address_line_1", "gender"],
+			as_dict=True,
+		) or {}
+		guardian = frappe.get_all(
+			"Student Guardian",
+			filters={"parent": sid, "parenttype": "Student"},
+			fields=["guardian_name"],
+			order_by="idx",
+			limit=1,
+		)
+		enrolment = frappe.get_all(
+			"Program Enrollment",
+			filters={"student": sid, "docstatus": 1},
+			fields=["program", "academic_year"],
+			order_by="enrollment_date desc",
+			limit=1,
+		)
+		return {
+			"name": st.get("student_name") or "",
+			"date_of_birth": _fmt_date(str(st.get("date_of_birth") or "")),
+			"joining_date": _fmt_date(str(st.get("joining_date") or "")),
+			"city": st.get("city") or st.get("address_line_1") or "",
+			"female": (st.get("gender") or "") in ("Female", "أنثى"),
+			"guardian": guardian[0].guardian_name if guardian else "",
+			"program": enrolment[0].program if enrolment else "",
+			"academic_year": enrolment[0].academic_year if enrolment else "",
+		}
+
 	def signatures(self):
 		labels = [x.strip() for x in (self.t.get("print_signatures") or "").split("\n") if x.strip()]
 		if not labels:
@@ -609,6 +685,10 @@ class Page:
 			"lines": self.lines,
 			"icon": self.icon,
 			"letterhead": self.letterhead,
+			"banner": self.banner,
+			"weekday": self.weekday,
+			"chosen": self.chosen,
+			"student": self._student(),
 			"signatures": self.signatures,
 			"footer": self.footer,
 		}

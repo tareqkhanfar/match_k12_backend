@@ -263,7 +263,7 @@ def get_template(template: str, persona: str = None):
 
 PRINT_SETTINGS = {
 	"entryFor": ("entry_for", tuple(forms_print.ENTRY_FOR)),
-	"printTheme": ("print_theme", ("soft", "classic")),
+	"printTheme": ("print_theme", ("soft", "classic", "letter")),
 	"printOrientation": ("print_orientation", ("Portrait", "Landscape")),
 	"printLogo": ("print_logo", None),
 	"printSchool": ("print_school", None),
