@@ -1095,7 +1095,7 @@ def delete_class(student_group: str, persona: str = None):
 			message_en="This class still has students. Remove them first.",
 			message_ar="لا يمكن الحذف: توجد قائمة طلاب في هذه الشعبة.",
 		)
-	frappe.delete_doc("Student Group", student_group)
+	frappe.delete_doc("Student Group", student_group, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,
@@ -1224,7 +1224,7 @@ def delete_subject(course: str, persona: str = None):
 	frappe.db.savepoint("delete_subject")
 	try:
 		_sync_course_programs(course, [])
-		frappe.delete_doc("Course", course)
+		frappe.delete_doc("Course", course, ignore_permissions=True)
 	except frappe.LinkExistsError as e:
 		frappe.db.rollback(save_point="delete_subject")
 		frappe.clear_messages()

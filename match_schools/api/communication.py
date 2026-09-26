@@ -349,7 +349,7 @@ def save_announcement(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def delete_announcement(announcement: str, persona: str = None):
-	frappe.delete_doc("MS Announcement", announcement)
+	frappe.delete_doc("MS Announcement", announcement, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,

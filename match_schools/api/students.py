@@ -1007,7 +1007,7 @@ def delete_guardian(guardian: str, persona: str = None):
 			message_en=f"This guardian is still linked to {linked} student(s).",
 			message_ar=f"ولي الأمر مرتبط بـ {linked} طالب/طلاب، يجب فك الارتباط أولاً.",
 		)
-	frappe.delete_doc("Guardian", guardian)
+	frappe.delete_doc("Guardian", guardian, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,

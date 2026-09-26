@@ -166,7 +166,7 @@ def delete_book(book: str, persona: str = None):
 			message_en="This book still has copies on loan.",
 			message_ar="لا يمكن الحذف: توجد نسخ معارة من هذا الكتاب.",
 		)
-	frappe.delete_doc("MS Library Book", book)
+	frappe.delete_doc("MS Library Book", book, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,
@@ -415,7 +415,7 @@ def delete_route(route: str, persona: str = None):
 			message_en="This route still has active student assignments.",
 			message_ar="لا يمكن الحذف: يوجد طلاب مسندون لهذا الخط.",
 		)
-	frappe.delete_doc("MS Transport Route", route)
+	frappe.delete_doc("MS Transport Route", route, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,
@@ -541,7 +541,7 @@ def save_transport_assignment(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def delete_transport_assignment(assignment: str, persona: str = None):
-	frappe.delete_doc("MS Transport Assignment", assignment)
+	frappe.delete_doc("MS Transport Assignment", assignment, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,

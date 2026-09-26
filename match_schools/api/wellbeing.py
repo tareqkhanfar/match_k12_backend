@@ -219,7 +219,7 @@ def save_health_visit(payload: str | dict, persona: str = None):
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
 def delete_health_visit(visit: str, persona: str = None):
-	frappe.delete_doc("MS Health Visit", visit)
+	frappe.delete_doc("MS Health Visit", visit, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"success": True,
