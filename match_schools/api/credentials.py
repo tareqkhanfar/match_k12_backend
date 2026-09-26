@@ -273,32 +273,52 @@ def _assert_may_manage(persona: str, doctype: str):
 def _user_of(doctype: str, name: str) -> str | None:
 	"""The User linked to a person's record.
 
-	Student and Guardian hold the link directly. An Instructor reaches it
-	through Employee, and falls back to matching on the full name for schools
-	that run without the HR module.
+	Student, Guardian and staff hold the link directly. An Instructor holds it
+	in `ms_user` — the same field the login reads first (`get_linked_instructor`)
+	— then through Employee. The name is matched only as a last resort, and
+	only to a teacher account nobody else claims: a parent who happens to share
+	a teacher's name must never be handed that teacher's new password.
 	"""
 	if doctype in ("Student", "Guardian", "MS Staff Member"):
 		return frappe.db.get_value(doctype, name, "user")
 
 	if doctype == "Instructor":
+		direct = frappe.db.get_value("Instructor", name, "ms_user")
+		if direct and frappe.db.exists("User", direct):
+			return direct
 		employee = frappe.db.get_value("Instructor", name, "employee")
 		if employee:
 			user = frappe.db.get_value("Employee", employee, "user_id")
 			if user:
 				return user
-		full_name = frappe.db.get_value("Instructor", name, "instructor_name")
-		if full_name:
-			return frappe.db.get_value("User", {"full_name": full_name, "enabled": 1}, "name")
+		return _unclaimed_teacher_by_name(name)
 	return None
 
 
+def _unclaimed_teacher_by_name(instructor: str) -> str | None:
+	"""The one teacher account carrying this instructor's name, if exactly one
+	does and no other instructor is linked to it."""
+	full_name = frappe.db.get_value("Instructor", instructor, "instructor_name")
+	if not full_name:
+		return None
+	users = frappe.get_all("User", filters={"full_name": full_name, "enabled": 1}, pluck="name")
+	teachers = [
+		u for u in users
+		if FRAPPE_ROLE_BY_PERSONA[ROLE_TEACHER] in frappe.get_roles(u)
+		and not frappe.db.exists("Instructor", {"ms_user": u, "name": ["!=", instructor]})
+	]
+	return teachers[0] if len(teachers) == 1 else None
+
+
 def _link_user(doctype: str, name: str, user: str):
-	"""Record the new User on the person's own record."""
+	"""Record the User on the person's own record — explicitly, so the login
+	finds its person without guessing by name."""
 	if doctype in ("Student", "Guardian", "MS Staff Member"):
 		frappe.db.set_value(doctype, name, "user", user, update_modified=False)
 	elif doctype == "Instructor":
+		frappe.db.set_value("Instructor", name, "ms_user", user, update_modified=False)
 		employee = frappe.db.get_value("Instructor", name, "employee")
-		if employee:
+		if employee and not frappe.db.get_value("Employee", employee, "user_id"):
 			frappe.db.set_value("Employee", employee, "user_id", user, update_modified=False)
 
 
@@ -416,6 +436,10 @@ def reset_account_password(doctype: str = None, name: str = None, persona: str =
 			message_en="This person has no account yet.",
 			message_ar="لا يوجد حساب لهذا الشخص — أنشئ الحساب أولاً.",
 		)
+	if _protected_user(user):
+		return fail("Administrator account.", "هذا حساب مدير النظام — لا تُغيَّر كلمة مروره من هنا.")
+	if doctype == "Instructor":
+		_link_user(doctype, name, user)
 
 	password = generate_password()
 	update_password(user, password)
@@ -661,6 +685,9 @@ def issue_accounts(doctype: str = None, names: str | list = None, mode: str = "a
 		elif user and _protected_user(user):
 			row.update(user=user, status="skipped", note="حساب مدير النظام — لم يُغيَّر")
 		elif user:
+			if doctype == "Instructor":
+				# Found by Employee or by name: make the link explicit now.
+				_link_user(doctype, name, user)
 			password = generate_password()
 			update_password(user, password)
 			if _force_change_enabled():

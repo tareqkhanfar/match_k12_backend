@@ -516,6 +516,12 @@ def list_teachers(
 				r["joined"] = str(emp.date_of_joining or "")
 		r.setdefault("phone", None)
 		r.setdefault("email", None)
+		# The login this teacher signs in with — so the office can see at a
+		# glance that the account and the teacher are joined up.
+		from match_schools.api.credentials import _user_of
+
+		user = _user_of("Instructor", r["name"])
+		r["username"] = (frappe.db.get_value("User", user, "username") or user.split("@")[0]) if user else None
 	return rows
 
 
