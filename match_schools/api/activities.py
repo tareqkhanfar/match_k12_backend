@@ -324,6 +324,12 @@ def delete_activity(activity: str, persona: str = None):
 			message_en=f"{enrolled} student(s) are registered; cancel the activity instead.",
 			message_ar=f"يوجد {enrolled} طالب مُسجّل — يمكنك إلغاء النشاط بدل حذفه.",
 		)
+	# Only withdrawals are left: they go with the activity, or their link
+	# would block the delete the check above just allowed.
+	for name in frappe.get_all(
+		"MS Activity Enrolment", filters={"activity": activity, "status": "Withdrawn"}, pluck="name"
+	):
+		frappe.delete_doc("MS Activity Enrolment", name, ignore_permissions=True)
 	frappe.delete_doc("MS Activity", activity, ignore_permissions=True)
 	frappe.db.commit()
 	return {
