@@ -20,6 +20,7 @@ from frappe import _
 from frappe.utils import cint, now
 
 from match_schools.api.utils import (
+	FRAPPE_ROLE_BY_PERSONA,
 	ROLE_ADMIN,
 	ROLE_SECRETARY,
 	ROLE_TEACHER,
@@ -240,7 +241,11 @@ def save_request(payload: str | dict = None, persona: str = None):
 	if not doc.academic_term:
 		doc.academic_term = get_default_academic_term()
 
+	is_new = doc.is_new()
 	doc.save(ignore_permissions=True)
+	_link_files(doc)
+	if is_new:
+		_notify_office(doc)
 	frappe.db.commit()
 	return {
 		"success": True,
@@ -286,6 +291,16 @@ def set_status(
 	if status in ("Ready", "Collected", "Rejected"):
 		doc.completed_on = now()
 	doc.save(ignore_permissions=True)
+	if status in ("Ready", "Rejected") and doc.requested_by:
+		from match_schools import push
+
+		push.notify(
+			[doc.requested_by],
+			"طلب الطباعة جاهز" if status == "Ready" else "رُفض طلب الطباعة",
+			doc.title + (f" — {notes}" if notes else ""),
+			channel="general",
+			link="/app/print-requests",
+		)
 	frappe.db.commit()
 
 	return {
@@ -323,6 +338,79 @@ def delete_request(request: str = None, persona: str = None):
 		"message_en": "Request withdrawn.",
 		"message_ar": "تم سحب الطلب.",
 	}
+
+
+def _link_files(doc):
+	"""Attach the uploaded files to the request they belong to.
+
+	They are uploaded before the request exists, so they start out attached to
+	nothing — and a private file attached to nothing opens for its uploader
+	alone, which is how the office got «Forbidden» on every teacher's paper.
+	"""
+	for a in doc.attachments or []:
+		name = frappe.db.get_value("File", {"file_url": a.file_url, "attached_to_name": ["is", "not set"]}, "name")
+		if name:
+			frappe.db.set_value(
+				"File", name,
+				{"attached_to_doctype": "MS Print Request", "attached_to_name": doc.name},
+				update_modified=False,
+			)
+
+
+def _office_users() -> list[str]:
+	"""The secretaries who work the print queue."""
+	users = frappe.get_all(
+		"Has Role",
+		filters={"role": FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY], "parenttype": "User"},
+		pluck="parent",
+	)
+	return [
+		u for u in users
+		if u not in ("Administrator", "Guest") and frappe.db.get_value("User", u, "enabled")
+	]
+
+
+def _notify_office(doc):
+	"""Ring the secretaries' phones for a new request; the bell lists it too."""
+	from match_schools import push
+
+	teacher = frappe.db.get_value("User", doc.requested_by, "full_name") or ""
+	push.notify(
+		_office_users(),
+		"طلب طباعة عاجل" if doc.priority == "Urgent" else "طلب طباعة جديد",
+		f"{doc.title} — {teacher} · {cint(doc.copies) or 1} نسخة",
+		channel="general",
+		link="/app/print-requests",
+	)
+
+
+def may_read_request(persona: str, doc) -> bool:
+	"""The office, and the teacher who sent it."""
+	return persona in BACK_OFFICE or doc.requested_by == frappe.session.user
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def download(request: str = None, file_url: str = None, persona: str = None):
+	"""One file of a request, served after the request's own check.
+
+	Frappe's file route decides by the File's owner and the attached record's
+	desk permissions, which the portal's personas do not carry; so the office
+	was refused files it is meant to print. The check here is the queue's own.
+	"""
+	doc = frappe.get_doc("MS Print Request", request)
+	if not may_read_request(persona, doc):
+		frappe.throw(_("This request is not yours."), frappe.PermissionError)
+	if not any(a.file_url == file_url for a in doc.attachments or []):
+		frappe.throw(_("This file is not part of the request."), frappe.PermissionError)
+	name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not name:
+		return fail(message_en="File not found.", message_ar="الملف غير موجود.")
+	f = frappe.get_doc("File", name)
+	frappe.local.response.filename = f.file_name
+	frappe.local.response.filecontent = f.get_content()
+	frappe.local.response.type = "download"
+	frappe.local.response.display_content_as = "attachment"
 
 
 @frappe.whitelist(methods=["POST"])

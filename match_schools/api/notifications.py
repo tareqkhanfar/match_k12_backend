@@ -93,6 +93,7 @@ def _build_feed(persona: str, limit: int = 30, unread_only: int = 0) -> dict:
 			items += _student_items(student, since, prefix_name=True, for_guardian=True)
 	elif persona == ROLE_TEACHER:
 		items += _teacher_items(scope, since)
+		items += _my_print_items(since)
 	elif persona in BACK_OFFICE:
 		items += _back_office_items(since)
 
@@ -599,7 +600,69 @@ def _back_office_items(since: str) -> list[dict]:
 			}
 		)
 
+	items += _print_queue_items(since)
 	return items
+
+
+def _print_queue_items(since: str) -> list[dict]:
+	"""Print requests waiting for the office, one entry each — a teacher's
+	exam paper arriving is the thing the secretary has to act on."""
+	if not frappe.db.table_exists("MS Print Request"):
+		return []
+	items = []
+	for r in frappe.get_all(
+		"MS Print Request",
+		filters={"status": "Submitted", "requested_on": [">=", since]},
+		fields=["name", "title", "requested_by", "requested_on", "copies", "priority", "needed_by"],
+		order_by="requested_on desc",
+		limit=50,
+	):
+		urgent = r.priority == "Urgent"
+		teacher = _sender_name(r.requested_by)
+		needed = f" · مطلوب قبل {r.needed_by}" if r.needed_by else ""
+		items.append(
+			{
+				"id": f"print:{r.name}",
+				"category": "print",
+				"category_label": "طلب طباعة",
+				"title": "طلب طباعة عاجل" if urgent else "طلب طباعة جديد",
+				"body": f"{r.title} — {teacher} · {cint(r.copies) or 1} نسخة{needed}",
+				"time": str(r.requested_on or ""),
+				"tone": "danger" if urgent else "warning",
+				"link": "/app/print-requests",
+				"ref": r.name,
+			}
+		)
+	return items
+
+
+def _my_print_items(since: str) -> list[dict]:
+	"""A teacher's own requests the office has finished."""
+	if not frappe.db.table_exists("MS Print Request"):
+		return []
+	return [
+		{
+			"id": f"print-done:{r.name}:{r.status}",
+			"category": "print",
+			"category_label": "طلب طباعة",
+			"title": "طلب الطباعة جاهز للاستلام" if r.status == "Ready" else "رُفض طلب الطباعة",
+			"body": r.title + (f" — {r.secretary_notes}" if r.secretary_notes else ""),
+			"time": str(r.completed_on or ""),
+			"tone": "success" if r.status == "Ready" else "danger",
+			"link": "/app/print-requests",
+			"ref": r.name,
+		}
+		for r in frappe.get_all(
+			"MS Print Request",
+			filters={
+				"requested_by": frappe.session.user,
+				"status": ["in", ["Ready", "Rejected"]],
+				"completed_on": [">=", since],
+			},
+			fields=["name", "title", "status", "secretary_notes", "completed_on"],
+			limit=20,
+		)
+	]
 
 
 # ---------------------------------------------------------------------------
