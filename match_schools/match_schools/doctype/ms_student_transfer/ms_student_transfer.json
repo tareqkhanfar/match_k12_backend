@@ -1,0 +1,147 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-TRF-.YYYY.-.#####",
+ "creation": "2026-09-30 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "student_name",
+  "status",
+  "transfer_date",
+  "column_break_1",
+  "to_school",
+  "academic_year",
+  "academic_term",
+  "section_break_1",
+  "reason",
+  "certificate",
+  "effects",
+  "section_break_2",
+  "applied",
+  "completed_on",
+  "completed_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "الطالب",
+   "options": "Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "اسم الطالب",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "الحالة",
+   "options": "Draft\nCompleted\nCancelled",
+   "default": "Draft",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "transfer_date",
+   "fieldtype": "Date",
+   "label": "تاريخ النقل",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "to_school",
+   "fieldtype": "Data",
+   "label": "إلى مدرسة / محافظة",
+   "reqd": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "العام الدراسي",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "label": "الفصل",
+   "options": "Academic Term"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "سبب النقل"
+  },
+  {
+   "fieldname": "certificate",
+   "fieldtype": "Long Text",
+   "label": "بيانات شهادة الانتقال",
+   "description": "JSON of the certificate's answers, by the form's field names."
+  },
+  {
+   "fieldname": "effects",
+   "fieldtype": "Long Text",
+   "label": "التأثيرات المطلوبة",
+   "description": "JSON: which effects to apply when completed."
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "التنفيذ"
+  },
+  {
+   "fieldname": "applied",
+   "fieldtype": "Long Text",
+   "label": "ما تغيّر عند التنفيذ",
+   "read_only": 1,
+   "description": "JSON log of what completing changed, so cancelling can undo it."
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "نُفِّذ في",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_by",
+   "fieldtype": "Link",
+   "label": "نفّذه",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Student Transfer",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
