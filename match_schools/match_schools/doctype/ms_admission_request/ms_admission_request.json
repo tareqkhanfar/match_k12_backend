@@ -1,0 +1,221 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-ADR-.YYYY.-.#####",
+ "creation": "2026-10-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "first_name",
+  "middle_name",
+  "grandfather_name",
+  "last_name",
+  "applicant_name",
+  "status",
+  "column_break_1",
+  "id_number",
+  "birth_date",
+  "gender",
+  "program",
+  "academic_year",
+  "section_break_1",
+  "guardian_name",
+  "guardian_mobile",
+  "mobile",
+  "email",
+  "city",
+  "previous_school",
+  "section_break_2",
+  "letter_date",
+  "principal",
+  "documents",
+  "notes",
+  "section_break_3",
+  "confirmed_on",
+  "confirmed_by",
+  "application",
+  "transferred_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "first_name",
+   "fieldtype": "Data",
+   "label": "الاسم الأول",
+   "reqd": 1
+  },
+  {
+   "fieldname": "middle_name",
+   "fieldtype": "Data",
+   "label": "اسم الأب"
+  },
+  {
+   "fieldname": "grandfather_name",
+   "fieldtype": "Data",
+   "label": "اسم الجد"
+  },
+  {
+   "fieldname": "last_name",
+   "fieldtype": "Data",
+   "label": "اسم العائلة"
+  },
+  {
+   "fieldname": "applicant_name",
+   "fieldtype": "Data",
+   "label": "الاسم الكامل",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "الحالة",
+   "options": "Draft\nConfirmed\nTransferred\nCancelled",
+   "default": "Draft",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "id_number",
+   "fieldtype": "Data",
+   "label": "رقم الهوية"
+  },
+  {
+   "fieldname": "birth_date",
+   "fieldtype": "Date",
+   "label": "تاريخ الميلاد"
+  },
+  {
+   "fieldname": "gender",
+   "fieldtype": "Data",
+   "label": "الجنس"
+  },
+  {
+   "fieldname": "program",
+   "fieldtype": "Data",
+   "label": "الصف المطلوب",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Data",
+   "label": "العام الدراسي"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "التواصل"
+  },
+  {
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "ولي الأمر"
+  },
+  {
+   "fieldname": "guardian_mobile",
+   "fieldtype": "Data",
+   "label": "هاتف ولي الأمر"
+  },
+  {
+   "fieldname": "mobile",
+   "fieldtype": "Data",
+   "label": "هاتف الطالب"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "البريد الإلكتروني"
+  },
+  {
+   "fieldname": "city",
+   "fieldtype": "Data",
+   "label": "العنوان / المدينة"
+  },
+  {
+   "fieldname": "previous_school",
+   "fieldtype": "Data",
+   "label": "المدرسة السابقة"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "الخطاب"
+  },
+  {
+   "fieldname": "letter_date",
+   "fieldtype": "Date",
+   "label": "تاريخ الخطاب"
+  },
+  {
+   "fieldname": "principal",
+   "fieldtype": "Data",
+   "label": "اسم مدير المدرسة"
+  },
+  {
+   "fieldname": "documents",
+   "fieldtype": "Long Text",
+   "label": "الوثائق المطلوبة",
+   "description": "One per line."
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "ملاحظات"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break",
+   "label": "المتابعة"
+  },
+  {
+   "fieldname": "confirmed_on",
+   "fieldtype": "Datetime",
+   "label": "أُكِّد في",
+   "read_only": 1
+  },
+  {
+   "fieldname": "confirmed_by",
+   "fieldtype": "Link",
+   "label": "أكّده",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "application",
+   "fieldtype": "Link",
+   "label": "طلب الالتحاق",
+   "options": "Student Applicant",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transferred_on",
+   "fieldtype": "Datetime",
+   "label": "رُحِّل في",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Admission Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "applicant_name",
+ "track_changes": 1
+}
