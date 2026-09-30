@@ -172,6 +172,86 @@ def export_excel(
 	] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+MAX_TABLE_ROWS = 20000
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+def export_table(title: str = None, headers: str | list = None, rows: str | list = None, persona: str = None):
+	"""An .xlsx of a table exactly as the screen shows it.
+
+	Every table in the portal offers Excel, and most of them are built by the
+	screen itself (mark grids, timetables, reports) rather than from a dataset
+	the server knows. The page sends what it is displaying — its headings and
+	its rows, already filtered — and this lays them out. Nothing is read from
+	the database here, so it can show nobody anything their screen did not.
+	"""
+	headers = parse_json_arg(headers) or []
+	rows = parse_json_arg(rows) or []
+	if not headers and not rows:
+		return fail(message_en="Nothing to export.", message_ar="لا توجد بيانات للتصدير.")
+	if len(rows) > MAX_TABLE_ROWS:
+		return fail(message_en="Too many rows.", message_ar="عدد الصفوف أكبر من المسموح للتصدير.")
+
+	from openpyxl import Workbook
+	from openpyxl.styles import Alignment, Font, PatternFill
+	from openpyxl.utils import get_column_letter
+
+	label = (title or "جدول").strip()[:31] or "جدول"
+	for bad in '[]:*?/\\':
+		label = label.replace(bad, " ")
+	wb = Workbook()
+	ws = wb.active
+	ws.title = label
+	ws.sheet_view.rightToLeft = True
+
+	width = max([len(headers)] + [len(r) for r in rows if isinstance(r, list)] or [0])
+	if headers:
+		ws.append([_cell(h) for h in headers] + [""] * (width - len(headers)))
+		for cell in ws[1]:
+			cell.font = Font(bold=True, color="FFFFFF")
+			cell.fill = PatternFill("solid", fgColor="0550AE")
+			cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+	for r in rows:
+		if isinstance(r, list):
+			ws.append([_number_or_text(v) for v in r])
+
+	longest = [0] * width
+	for r in ([headers] if headers else []) + rows[:300]:
+		for i, v in enumerate(r if isinstance(r, list) else []):
+			longest[i] = max(longest[i], min(len(str(v or "")), 60))
+	for i, n in enumerate(longest, start=1):
+		ws.column_dimensions[get_column_letter(i)].width = min(max(n + 2, 8), 48)
+	if headers:
+		ws.freeze_panes = "A2"
+		if rows:
+			ws.auto_filter.ref = f"A1:{get_column_letter(width)}{len(rows) + 1}"
+
+	buffer = io.BytesIO()
+	wb.save(buffer)
+	frappe.local.response.filename = f"{label}-{today()}.xlsx"
+	frappe.local.response.filecontent = buffer.getvalue()
+	frappe.local.response.type = "binary"
+	frappe.local.response["content_type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _cell(value) -> str:
+	# A formula typed into a cell on screen must stay text in the sheet.
+	text = "" if value is None else str(value)
+	return "'" + text if text[:1] in ("=", "+", "@") else text
+
+
+def _number_or_text(value):
+	"""Keep numbers numeric so Excel can total them; everything else as text."""
+	text = _cell(value).strip()
+	if text and len(text) < 16 and text.replace(".", "", 1).replace("-", "", 1).isdigit() and not text.startswith("0") or text in ("0",):
+		try:
+			return float(text) if "." in text else int(text)
+		except ValueError:
+			return text
+	return text
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
 def export_pdf(
