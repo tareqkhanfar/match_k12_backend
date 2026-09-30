@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-PRF-.YYYY.-.#####",
+ "creation": "2026-10-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "period_type",
+  "academic_year",
+  "is_active",
+  "open_period",
+  "column_break_1",
+  "heading",
+  "principal_name",
+  "print_logo",
+  "created_by_user",
+  "section_setup",
+  "periods",
+  "programs",
+  "scale",
+  "criteria",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "اسم النموذج",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "period_type",
+   "fieldtype": "Select",
+   "label": "الدورية",
+   "options": "شهري\nكل شهرين\nنصفي\nسنوي",
+   "default": "شهري",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "العام الدراسي",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "فعّال",
+   "default": "1"
+  },
+  {
+   "fieldname": "open_period",
+   "fieldtype": "Data",
+   "label": "الفترة المفتوحة للإدخال"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "heading",
+   "fieldtype": "Data",
+   "label": "عنوان الطباعة"
+  },
+  {
+   "fieldname": "principal_name",
+   "fieldtype": "Data",
+   "label": "اسم مدير المدرسة"
+  },
+  {
+   "fieldname": "print_logo",
+   "fieldtype": "Attach Image",
+   "label": "ترويسة الطباعة"
+  },
+  {
+   "fieldname": "created_by_user",
+   "fieldtype": "Link",
+   "label": "أنشأه",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_setup",
+   "fieldtype": "Section Break",
+   "label": "الإعداد"
+  },
+  {
+   "fieldname": "periods",
+   "fieldtype": "Small Text",
+   "label": "الفترات (JSON)"
+  },
+  {
+   "fieldname": "programs",
+   "fieldtype": "Small Text",
+   "label": "الصفوف (JSON)"
+  },
+  {
+   "fieldname": "scale",
+   "fieldtype": "Small Text",
+   "label": "المقياس (JSON)"
+  },
+  {
+   "fieldname": "criteria",
+   "fieldtype": "Long Text",
+   "label": "المعايير (JSON)"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "ملاحظات"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Periodic Form",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "title"
+}

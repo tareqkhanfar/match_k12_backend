@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-10-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "entry_key",
+  "form",
+  "period",
+  "academic_year",
+  "scope",
+  "column_break_1",
+  "student",
+  "student_name",
+  "student_group",
+  "program",
+  "course",
+  "section_answers",
+  "answers",
+  "instructor",
+  "evaluated_by",
+  "evaluator_name",
+  "evaluated_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "entry_key",
+   "fieldtype": "Data",
+   "label": "المفتاح",
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "form",
+   "fieldtype": "Link",
+   "label": "النموذج",
+   "options": "MS Periodic Form",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "period",
+   "fieldtype": "Data",
+   "label": "الفترة",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "العام الدراسي",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "scope",
+   "fieldtype": "Select",
+   "label": "الجهة",
+   "options": "subject\nhomeroom",
+   "default": "subject"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "الطالب",
+   "options": "Student",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "اسم الطالب",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_group",
+   "fieldtype": "Link",
+   "label": "الشعبة",
+   "options": "Student Group",
+   "search_index": 1
+  },
+  {
+   "fieldname": "program",
+   "fieldtype": "Link",
+   "label": "الصف",
+   "options": "Program"
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "المادة",
+   "options": "Course"
+  },
+  {
+   "fieldname": "section_answers",
+   "fieldtype": "Section Break",
+   "label": "التقييم"
+  },
+  {
+   "fieldname": "answers",
+   "fieldtype": "Long Text",
+   "label": "الإجابات (JSON)"
+  },
+  {
+   "fieldname": "instructor",
+   "fieldtype": "Link",
+   "label": "المعلم",
+   "options": "Instructor"
+  },
+  {
+   "fieldname": "evaluated_by",
+   "fieldtype": "Link",
+   "label": "أدخله",
+   "options": "User"
+  },
+  {
+   "fieldname": "evaluator_name",
+   "fieldtype": "Data",
+   "label": "اسم المقيِّم"
+  },
+  {
+   "fieldname": "evaluated_on",
+   "fieldtype": "Datetime",
+   "label": "تاريخ الإدخال"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Periodic Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

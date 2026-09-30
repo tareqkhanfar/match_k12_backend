@@ -70,7 +70,7 @@ def list_classes(
 		filters=filters,
 		fields=[
 			"name", "student_group_name", "program", "batch", "course",
-			"academic_year", "academic_term", "max_strength",
+			"academic_year", "academic_term", "max_strength", "ms_homeroom_instructor",
 		],
 		order_by="student_group_name",
 	)
@@ -86,7 +86,15 @@ def list_classes(
 			filters={"parent": g["name"], "parenttype": "Student Group"},
 			fields=["instructor", "instructor_name"],
 		)
-		g["homeroom"] = instructors[0].instructor_name if instructors else None
+		# The office names the class teacher on the section; before that, the
+		# first teacher linked to it was taken to be one.
+		chosen = g.pop("ms_homeroom_instructor", None)
+		g["homeroom"] = (
+			frappe.db.get_value("Instructor", chosen, "instructor_name") or chosen
+			if chosen
+			else (instructors[0].instructor_name if instructors else None)
+		)
+		g["homeroomId"] = chosen
 		g["instructors"] = [
 			{"id": i.instructor, "name": i.instructor_name} for i in instructors
 		]

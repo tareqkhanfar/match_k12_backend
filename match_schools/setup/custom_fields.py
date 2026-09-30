@@ -165,6 +165,18 @@ CUSTOM_FIELDS = {
 			"description": "اتركه فارغاً لتتبع الشعبة توقيت صفّها",
 			"translatable": 0,
 		},
+		{
+			# One per section, chosen by the office. Work that belongs to the
+			# class teacher alone (the homeroom lines of a periodic report)
+			# reads this — not the section's instructor table, which lists
+			# every teacher linked by hand.
+			"fieldname": "ms_homeroom_instructor",
+			"label": "مربي الصف",
+			"fieldtype": "Link",
+			"options": "Instructor",
+			"insert_after": "ms_bell_schedule",
+			"translatable": 0,
+		},
 	],
 }
 

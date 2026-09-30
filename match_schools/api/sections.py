@@ -167,11 +167,12 @@ def program_sections(program: str = None, academic_year: str = None, persona: st
 		filters=filters,
 		fields=[
 			"name", "student_group_name", "batch", "academic_year",
-			"academic_term", "max_strength",
+			"academic_term", "max_strength", "ms_homeroom_instructor",
 		],
 		order_by="batch, name",
 		limit_page_length=0,
 	)
+	homeroom_names = _instructor_names([g.ms_homeroom_instructor for g in groups])
 
 	sections = []
 	placed: set[str] = set()
@@ -189,6 +190,11 @@ def program_sections(program: str = None, academic_year: str = None, persona: st
 				"capacity": limit,
 				"count": len(roster),
 				"spaceLeft": (limit - len(roster)) if limit else None,
+				"homeroom": (
+					{"id": g.ms_homeroom_instructor, "name": homeroom_names.get(g.ms_homeroom_instructor)}
+					if g.ms_homeroom_instructor
+					else None
+				),
 				"students": roster,
 			}
 		)
@@ -239,6 +245,29 @@ def section_options(persona: str = None):
 		),
 		"academicTerms": frappe.get_all("Academic Term", pluck="name", order_by="name"),
 		"batches": frappe.get_all("Student Batch Name", pluck="name", order_by="name"),
+		# Who may be picked as a section's مربي الصف.
+		"instructors": [
+			{"id": r.name, "name": r.instructor_name or r.name}
+			for r in frappe.get_all(
+				"Instructor",
+				filters={"status": ["!=", "Left"]},
+				fields=["name", "instructor_name"],
+				order_by="instructor_name",
+				limit_page_length=0,
+			)
+		],
+	}
+
+
+def _instructor_names(ids) -> dict[str, str]:
+	ids = [i for i in set(ids) if i]
+	if not ids:
+		return {}
+	return {
+		r.name: r.instructor_name or r.name
+		for r in frappe.get_all(
+			"Instructor", filters={"name": ["in", ids]}, fields=["name", "instructor_name"]
+		)
 	}
 
 
@@ -611,6 +640,7 @@ def save_section(
 	academic_term: str = None,
 	max_strength: int = 0,
 	disabled: int = 0,
+	homeroom_instructor: str = None,
 	persona: str = None,
 ):
 	"""Create a section, or edit one that exists.
@@ -641,6 +671,11 @@ def save_section(
 	if academic_term:
 		doc.academic_term = academic_term
 	doc.disabled = cint(disabled)
+	# Sent as "" to clear it; left out (None) by callers that do not manage it.
+	if homeroom_instructor is not None:
+		if homeroom_instructor and not frappe.db.exists("Instructor", homeroom_instructor):
+			return fail(message_en="Unknown teacher.", message_ar="المعلم غير موجود.")
+		doc.ms_homeroom_instructor = homeroom_instructor or None
 
 	limit = cint(max_strength)
 	if limit:
