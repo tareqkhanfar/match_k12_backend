@@ -556,7 +556,11 @@ def save_marks(payload: str | dict, persona: str = None):
 		)
 
 	marks = data.get("marks") or []
-	if not marks:
+	# Students whose mark the teacher emptied on the sheet. Sent apart from
+	# `marks` because an empty score there is a typo to refuse, while an
+	# emptied cell is a deliberate «this mark should not exist».
+	clear = [s for s in (data.get("clear") or []) if s]
+	if not marks and not clear:
 		return fail(message_en="No marks supplied.", message_ar="لم يتم إرسال أي درجات.")
 
 	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_owns_course
@@ -634,6 +638,21 @@ def save_marks(payload: str | dict, persona: str = None):
 	saved, updated, skipped = 0, 0, []
 	rejected: list[dict] = []
 
+	cleared = 0
+	for student in clear:
+		existing = frappe.db.get_value(
+			"MS Gradebook Entry",
+			{
+				"student": student,
+				"course": data["course"],
+				"component_name": data["component_name"],
+				"academic_year": academic_year,
+			},
+			"name",
+		)
+		if existing:
+			frappe.delete_doc("MS Gradebook Entry", existing, ignore_permissions=True)
+			cleared += 1
 
 	for row in marks:
 		student = row.get("student")
@@ -720,6 +739,8 @@ def save_marks(payload: str | dict, persona: str = None):
 	frappe.db.commit()
 
 	message_ar = f"تم حفظ {saved + updated} درجة."
+	if cleared:
+		message_ar += f" ومسح {cleared}."
 	if skipped:
 		message_ar += f" تم تجاوز {len(skipped)} درجة تفوق الحد الأقصى."
 	step_errors = [r["student"] for r in rejected if r["reason"] == "step"]
@@ -736,6 +757,7 @@ def save_marks(payload: str | dict, persona: str = None):
 		"data": {
 			"created": saved,
 			"updated": updated,
+			"cleared": cleared,
 			"skipped": skipped,
 			"rejected": rejected,
 		},
@@ -775,11 +797,11 @@ def save_grid(payload: str | dict, persona: str = None):
 			message_ar="لا توجد أعمدة للحفظ.",
 		)
 
-	saved = updated = 0
+	saved = updated = cleared = 0
 	problems: list[str] = []
 
 	for column in columns:
-		if not column.get("component_name") or not (column.get("marks") or []):
+		if not column.get("component_name") or not (column.get("marks") or column.get("clear")):
 			continue
 		result = save_marks(
 			payload={
@@ -792,7 +814,8 @@ def save_grid(payload: str | dict, persona: str = None):
 				"max_score": column.get("max_score"),
 				"weight": column.get("weight"),
 				"is_bonus": column.get("is_bonus"),
-				"marks": column.get("marks"),
+				"marks": column.get("marks") or [],
+				"clear": column.get("clear") or [],
 			},
 			persona=persona,
 		)
@@ -808,8 +831,12 @@ def save_grid(payload: str | dict, persona: str = None):
 			)
 			continue
 		if body:
-			saved += cint(body.get("saved"))
+			# `save_marks` reports new marks as `created`. Reading `saved` here
+			# counted only the updates, so a sheet of first-time marks was
+			# saved and then announced as «تم حفظ 0 علامة».
+			saved += cint(body.get("created"))
 			updated += cint(body.get("updated"))
+			cleared += cint(body.get("cleared"))
 
 	if problems:
 		return fail(
@@ -820,9 +847,13 @@ def save_grid(payload: str | dict, persona: str = None):
 
 	return {
 		"success": True,
-		"data": {"saved": saved, "updated": updated, "columns": len(columns)},
+		"data": {"saved": saved, "updated": updated, "cleared": cleared, "columns": len(columns)},
 		"message_en": f"Saved {saved + updated} marks.",
-		"message_ar": f"تم حفظ {saved + updated} علامة.",
+		"message_ar": (
+			f"تم مسح {cleared} علامة."
+			if cleared and not (saved + updated)
+			else f"تم حفظ {saved + updated} علامة" + (f" ومسح {cleared}" if cleared else "") + "."
+		),
 	}
 
 
@@ -904,6 +935,170 @@ def set_aggregation(
 		"data": {"component": component_name, "mode": mode, "n": n},
 		"message_en": f"Aggregation set to {mode}.",
 		"message_ar": f"تم ضبط احتساب «{component_name}»: {label}.",
+	}
+
+
+# --- The plan's leaves, from the sheet ----------------------------------------
+#
+# A teacher setting a fourth daily test in week ten should not have to leave
+# the sheet for the plan editor. So the sheet may add an assessment under a
+# category that already has assessments, and change what one is out of —
+# and nothing else. Quarters and categories carry the weights that add up to
+# the subject's mark; touching them from here would let one keystroke rewrite
+# every pupil's total, so those stay the plan editor's business.
+
+
+def _sheet_plan(persona: str, student_group: str, course: str):
+	"""The plan the sheet for this class and subject shows, once the caller
+	may change it: they teach it and its marks are still open to them."""
+	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_teaches
+
+	assert_teacher_teaches(persona, student_group, course)
+	group = frappe.db.get_value(
+		"Student Group", student_group, ["program", "academic_year", "academic_term"], as_dict=True
+	)
+	if not group:
+		frappe.throw(_("Class not found."))
+	term = group.academic_term or get_default_academic_term()
+	assert_entry_allowed(persona, student_group, course, term)
+	scheme = resolve_scheme(course, group.program)
+	if not scheme:
+		frappe.throw(_("This subject has no assessment plan yet."))
+	return frappe.get_doc("MS Grade Scheme", scheme["id"]), group
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def add_assessment(
+	student_group: str = None,
+	course: str = None,
+	parent: str = None,
+	name: str = None,
+	max_score: float = None,
+	persona: str = None,
+):
+	"""Add an assessment under a category that already has some.
+
+	Only beside existing children: a category marked directly has marks of
+	its own, and turning it into a heading would orphan them.
+	"""
+	name = (name or "").strip()
+	if not (student_group and course and parent and name):
+		return fail(message_en="Category and name are required.", message_ar="حدّد البند واسم الامتحان.")
+	if len(name) > 140:
+		return fail(message_en="Name too long.", message_ar="اسم الامتحان طويل جداً.")
+
+	doc, _group = _sheet_plan(persona, student_group, course)
+	rows = list(doc.components)
+	head = next((c for c in rows if c.component_name == parent and not c.get("ms_parent_component")), None)
+	siblings = [c for c in rows if c.get("ms_parent_component") == parent]
+	if not head:
+		if any(c.component_name == parent for c in rows):
+			# Asked to nest under an assessment: the plan is two levels deep.
+			return fail(
+				message_en="Assessments are added under a category only.",
+				message_ar=f"«{parent}» امتحان وليس بنداً — الإضافة مسموحة فقط تحت بند رئيسي فيه امتحانات.",
+			)
+		return fail(message_en="Unknown category.", message_ar="البند غير موجود في خطة التقييم.")
+	if not siblings:
+		return fail(
+			message_en="Assessments can only be added beside existing ones.",
+			message_ar=f"«{parent}» يُرصد مباشرة وليس تحته امتحانات — الإضافة مسموحة فقط تحت بند فيه امتحانات.",
+		)
+	# Marks are filed by name, so a name anywhere in the plan is taken.
+	if any(c.component_name == name for c in rows):
+		return fail(
+			message_en="That name is already in the plan.",
+			message_ar=f"«{name}» موجود في خطة التقييم — اختر اسماً آخر.",
+		)
+
+	out_of = flt(max_score) or flt(siblings[-1].max_score)
+	if out_of <= 0:
+		return fail(message_en="The maximum must be positive.", message_ar="العلامة العظمى يجب أن تكون أكبر من صفر.")
+
+	position = rows.index(siblings[-1]) + 1
+	row = doc.append(
+		"components",
+		{
+			"component_name": name,
+			"component_type": siblings[-1].component_type or head.component_type or "Exam",
+			"weight": 0,
+			"max_score": out_of,
+			"ms_quarter": head.get("ms_quarter"),
+			"ms_parent_component": parent,
+		},
+	)
+	rows.insert(position, row)
+	doc.components = rows
+	for i, c in enumerate(doc.components, start=1):
+		c.idx = i
+	# The categories' weights are untouched — an assessment carries none — so
+	# the plan's weight check has nothing to say, and must not block this on
+	# an unrelated quarter that drifted out of balance.
+	doc.flags.ignore_validate = True
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"component": name, "parent": parent, "max_score": out_of},
+		"message_en": "Assessment added.",
+		"message_ar": f"أُضيف «{name}» تحت «{parent}» (من {out_of:g}) — يظهر لكل شعب هذه المادة.",
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def set_assessment_max(
+	student_group: str = None,
+	course: str = None,
+	component_name: str = None,
+	max_score: float = None,
+	persona: str = None,
+):
+	"""Change what an assessment inside a category is out of — its share of
+	the category. A category's own weight is never changed here."""
+	out_of = flt(max_score)
+	if not (student_group and course and component_name):
+		return fail(message_en="An assessment is required.", message_ar="حدّد الامتحان.")
+	if out_of <= 0:
+		return fail(message_en="The maximum must be positive.", message_ar="العلامة العظمى يجب أن تكون أكبر من صفر.")
+
+	doc, group = _sheet_plan(persona, student_group, course)
+	row = next((c for c in doc.components if c.component_name == component_name), None)
+	if not row:
+		return fail(message_en="Unknown assessment.", message_ar="الامتحان غير موجود في خطة التقييم.")
+	if not row.get("ms_parent_component"):
+		return fail(
+			message_en="A category's weight cannot be changed from the sheet.",
+			message_ar=f"لا يمكن تعديل وزن «{component_name}» — هو بند رئيسي في خطة التقييم، ووزنه يُحدَّد من خطة التقييم فقط.",
+		)
+
+	entry_filters = {
+		"course": course,
+		"component_name": component_name,
+		"academic_year": group.academic_year or get_default_academic_year(),
+	}
+	if doc.get("program"):
+		entry_filters["program"] = doc.program
+	above = frappe.db.count("MS Gradebook Entry", {**entry_filters, "score": [">", out_of], "is_bonus": 0})
+	if above:
+		return fail(
+			message_en="Some marks are above the new maximum.",
+			message_ar=f"{above} علامة مُدخلة في «{component_name}» أعلى من {out_of:g} — عدّلها أولاً.",
+		)
+
+	previous = flt(row.max_score)
+	frappe.db.set_value("MS Grade Scheme Component", row.name, "max_score", out_of)
+	# Each mark keeps the maximum it was entered against; they follow the
+	# plan so the sheet and the totals read the same figure.
+	for entry in frappe.get_all("MS Gradebook Entry", filters=entry_filters, pluck="name", limit_page_length=0):
+		frappe.db.set_value("MS Gradebook Entry", entry, "max_score", out_of, update_modified=False)
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"component": component_name, "max_score": out_of, "previous": previous},
+		"message_en": "Maximum updated.",
+		"message_ar": f"أصبح «{component_name}» من {out_of:g} بدل {previous:g}.",
 	}
 
 
