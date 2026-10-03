@@ -15,7 +15,7 @@ import json
 import frappe
 from frappe.utils import cint, flt, getdate, now_datetime, nowdate
 
-from match_schools.api import forms, forms_print, transfer_certificate as cert
+from match_schools.api import forms, forms_print, print_designs, transfer_certificate as cert
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -311,8 +311,12 @@ def delete_transfer(transfer: str = None, persona: str = None):
 # --- The certificate ------------------------------------------------------------
 
 
-def _template():
-	"""The school's own transfer-certificate form if it has one, else the built-in."""
+PRINT_KEY = "student_transfer"
+
+
+def _form_template():
+	"""The certificate's form — its fields: the school's own transfer-certificate
+	form if it has one, else the built-in."""
 	name = frappe.db.get_value("MS Form Template", {"title": cert.TITLE, "category": "school"}, "name")
 	if name:
 		return frappe.get_doc("MS Form Template", name)
@@ -335,9 +339,17 @@ def _template():
 	return doc
 
 
-def certificate_html(doc) -> str:
+def _template(design=None):
+	"""The certificate's form carrying the design it prints with: the one set
+	in Settings › تصاميم الطباعة, else the school's own form's (with the
+	letterhead image at its top), else the built-in (print_designs.effective)
+	— or `design`, a draft being previewed."""
+	return print_designs.apply_to_form(_form_template(), design or print_designs.effective(PRINT_KEY))
+
+
+def certificate_html(doc, design=None) -> str:
 	"""The ministry certificate for this request, with every answer in place."""
-	template = _template()
+	template = _template(design)
 	entry = frappe.new_doc("MS Form Entry")
 	entry.template = template.name if not template.is_new() else None
 	entry.student = doc.student
@@ -363,7 +375,42 @@ def preview(transfer: str = None, persona: str = None):
 	if not transfer or not frappe.db.exists(DOCTYPE, transfer):
 		return fail("Not found.", "لم يتم العثور على الطلب.")
 	doc = frappe.get_doc(DOCTYPE, transfer)
-	return {"html": certificate_html(doc), "title": f"{cert.TITLE} — {doc.student_name}"}
+	try:
+		html = certificate_html(doc)
+	except Exception as exc:
+		frappe.clear_messages()
+		return fail("The print design could not be rendered.", forms_print.error_text(exc))
+	return {"html": html, "title": f"{cert.TITLE} — {doc.student_name}"}
+
+
+# --- For the print-design editor ---------------------------------------------------
+
+
+def print_fields() -> list[dict]:
+	"""The certificate's fields, for the editor's list of what a design can name."""
+	return forms._field_rows(_form_template())
+
+
+def print_sample(design) -> str:
+	"""The certificate drawn with `design` on the latest request, or on a
+	made-up one for a pupil of the school when there is none yet."""
+	name = frappe.db.get_value(DOCTYPE, {}, "name", order_by="modified desc")
+	if name:
+		return certificate_html(frappe.get_doc(DOCTYPE, name), design)
+	doc = frappe.new_doc(DOCTYPE)
+	student = frappe.db.get_value("Student", {"enabled": 1}, ["name", "student_name"], as_dict=True)
+	answers = _prefill(student.name) if student else {"full_name": "أحمد محمد علي الخطيب", "religion": "الإسلام"}
+	answers.update({"number": "1/2026", "conduct": "ممتاز", "stream": "الأساسي"})
+	doc.update(
+		{
+			"student": student.name if student else None,
+			"student_name": (student.student_name if student else answers["full_name"]),
+			"to_school": "مدرسة الأمل الأساسية",
+			"transfer_date": nowdate(),
+			"certificate": json.dumps(answers, ensure_ascii=False),
+		}
+	)
+	return certificate_html(doc, design)
 
 
 # --- Completing and undoing --------------------------------------------------------

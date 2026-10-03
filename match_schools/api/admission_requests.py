@@ -11,7 +11,7 @@ import frappe
 from frappe.utils import cint, now_datetime, nowdate
 
 from match_schools.api import admission_request_form as letter
-from match_schools.api import admissions, forms, forms_print
+from match_schools.api import admissions, forms, forms_print, print_designs
 from match_schools.api.utils import (
 	BACK_OFFICE,
 	fail,
@@ -259,8 +259,12 @@ def to_application(request: str = None, persona: str = None):
 # --- The letter ------------------------------------------------------------------
 
 
-def _template():
-	"""The school's own «متسع» form if it has one, else the built-in letter."""
+PRINT_KEY = "admission_request"
+
+
+def _form_template():
+	"""The letter's form — its fields: the school's own «متسع» form if it has
+	one, else the built-in letter."""
 	name = frappe.db.get_value("MS Form Template", {"title": letter.TITLE, "category": "school"}, "name")
 	if name:
 		return frappe.get_doc("MS Form Template", name)
@@ -283,8 +287,15 @@ def _template():
 	return doc
 
 
-def letter_html(doc) -> str:
-	template = _template()
+def _template(design=None):
+	"""The letter's form carrying the design it prints with: the one set in
+	Settings › تصاميم الطباعة, else the school's own form's, else the built-in
+	(see print_designs.effective) — or `design`, a draft being previewed."""
+	return print_designs.apply_to_form(_form_template(), design or print_designs.effective(PRINT_KEY))
+
+
+def letter_html(doc, design=None) -> str:
+	template = _template(design)
 	entry = frappe.new_doc("MS Form Entry")
 	entry.template = template.name if not template.is_new() else None
 	entry.filled_on = str(now_datetime())
@@ -317,4 +328,34 @@ def preview(request: str = None, persona: str = None):
 	if not request or not frappe.db.exists(DOCTYPE, request):
 		return fail("Not found.", "لم يتم العثور على الطلب.")
 	doc = frappe.get_doc(DOCTYPE, request)
-	return {"html": letter_html(doc), "title": f"{letter.TITLE} — {doc.applicant_name}"}
+	try:
+		html = letter_html(doc)
+	except Exception as exc:
+		frappe.clear_messages()
+		return fail("The print design could not be rendered.", forms_print.error_text(exc))
+	return {"html": html, "title": f"{letter.TITLE} — {doc.applicant_name}"}
+
+
+# --- For the print-design editor ---------------------------------------------------
+
+
+def print_fields() -> list[dict]:
+	"""The letter's fields, for the editor's list of what a design can name."""
+	return forms._field_rows(_form_template())
+
+
+def print_sample(design) -> str:
+	"""The letter drawn with `design` on the latest request, or on a made-up
+	one when there is none yet."""
+	name = frappe.db.get_value(DOCTYPE, {}, "name", order_by="modified desc")
+	if name:
+		return letter_html(frappe.get_doc(DOCTYPE, name), design)
+	doc = frappe.new_doc(DOCTYPE)
+	doc.update(
+		{
+			"first_name": "أحمد", "middle_name": "محمد", "grandfather_name": "علي", "last_name": "الخطيب",
+			"gender": "Male", "program": frappe.db.get_value("Program", {}, "name") or "السابع",
+			"academic_year": get_default_academic_year() or "2026-2027", "letter_date": nowdate(),
+		}
+	)
+	return letter_html(doc, design)

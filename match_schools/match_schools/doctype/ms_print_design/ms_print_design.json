@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:document",
+ "creation": "2026-10-03 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "document",
+  "title",
+  "column_break_1",
+  "print_theme",
+  "print_orientation",
+  "print_logo",
+  "section_design",
+  "print_template",
+  "print_css"
+ ],
+ "fields": [
+  {
+   "fieldname": "document",
+   "fieldtype": "Data",
+   "label": "الصفحة (المعرّف)",
+   "reqd": 1,
+   "unique": 1,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "الصفحة",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "print_theme",
+   "fieldtype": "Select",
+   "label": "شكل الطباعة",
+   "options": "soft\nclassic\nletter",
+   "default": "classic"
+  },
+  {
+   "fieldname": "print_orientation",
+   "fieldtype": "Select",
+   "label": "اتجاه الورقة",
+   "options": "Portrait\nLandscape",
+   "default": "Portrait"
+  },
+  {
+   "fieldname": "print_logo",
+   "fieldtype": "Attach Image",
+   "label": "صورة الترويسة",
+   "description": "فارغ = ترويسة المدرسة المستخدمة في خطاباتها"
+  },
+  {
+   "fieldname": "section_design",
+   "fieldtype": "Section Break",
+   "label": "التصميم"
+  },
+  {
+   "fieldname": "print_template",
+   "fieldtype": "Code",
+   "label": "تصميم الطباعة (HTML/Jinja)",
+   "options": "HTML"
+  },
+  {
+   "fieldname": "print_css",
+   "fieldtype": "Code",
+   "label": "تنسيق الطباعة (CSS)",
+   "options": "CSS"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Print Design",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "title"
+}

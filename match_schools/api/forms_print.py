@@ -800,3 +800,84 @@ def design_from_fields(fields: list[dict], entry_for: str = "Student") -> str:
 		"</div>",
 	]
 	return "\n".join(lines)
+
+
+# --- Pages that are not forms ------------------------------------------------------
+# A periodic report or a printed table is drawn from a context of its own, not
+# from a form's fields, but prints in the same frame: the same base style, the
+# same themes and orientation, the design's CSS after the base. These are the
+# pieces print_designs uses for them.
+
+THEMES = ("soft", "classic", "letter")
+
+# A document of several pages (a section's reports) starts each on a new sheet
+# whatever its CSS says.
+PAGE_BREAK = "<style>.ms-page + .ms-page { page-break-before: always; break-before: page; }</style>"
+
+
+class DesignError(Exception):
+	"""A print design that cannot be drawn, carrying the sentence its designer reads."""
+
+
+def compile_design(design: str):
+	"""A design compiled once, to draw many pages with — or a DesignError saying
+	which line is wrong. Same sandbox and rules as `frappe.render_template`."""
+	from jinja2 import TemplateSyntaxError
+
+	from frappe.utils.jinja import get_jenv
+
+	if ".__" in (design or ""):
+		raise DesignError("التصميم يحتوي على صيغة غير مسموحة («.__»).")
+	try:
+		return get_jenv().from_string(design or "")
+	except TemplateSyntaxError as e:
+		raise DesignError(f"خطأ في صيغة التصميم في السطر {e.lineno}: {e.message}") from e
+
+
+def draw(compiled, context: dict) -> str:
+	"""One page of a compiled design."""
+	try:
+		return compiled.render(context)
+	except Exception as e:
+		raise DesignError(f"خطأ في تصميم الطباعة: {e}") from e
+
+
+def error_text(exc: Exception) -> str:
+	"""The readable part of a failed render.
+
+	`frappe.render_template` reports a failure as desk markup holding the
+	whole design and then the traceback; the sentence that matters is the
+	traceback's last line.
+	"""
+	if isinstance(exc, DesignError):
+		return str(exc)
+	import html
+
+	text = html.unescape(re.sub(r"<[^>]+>", "\n", str(exc)))
+	lines = [x.strip() for x in text.splitlines() if x.strip()]
+	if not lines:
+		return "تعذّر رسم تصميم الطباعة."
+	# «jinja2.exceptions.UndefinedError: …» — the class name is enough.
+	return ("خطأ في تصميم الطباعة: " + re.sub(r"^(?:[a-z_][\w]*\.)+(?=\w+: )", "", lines[-1]))[:300]
+
+
+def banner_html(url: str) -> str:
+	"""The letterhead image across the page, as `Page.banner()` draws it."""
+	return f'<div class="ms-banner"><img src="{file_data_uri(url)}" alt=""></div>' if url else ""
+
+
+def frame(pages: list[str], theme: str = "classic", orientation: str = "Portrait", css: str = "", page_class: str = "") -> str:
+	"""Pages already drawn, framed as `render()` frames a form: base style,
+	the page size, the design's CSS, then each page in its themed box."""
+	theme = theme if theme in THEMES else "classic"
+	landscape = orientation == "Landscape"
+	deco = "".join(_LEAF.format(pos=p) for p in ("tr", "tl", "br", "bl")) if theme == "soft" else ""
+	cls = f"ms-page theme-{theme}" + (" landscape" if landscape else "") + (f" {page_class}" if page_class else "")
+	page_css = "<style>@page { size: A4 landscape; }</style>" if landscape else ""
+	return (
+		PRINT_STYLE
+		+ PAGE_BREAK
+		+ page_css
+		+ css_block(css)
+		+ "".join(f'<div class="{cls}">{deco}{p}</div>' for p in pages)
+	)

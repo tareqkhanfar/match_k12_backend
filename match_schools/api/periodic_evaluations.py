@@ -23,11 +23,11 @@ import json
 import re
 
 import frappe
+import jinja2
 from frappe import _
 from frappe.utils import cint, escape_html, flt, get_fullname, now
 
-from match_schools.api.document_theme import school_name
-from match_schools.api.forms_print import PRINT_STYLE, file_data_uri
+from match_schools.api import forms_print, print_designs
 from match_schools.api.gradeflow import teaching_pairs
 from match_schools.api.utils import (
 	ROLE_ADMIN,
@@ -735,7 +735,11 @@ def delete_form(form: str = None, persona: str = None):
 # The printed report — one page per pupil, as the school's paper
 # ---------------------------------------------------------------------------
 
-CARD_CSS = """<style>
+# The report is a print design (Settings › تصاميم الطباعة, «تقرير التقييم
+# الدوري»): this is the one it ships with — the school's paper, drawn for one
+# pupil and repeated a page each. The values it is given are already escaped.
+
+CARD_CSS = """
   .pc-page + .pc-page { page-break-before: always; break-before: page; }
   .pc-page { font-size: 16px; line-height: 1.7; }
   .pc-head { text-align: center; font-weight: 800; font-size: 20px; line-height: 1.5; margin: 1mm 0 6mm; }
@@ -758,7 +762,40 @@ CARD_CSS = """<style>
   .pc-seal { text-align: center; margin-top: 8mm; font-weight: 700; }
   .pc-principal { margin-top: 2mm; font-weight: 700; line-height: 1.5; width: 60mm; margin-inline-start: auto; text-align: center; }
   .pc-dots { display: inline-block; min-width: 45mm; border-bottom: 1px dotted #555; }
-</style>"""
+"""
+
+CARD_DESIGN = """{{ banner() }}
+<div class="pc-head">
+  <div>{{ heading_line }}</div>
+  <div>للعام الدراسي {{ year_label }}</div>
+</div>
+<table class="pc-t pc-id"><tr>
+  <td style="width:50%">الاسم: <b>{{ student.name }}</b></td>
+  <td>الصف: <b>{{ grade }}</b></td>
+  <td>الشعبة: <b>{{ section }}</b></td>
+</tr></table>
+{% if subject_criteria %}
+<table class="pc-t pc-grid">
+  <thead><tr><th>المادة</th>{% for c in subject_criteria %}<th>{{ c.label }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for s in subjects %}
+    <tr><td class="sub">{{ s.name }}</td>{% for c in subject_criteria %}<td class="val">{{ answer(c, s.answers.get(c.key)) }}</td>{% endfor %}</tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if homeroom_criteria %}
+<table class="pc-t pc-home"><tr>
+  {% for c in homeroom_criteria %}<td><span class="lb">{{ c.label }} :</span> {{ answer(c, homeroom.get(c.key), false) }}</td>{% endfor %}
+</tr></table>
+{% endif %}
+<div class="pc-sign">توقيع مربي الصف: {{ homeroom_teacher or '<span class="pc-dots"></span>' }}</div>
+<div class="pc-seal">الخاتم</div>
+<div class="pc-principal">مدير المدرسة<br>{{ principal }}</div>
+"""
+
+PRINT_KEY = "periodic_report"
+PRINT_DEFAULT = {"design": CARD_DESIGN, "css": CARD_CSS, "theme": "letter", "orientation": "Portrait"}
 
 
 def _year_label(year: str | None) -> str:
@@ -779,19 +816,9 @@ def _short_program(program: str | None) -> str:
 	return re.sub(r"^\s*الصف\s+", "", program or "")
 
 
-def _default_banner() -> str | None:
-	"""The letterhead the school already uses on its letters."""
-	rows = frappe.get_all(
-		"MS Form Template",
-		filters={"print_logo": ["is", "set"], "print_theme": "letter"},
-		pluck="print_logo",
-		order_by="modified desc",
-		limit=1,
-	)
-	return rows[0] if rows else None
-
-
 def _answer_html(criterion: dict, value, scale: list[str], circled: bool) -> str:
+	if isinstance(value, jinja2.Undefined):
+		value = None
 	if criterion.get("type") == "scale" and circled:
 		return (
 			'<span class="pc-opt">'
@@ -807,57 +834,61 @@ def _answer_html(criterion: dict, value, scale: list[str], circled: bool) -> str
 	return f'<span class="ans">{escape_html(str(value))}</span>'
 
 
-def _card(f: dict, period: str, group: dict, student: dict, courses: list[dict], entries: dict, banner: str) -> str:
+def _card_context(f: dict, period: str, group: dict, student: dict, courses: list[dict], entries: dict) -> dict:
+	"""What the design is given for one pupil — text already escaped."""
 	scale = [s["label"] for s in f["scale"]]
-	subject = _criteria(f, SUBJECT)
-	homeroom = _criteria(f, HOMEROOM)
 	mine = entries.get(student["id"], {})
-
-	parts = [banner]
-	parts.append(
-		'<div class="pc-head">'
-		f"<div>{escape_html(_heading_line(f['heading'], period))}</div>"
-		f"<div>للعام الدراسي {escape_html(_year_label(f['academicYear'] or group['academicYear']))}</div>"
-		"</div>"
-	)
-	parts.append(
-		'<table class="pc-t pc-id"><tr>'
-		f'<td style="width:50%">الاسم: <b>{escape_html(student["name"] or "")}</b></td>'
-		f'<td>الصف: <b>{escape_html(_short_program(group["program"]))}</b></td>'
-		f'<td>الشعبة: <b>{escape_html(group["batch"] or group["name"])}</b></td>'
-		"</tr></table>"
-	)
-	if subject:
-		head = "".join(f"<th>{escape_html(c['label'])}</th>" for c in subject)
-		body = []
-		for course in courses:
-			values = (mine.get(course["id"]) or {}).get("values") or {}
-			cells = "".join(
-				f'<td class="val">{_answer_html(c, values.get(c["key"]), scale, True)}</td>' for c in subject
-			)
-			body.append(f'<tr><td class="sub">{escape_html(course["name"])}</td>{cells}</tr>')
-		parts.append(
-			f'<table class="pc-t pc-grid"><thead><tr><th>المادة</th>{head}</tr></thead>'
-			f"<tbody>{''.join(body)}</tbody></table>"
-		)
-	if homeroom:
-		values = (mine.get(HOMEROOM) or {}).get("values") or {}
-		cells = "".join(
-			f'<td><span class="lb">{escape_html(c["label"])} :</span> '
-			f"{_answer_html(c, values.get(c['key']), scale, False)}</td>"
-			for c in homeroom
-		)
-		parts.append(f'<table class="pc-t pc-home"><tr>{cells}</tr></table>')
-
 	teacher = (group["homeroom"] or {}).get("name") or (mine.get(HOMEROOM) or {}).get("by") or ""
-	parts.append(
-		f'<div class="pc-sign">توقيع مربي الصف: {escape_html(teacher) or "<span class=pc-dots></span>"}</div>'
-	)
-	parts.append('<div class="pc-seal">الخاتم</div>')
-	parts.append(
-		f'<div class="pc-principal">مدير المدرسة<br>{escape_html(f["principalName"])}</div>'
-	)
-	return f'<div class="ms-page theme-letter pc-page">{"".join(parts)}</div>'
+
+	def criteria(scope: str) -> list[dict]:
+		return [{**c, "label": escape_html(c["label"])} for c in _criteria(f, scope)]
+
+	return {
+		"heading": escape_html(f["heading"]),
+		"period": escape_html(period),
+		"heading_line": escape_html(_heading_line(f["heading"], period)),
+		"year_label": escape_html(_year_label(f["academicYear"] or group["academicYear"])),
+		"form_title": escape_html(f["title"]),
+		"student": {"id": student["id"], "name": escape_html(student["name"] or ""), "roll": student.get("roll")},
+		"grade": escape_html(_short_program(group["program"])),
+		"section": escape_html(group["batch"] or group["name"]),
+		"section_name": escape_html(group["name"]),
+		"subject_criteria": criteria(SUBJECT),
+		"homeroom_criteria": criteria(HOMEROOM),
+		"subjects": [
+			{
+				"id": c["id"],
+				"name": escape_html(c["name"]),
+				"answers": (mine.get(c["id"]) or {}).get("values") or {},
+				"by": escape_html((mine.get(c["id"]) or {}).get("by") or ""),
+			}
+			for c in courses
+		],
+		"homeroom": (mine.get(HOMEROOM) or {}).get("values") or {},
+		"homeroom_teacher": escape_html(teacher),
+		"principal": escape_html(f["principalName"]),
+		"scale": [escape_html(o) for o in scale],
+		"answer": lambda c, value=None, circled=True: _answer_html(c, value, scale, circled),
+	}
+
+
+def _design(f: dict, design=None):
+	"""The report's design — a draft being previewed, or the one it prints
+	with now. A form given a letterhead of its own prints with that one."""
+	design = frappe._dict(design or print_designs.effective(PRINT_KEY))
+	if f.get("printLogo"):
+		design.letterhead = f["printLogo"]
+	return design
+
+
+def render_cards(design, f: dict, period: str, group: dict, roster: list[dict], courses: list[dict], entries: dict) -> str:
+	"""The report of every pupil in `roster`, a page each, in one document."""
+	compiled = forms_print.compile_design(design.design)
+	base = print_designs.base_context(design, fallback_class="pc-head")
+	pages = [
+		forms_print.draw(compiled, {**base, **_card_context(f, period, group, s, courses, entries)}) for s in roster
+	]
+	return forms_print.frame(pages, design.theme, design.orientation, design.css, "pc-page")
 
 
 @frappe.whitelist()
@@ -885,14 +916,67 @@ def print_cards(
 	entries = _section_entries(form, period, [s["id"] for s in roster])
 	used = {c for per in entries.values() for c in per if c != HOMEROOM}
 	courses = _section_courses(student_group, group["program"], used)
-	logo = f["printLogo"] or _default_banner()
-	banner = (
-		f'<div class="ms-banner"><img src="{file_data_uri(logo)}" alt=""></div>'
-		if logo
-		else f'<div class="pc-head">{escape_html(school_name())}</div>'
-	)
-	pages = "".join(_card(f, period, group, s, courses, entries, banner) for s in roster)
+	try:
+		html = render_cards(_design(f), f, period, group, roster, courses, entries)
+	except forms_print.DesignError as exc:
+		return fail(
+			message_en="The print design could not be rendered.",
+			message_ar=f"{exc} — راجع «تقرير التقييم الدوري» في الإعدادات › تصاميم الطباعة.",
+		)
 	title = f"{f['title']} — {period} — {group['name']}"
 	if len(roster) == 1:
 		title = f"{f['title']} — {period} — {roster[0]['name']}"
-	return {"html": PRINT_STYLE + CARD_CSS + pages, "title": title, "count": len(roster)}
+	return {"html": html, "title": title, "count": len(roster)}
+
+
+def _sample_report() -> tuple:
+	"""A made-up pupil's report, for the editor on a site with none entered yet."""
+	f = {
+		"title": "التقييم الشهري",
+		"heading": HEADINGS["شهري"],
+		"academicYear": get_default_academic_year() or "2026-2027",
+		"principalName": "",
+		"printLogo": "",
+		"scale": SCALE_PRESET,
+		"criteria": [
+			{"key": "rating", "label": "التقييم", "scope": SUBJECT, "type": "scale"},
+			{"key": "conduct", "label": "النظافة والسلوك", "scope": HOMEROOM, "type": "scale"},
+			{"key": "remarks", "label": "ملاحظات مربي الصف", "scope": HOMEROOM, "type": "text"},
+		],
+	}
+	group = {
+		"id": "sample", "name": "السابع أ", "program": "الصف السابع", "batch": "أ",
+		"academicYear": f["academicYear"], "homeroom": {"id": "", "name": "أ. سامر يوسف"},
+	}
+	roster = [{"id": "sample-student", "name": "أحمد محمد علي الخطيب", "roll": 1}]
+	names = ["التربية الإسلامية", "اللغة العربية", "اللغة الإنجليزية", "الرياضيات", "العلوم والحياة", "الدراسات الاجتماعية"]
+	ratings = ["ممتاز", "جيد جدا", "ممتاز", "جيد", "جيد جدا", "ممتاز"]
+	courses = [{"id": f"c{i}", "name": n, "teachers": []} for i, n in enumerate(names)]
+	mine = {f"c{i}": {"values": {"rating": r}, "by": "", "on": ""} for i, r in enumerate(ratings)}
+	mine[HOMEROOM] = {"values": {"conduct": "ممتاز", "remarks": "طالب مجتهد ومتعاون"}, "by": "", "on": ""}
+	return f, "شهر (2)", group, roster, courses, {"sample-student": mine}
+
+
+def print_sample(design) -> str:
+	"""One pupil's report drawn with `design`: the latest one entered, or a
+	made-up one when nothing has been entered yet."""
+	last = frappe.get_all(
+		"MS Periodic Entry",
+		fields=["form", "period", "student_group", "student"],
+		order_by="modified desc",
+		limit=1,
+	)
+	if last and frappe.db.exists("MS Periodic Form", last[0].form) and frappe.db.exists(
+		"Student Group", last[0].student_group
+	):
+		e = last[0]
+		f = _form(_load(e.form))
+		group = _group_info(e.student_group)
+		roster = [s for s in _roster(e.student_group) if s["id"] == e.student][:1]
+		if roster:
+			entries = _section_entries(e.form, e.period, [roster[0]["id"]])
+			used = {c for per in entries.values() for c in per if c != HOMEROOM}
+			courses = _section_courses(e.student_group, group["program"], used)
+			return render_cards(_design(f, design), f, e.period, group, roster, courses, entries)
+	f, period, group, roster, courses, entries = _sample_report()
+	return render_cards(_design(f, design), f, period, group, roster, courses, entries)
