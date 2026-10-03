@@ -119,6 +119,15 @@ DOCUMENTS: dict[str, dict] = {
 		"variables": PERIODIC_VARIABLES,
 		"note": "النموذج الدوري الذي حُدّدت له ترويسة خاصة في إعداداته يُطبع بها بدل ترويسة هذا التصميم.",
 	},
+	"weekly_plan": {
+		"title": "الخطة الأسبوعية",
+		"page": "الجدول الدراسي (زر «طباعة الخطة الأسبوعية»)",
+		"description": "خطة الشعبة للأسبوع: المواد × أيام الأسبوع، وفي كل خانة تحضير الحصة الذي أدخله المعلم.",
+		"default": "match_schools.api.weekly_plan.PRINT_DEFAULT",
+		"sample": "match_schools.api.weekly_plan.print_sample",
+		# A dotted path: weekly_plan imports this module.
+		"variables": "match_schools.api.weekly_plan.VARIABLES",
+	},
 	"table": {
 		"title": "طباعة الجداول",
 		"page": "كل الجداول (زر «طباعة» فوق الجدول)",
@@ -347,6 +356,13 @@ def _sample(key: str, design: frappe._dict) -> tuple[str | None, str | None]:
 # --- Endpoints --------------------------------------------------------------------
 
 
+def _variables(entry: dict) -> list:
+	"""A page's variable list — given inline, or as the dotted path of one kept
+	beside the page's own code."""
+	found = entry.get("variables") or []
+	return frappe.get_attr(found) if isinstance(found, str) else found
+
+
 def _payload(key: str) -> dict:
 	entry = _entry(key)
 	d = effective(key)
@@ -371,7 +387,7 @@ def _payload(key: str) -> dict:
 		"defaultLogo": default_letterhead(),
 		"modified": d.get("modified") or "",
 		"modifiedBy": d.get("modified_by") or "",
-		"variables": [{"code": c, "label": label} for c, label in entry.get("variables") or []],
+		"variables": [{"code": c, "label": label} for c, label in _variables(entry)],
 		"fields": [
 			{"fieldname": f["fieldname"], "label": f["label"], "fieldtype": f["fieldtype"]}
 			for f in fields
