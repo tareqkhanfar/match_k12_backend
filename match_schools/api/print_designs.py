@@ -128,6 +128,22 @@ DOCUMENTS: dict[str, dict] = {
 		# A dotted path: weekly_plan imports this module.
 		"variables": "match_schools.api.weekly_plan.VARIABLES",
 	},
+	"cover_schedule": {
+		"title": "جدول الإشغال",
+		"page": "جدول اليوم والمناوبات › جدول الإشغال",
+		"description": "المعلمون المتاحون في كل حصة من أيام الأسبوع، مرتّبين حسب قاعدة الإشغال، مع عدد حصصهم في اليوم.",
+		"default": "match_schools.api.cover_schedule.PRINT_DEFAULT",
+		"sample": "match_schools.api.cover_schedule.print_sample",
+		"variables": "match_schools.api.cover_schedule.VARIABLES",
+	},
+	"duty_schedule": {
+		"title": "جدول المناوبة",
+		"page": "جدول اليوم والمناوبات › جدول المناوبة",
+		"description": "برامج المناوبة في الاستراحات وآخر الدوام: لكل يوم المناوبون وأماكنهم.",
+		"default": "match_schools.api.duty_schedule.PRINT_DEFAULT",
+		"sample": "match_schools.api.duty_schedule.print_sample",
+		"variables": "match_schools.api.duty_schedule.VARIABLES",
+	},
 	"table": {
 		"title": "طباعة الجداول",
 		"page": "كل الجداول (زر «طباعة» فوق الجدول)",

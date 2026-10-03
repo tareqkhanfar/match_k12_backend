@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-DUT-.YYYY.-.#####",
+ "creation": "2026-10-03 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "period_label",
+  "from_time",
+  "to_time",
+  "column_break_1",
+  "academic_year",
+  "sort_order",
+  "is_active",
+  "section_entries",
+  "entries",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "عنوان البرنامج",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "period_label",
+   "fieldtype": "Data",
+   "label": "الفترة (استراحة / آخر الدوام)"
+  },
+  {
+   "fieldname": "from_time",
+   "fieldtype": "Time",
+   "label": "من"
+  },
+  {
+   "fieldname": "to_time",
+   "fieldtype": "Time",
+   "label": "إلى"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "العام الدراسي",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "الترتيب"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "فعّال",
+   "default": "1"
+  },
+  {
+   "fieldname": "section_entries",
+   "fieldtype": "Section Break",
+   "label": "المناوبون"
+  },
+  {
+   "fieldname": "entries",
+   "fieldtype": "Long Text",
+   "label": "المناوبون (JSON)"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "ملاحظات"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Duty Program",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "title"
+}
