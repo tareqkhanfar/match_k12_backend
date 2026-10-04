@@ -259,6 +259,21 @@ def section_options(persona: str = None):
 	}
 
 
+def set_homeroom(doc, instructor: str | None) -> None:
+	"""Make `instructor` the section's مربي الصف (or clear it), on an unsaved
+	Student Group.
+
+	The class teacher is also put on the section's teacher list if missing,
+	so every screen that reads that list (attendance, the section's pages)
+	finds the section for them. Nobody else is taken off it: those rows are
+	other teachers linked by hand, and removing them takes the section away
+	from them.
+	"""
+	doc.ms_homeroom_instructor = instructor or None
+	if instructor and not any(r.instructor == instructor for r in (doc.instructors or [])):
+		doc.append("instructors", {"instructor": instructor})
+
+
 def _instructor_names(ids) -> dict[str, str]:
 	ids = [i for i in set(ids) if i]
 	if not ids:
@@ -675,7 +690,7 @@ def save_section(
 	if homeroom_instructor is not None:
 		if homeroom_instructor and not frappe.db.exists("Instructor", homeroom_instructor):
 			return fail(message_en="Unknown teacher.", message_ar="المعلم غير موجود.")
-		doc.ms_homeroom_instructor = homeroom_instructor or None
+		set_homeroom(doc, homeroom_instructor)
 
 	limit = cint(max_strength)
 	if limit:

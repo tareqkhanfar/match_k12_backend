@@ -378,6 +378,17 @@ def save_exam(payload: str | dict, persona: str = None):
 	from_time = data.get("from_time")
 	to_time = data.get("to_time")
 
+	# Chosen as «من الحصة … إلى الحصة …»: the times are the section's own,
+	# from its bell schedule — the same clock every other screen reads.
+	if data.get("from_period") and data.get("to_period"):
+		span = _period_span(data["student_group"], cint(data["from_period"]), cint(data["to_period"]))
+		if not span:
+			return fail(
+				message_en="Those periods are not in this section's day.",
+				message_ar="الحصص المختارة غير موجودة في دوام هذه الشعبة.",
+			)
+		from_time, to_time = span
+
 	# ERPNext makes both times mandatory on an Assessment Plan, but a teacher
 	# setting a paper from the mark sheet has a date in mind and not a clock.
 	# The class's own lesson that weekday is the honest default — that is when
@@ -661,6 +672,123 @@ def _find_clash(
 				"ar": f"القاعة محجوزة لامتحان {c.course} في نفس الوقت.",
 			}
 	return None
+
+
+def _periods_of(student_group: str) -> list[dict]:
+	"""The section's lessons of the day — number, label and times — from the
+	clock every timetable screen reads."""
+	from match_schools.api.timetable_grid import _clock
+
+	return [
+		{"order": cint(p["order"]), "name": p.get("name") or f"الحصة {cint(p['order'])}", "from": p.get("from") or "", "to": p.get("to") or ""}
+		for p in _clock(student_group)
+		if not p.get("isBreak") and p.get("from") and p.get("to")
+	]
+
+
+def _period_span(student_group: str, first: int, last: int) -> tuple[str, str] | None:
+	"""Start of the first period and end of the last, as HH:MM:SS."""
+	if last < first:
+		first, last = last, first
+	periods = {p["order"]: p for p in _periods_of(student_group)}
+	if first not in periods or last not in periods:
+		return None
+	return f"{periods[first]['from']}:00"[:8], f"{periods[last]['to']}:00"[:8]
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def availability(student_group: str = None, week_start: str = None, exam: str = None, persona: str = None):
+	"""A section's school week, period by period, for choosing an exam slot.
+
+	Each square says what is already there: the class's lesson, an exam the
+	section sits, or one its pupils sit with another section (an elective
+	group) — and whether the school is closed that day. The exam being edited
+	is left out so it does not block itself.
+	"""
+	if not student_group or not frappe.db.exists("Student Group", student_group):
+		return fail(message_en="Choose a section.", message_ar="اختر الشعبة أولاً.")
+	if persona not in BACK_OFFICE:
+		allowed = _visible_groups(persona, resolve_scope(persona)) or []
+		if student_group not in allowed:
+			frappe.throw(_("You can only schedule exams for your own classes."), frappe.PermissionError)
+
+	start = getdate(week_start or today())
+	start = add_days(start, -((start.weekday() + 1) % 7))  # back to Sunday
+	dates = [add_days(start, i) for i in range(5)]
+	periods = _periods_of(student_group)
+
+	# The other sections this class's pupils sit in: their exams are this
+	# class's problem too.
+	students = _students_of(student_group)
+	shared = set(
+		frappe.get_all(
+			"Student Group Student",
+			filters={"student": ["in", students or [""]], "active": 1, "parent": ["!=", student_group]},
+			pluck="parent",
+			distinct=True,
+		)
+	)
+	sittings = frappe.get_all(
+		"Assessment Plan",
+		filters={
+			"schedule_date": ["between", [dates[0], dates[-1]]],
+			"docstatus": ["<", 2],
+			"student_group": ["in", [student_group, *shared]],
+			**({"name": ["!=", exam]} if exam else {}),
+		},
+		fields=["name", "assessment_name", "course", "student_group", "schedule_date", "from_time", "to_time", "room"],
+		limit_page_length=0,
+	)
+	names = {
+		r.name: r.student_group_name or r.name
+		for r in frappe.get_all(
+			"Student Group", filters={"name": ["in", list({s.student_group for s in sittings}) or [""]]}, fields=["name", "student_group_name"]
+		)
+	}
+	weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+	lessons: dict[tuple[str, int], str] = {}
+	for r in frappe.get_all(
+		"MS Timetable Slot",
+		filters={"student_group": student_group, "active": 1},
+		fields=["day", "period_order", "course"],
+		limit_page_length=0,
+	):
+		lessons[(r.day, cint(r.period_order))] = r.course or ""
+
+	day_labels = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"]
+	days = []
+	for i, d in enumerate(dates):
+		closed = ctx.holiday_reason(str(d))
+		cells = []
+		for p in periods:
+			here = []
+			for s in sittings:
+				if str(s.schedule_date) != str(d) or not (s.from_time and s.to_time):
+					continue
+				if hhmm(s.to_time) <= p["from"] or hhmm(s.from_time) >= p["to"]:
+					continue
+				here.append(
+					{
+						"id": s.name,
+						"course": s.course,
+						"title": s.assessment_name,
+						"group": names.get(s.student_group, s.student_group),
+						"own": s.student_group == student_group,
+						"from": hhmm(s.from_time),
+						"to": hhmm(s.to_time),
+					}
+				)
+			cells.append(
+				{
+					"order": p["order"],
+					"lesson": lessons.get((weekday[d.weekday()], p["order"]), ""),
+					"exams": here,
+				}
+			)
+		days.append({"date": str(d), "label": day_labels[i], "holiday": closed or "", "cells": cells})
+
+	return {"weekStart": str(dates[0]), "periods": periods, "days": days}
 
 
 @frappe.whitelist()

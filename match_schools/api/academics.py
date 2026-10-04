@@ -1074,13 +1074,23 @@ def save_class(payload: str | dict, persona: str = None):
 	else:
 		doc = frappe.get_doc({"doctype": "Student Group", **fields})
 
-	# Instructors arrive as a list of Instructor ids.
-	instructors = data.get("instructors")
-	if isinstance(instructors, list):
-		doc.set("instructors", [])
-		for instructor in instructors:
-			if instructor:
-				doc.append("instructors", {"instructor": instructor})
+	# The screen's «مربي الصف». It used to arrive as `instructors: [id]` and
+	# replace the whole teacher list — dropping every teacher linked to the
+	# section by hand, and never reaching ms_homeroom_instructor, which is
+	# what homeroom work reads. Older clients still send that shape; both now
+	# set the class teacher and only add to the list.
+	from match_schools.api.sections import set_homeroom
+
+	if "homeroom_instructor" in data:
+		homeroom = data.get("homeroom_instructor") or None
+	elif isinstance(data.get("instructors"), list):
+		homeroom = next((i for i in data["instructors"] if i), None)
+	else:
+		homeroom = False
+	if homeroom is not False:
+		if homeroom and not frappe.db.exists("Instructor", homeroom):
+			return fail(message_en="Unknown teacher.", message_ar="المعلم غير موجود.")
+		set_homeroom(doc, homeroom)
 
 	doc.save() if group_id else doc.insert()
 	frappe.db.commit()

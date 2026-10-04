@@ -37,6 +37,7 @@ def list_students(
 	enrolment_status: str = None,
 	page: int = 1,
 	page_size: int = 20,
+	no_section: int = 0,
 	persona: str = None,
 ):
 	"""Paginated student directory, scoped to what the caller may see."""
@@ -84,9 +85,26 @@ def list_students(
 		)
 		params["student_group"] = student_group
 
+	academic_year = get_default_academic_year()
+
+	# Pupils sitting in no section this year — admitted, or carried over,
+	# and never placed. They are invisible on every screen that starts from
+	# a section, which is exactly why the office needs to find them here.
+	if cint(no_section):
+		conditions.append(
+			"""s.name NOT IN (
+				SELECT sgs.student FROM `tabStudent Group Student` sgs
+				  JOIN `tabStudent Group` g ON g.name = sgs.parent
+				 WHERE sgs.parenttype = 'Student Group'
+				   AND sgs.active = 1
+				   AND g.disabled = 0
+				   AND (IFNULL(g.academic_year, '') = '' OR g.academic_year = %(ns_year)s)
+			)"""
+		)
+		params["ns_year"] = academic_year or ""
+
 	# Program / batch live on Program Enrollment, so join through it.
 	joins = ""
-	academic_year = get_default_academic_year()
 	if program or batch:
 		joins = """
 			INNER JOIN `tabProgram Enrollment` pe

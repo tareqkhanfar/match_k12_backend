@@ -17,6 +17,7 @@ families, families can reach staff, and children cannot reach each other.
 
 import frappe
 from match_schools.api.utils import (
+	parse_json_arg,
 	apply_period,
 	ms_endpoint,
 	resolve_scope,
@@ -314,6 +315,44 @@ def my_audiences(persona: str = None):
 			for g in ids
 		]
 	return {"audiences": rows, "groups": groups}
+
+
+ROLE_LABELS = (
+	("MS Teacher", "معلم"),
+	("MS Secretary", "سكرتارية"),
+	("MS School Admin", "إدارة"),
+	("MS Parent", "ولي أمر"),
+	("MS Student", "طالب"),
+)
+
+
+@frappe.whitelist()
+@ms_endpoint()
+def preview_audience(audience: str = None, groups: str | list = None, persona: str = None):
+	"""Who an audience reaches for this caller — the same expansion sending
+	uses — so the sender sees the names and can leave some out."""
+	chosen = [g for g in (parse_json_arg(groups) or []) if isinstance(g, str)]
+	users = resolve_audience(persona, audience or "", chosen or None)
+	users = [u for u in users if u and u != frappe.session.user]
+	if not users:
+		return {"recipients": [], "total": 0}
+	names = {
+		r.name: r.full_name or r.name
+		for r in frappe.get_all("User", filters={"name": ["in", users]}, fields=["name", "full_name"])
+	}
+	roles: dict[str, str] = {}
+	for role, label in ROLE_LABELS:
+		for u in frappe.get_all(
+			"Has Role", filters={"parent": ["in", users], "role": role, "parenttype": "User"}, pluck="parent"
+		):
+			roles.setdefault(u, label)
+	kind = (AUDIENCES.get(audience or "") or {}).get("kind")
+	fallback = {"teacher": "معلم", "parent": "ولي أمر", "student": "طالب", "office": "إدارة"}.get(kind, "")
+	rows = sorted(
+		({"user": u, "name": names.get(u, u), "role": roles.get(u) or fallback} for u in set(users)),
+		key=lambda r: r["name"],
+	)
+	return {"recipients": rows, "total": len(rows)}
 
 
 @frappe.whitelist()

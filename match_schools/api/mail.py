@@ -467,6 +467,10 @@ def _resolve_recipients(persona: str, data: dict) -> tuple[list[tuple[str, str]]
 		if audience not in AUDIENCES:
 			return [], "جمهور غير معروف."
 		members = resolve_audience(persona, audience, data.get("audience_groups") or None)
+		# Names the sender untucked in the preview. Only ever narrows the
+		# audience: anyone listed here who is not in it is simply ignored.
+		left_out = set(data.get("audience_exclude") or [])
+		members = [u for u in members if u not in left_out]
 		if not members:
 			return [], "لا يوجد مستلمون في هذا الجمهور."
 		for user in members:
@@ -593,8 +597,11 @@ def save_message(payload: str | dict = None, persona: str = None):
 			frappe.db.get_value("Student Group", g, "student_group_name") or g for g in groups
 		]
 		doc.audience_key = audience
-		doc.audience_label = AUDIENCES[audience]["label_ar"] + (
-			f" — {'، '.join(labels)}" if labels else ""
+		left_out = len(set(data.get("audience_exclude") or []))
+		doc.audience_label = (
+			AUDIENCES[audience]["label_ar"]
+			+ (f" — {'، '.join(labels)}" if labels else "")
+			+ (f" (باستثناء {left_out})" if left_out else "")
 		)
 		doc.audience_groups = ",".join(groups)
 	else:

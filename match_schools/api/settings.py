@@ -4,6 +4,7 @@
 """School settings: academic year/term, school details and role counts."""
 
 import frappe
+from frappe.utils import cint
 import frappe.defaults
 from frappe import _
 
@@ -71,6 +72,8 @@ def get_settings(persona: str = None):
 		"policies": {
 			# Whether a student may write outside their own teachers.
 			"student_open_messaging": _student_open_messaging(),
+			# Only class teachers (and the office) take attendance.
+			"attendance_homeroom_only": _attendance_homeroom_only(),
 		},
 		"counts": {
 			"students": frappe.db.count("Student", {"enabled": 1}),
@@ -87,6 +90,12 @@ def _student_open_messaging() -> bool:
 	from match_schools.api.messaging import student_open_messaging
 
 	return student_open_messaging()
+
+
+def _attendance_homeroom_only() -> bool:
+	from match_schools.api.attendance import homeroom_only
+
+	return homeroom_only()
 
 
 def _role_counts() -> list[dict]:
@@ -136,6 +145,13 @@ def save_settings(payload: str | dict, persona: str = None):
 			)
 		frappe.db.set_single_value("Education Settings", "current_academic_term", term)
 		updated.append("current_term")
+
+	# --- Who takes attendance ---
+	if "attendance_homeroom_only" in data:
+		from match_schools.api.attendance import HOMEROOM_ONLY_KEY
+
+		frappe.db.set_default(HOMEROOM_ONLY_KEY, "1" if cint(data.get("attendance_homeroom_only")) else "0")
+		updated.append("attendance_homeroom_only")
 
 	# --- School (Company) details ---
 	company = data.get("company")

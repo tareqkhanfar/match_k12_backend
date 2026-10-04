@@ -98,6 +98,28 @@ def _term_of(date) -> str | None:
 	return rows[0] if rows else None
 
 
+HOMEROOM_ONLY_KEY = "ms_attendance_homeroom_only"
+
+
+def homeroom_only() -> bool:
+	"""Whether the school lets only class teachers (and the office) take
+	attendance — set by the administration in Settings."""
+	return frappe.db.get_default(HOMEROOM_ONLY_KEY) == "1"
+
+
+def teacher_attendance_groups(instructor: str | None, period: bool = True) -> list[str]:
+	"""The sections a teacher takes attendance for: every section they teach,
+	or — when the school restricts attendance — only those they are مربي of."""
+	if not instructor:
+		return []
+	if not homeroom_only():
+		return instructor_groups(instructor, period=period)
+	filters: dict = {"ms_homeroom_instructor": instructor, "disabled": 0}
+	if period:
+		apply_period(filters, "Student Group")
+	return frappe.get_all("Student Group", filters=filters, pluck="name", limit_page_length=0)
+
+
 def _assert_group_access(student_group: str, persona: str):
 	"""A teacher may only touch groups they are assigned to."""
 	if persona in BACK_OFFICE:
@@ -109,7 +131,11 @@ def _assert_group_access(student_group: str, persona: str):
 	# The same sections `my_groups` offers. Checking the section's instructor
 	# table alone refused every section but the one the teacher is class
 	# teacher of — the screen listed four and threw on three.
-	if student_group not in instructor_groups(instructor, period=False):
+	if student_group not in teacher_attendance_groups(instructor, period=False):
+		if homeroom_only():
+			frappe.throw(
+				_("Attendance is taken by the section's class teacher only."), frappe.PermissionError
+			)
 		frappe.throw(_("You are not assigned to this group."), frappe.PermissionError)
 
 
@@ -508,7 +534,7 @@ def my_groups(persona: str = None):
 		)
 	else:
 		scope = resolve_scope(persona)
-		names = _instructor_group_names(scope.get("instructor"))
+		names = teacher_attendance_groups(scope.get("instructor"))
 		groups = (
 			frappe.get_all(
 				"Student Group",
