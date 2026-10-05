@@ -1070,6 +1070,8 @@ def save_entry(payload: str | dict, persona: str = None):
 		if (
 			not data.get("name")
 			and template.category not in OPEN_CATEGORIES
+			# A built page may open its form to any student (custom_pages).
+			and not frappe.flags.get("ms_form_any_student")
 			and data["student"] not in set(_subjects(template.name))
 		):
 			return fail(

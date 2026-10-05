@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-WSP-.#####",
+ "creation": "2026-10-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "icon",
+  "color",
+  "description",
+  "column_break_1",
+  "is_active",
+  "sort_order",
+  "personas",
+  "section_layout",
+  "layout"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "اسم مساحة العمل",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "icon",
+   "fieldtype": "Data",
+   "label": "الأيقونة"
+  },
+  {
+   "fieldname": "color",
+   "fieldtype": "Data",
+   "label": "اللون"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "الوصف"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "فعّالة",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "الترتيب"
+  },
+  {
+   "fieldname": "personas",
+   "fieldtype": "Small Text",
+   "label": "متاحة لكل مستخدمي الأدوار (JSON)"
+  },
+  {
+   "fieldname": "section_layout",
+   "fieldtype": "Section Break",
+   "label": "المحتوى"
+  },
+  {
+   "fieldname": "layout",
+   "fieldtype": "Long Text",
+   "label": "الأقسام والأزرار (JSON)"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Workspace",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "title"
+}
