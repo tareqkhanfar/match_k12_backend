@@ -49,7 +49,10 @@ doctype_js = {"Sales Invoice": "public/js/sales_invoice.js"}
 
 # بريد الطالب اختياري: رفع الإلزام وحده ينقل الخطأ إلى إنشاء الحساب،
 # فيُتجاوز المتحكّم ليتخطّاه حين لا بريد. انظر `ms_student.py`.
-override_doctype_class = {"Student": "match_schools.ms_student.MSStudent"}
+override_doctype_class = {
+	"Student": "match_schools.ms_student.MSStudent",
+	"Assessment Plan": "match_schools.ms_assessment_plan.MSAssessmentPlan",
+}
 
 # doctype_js = {"doctype" : "public/js/doctype.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
