@@ -317,7 +317,13 @@ def my_audiences(persona: str = None):
 	return {"audiences": rows, "groups": groups}
 
 
-ROLE_LABELS = (
+# A recipient's tag in the preview, by Frappe role. Named apart from
+# ROLE_LABELS above (the policy grid's): sharing the name replaced that one
+# and emptied «صلاحيات المراسلة».
+RECIPIENT_ROLE_TAGS = (
+	("MS Vice Principal", "نائب المدير"),
+	("MS Supervisor", "مشرف"),
+	("MS Nurse", "ممرض"),
 	("MS Teacher", "معلم"),
 	("MS Secretary", "سكرتارية"),
 	("MS School Admin", "إدارة"),
@@ -341,7 +347,7 @@ def preview_audience(audience: str = None, groups: str | list = None, persona: s
 		for r in frappe.get_all("User", filters={"name": ["in", users]}, fields=["name", "full_name"])
 	}
 	roles: dict[str, str] = {}
-	for role, label in ROLE_LABELS:
+	for role, label in RECIPIENT_ROLE_TAGS:
 		for u in frappe.get_all(
 			"Has Role", filters={"parent": ["in", users], "role": role, "parenttype": "User"}, pluck="parent"
 		):
