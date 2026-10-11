@@ -79,12 +79,17 @@ def get_group_sheet(student_group: str, date: str = None, persona: str = None):
 			}
 		)
 
+	from match_schools.api.agenda import lessons_suspended
+
 	return {
 		"student_group": student_group,
 		"date": str(date),
 		"students": rows,
 		"marked": len(existing),
 		"total": len(rows),
+		# A trip or activity on the agenda: shown, not enforced — some schools
+		# still take the register on a trip.
+		"agendaNote": lessons_suspended(student_group, date) or "",
 	}
 
 

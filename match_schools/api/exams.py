@@ -786,7 +786,22 @@ def availability(student_group: str = None, week_start: str = None, exam: str = 
 					"exams": here,
 				}
 			)
-		days.append({"date": str(d), "label": day_labels[i], "holiday": closed or "", "cells": cells})
+		# The agenda's word on the day: a trip or activity that suspends this
+		# section's lessons, and the exam period.
+		from match_schools.api import agenda
+
+		day_events = agenda.day_events(d, student_group)
+		days.append(
+			{
+				"date": str(d),
+				"label": day_labels[i],
+				"holiday": closed or "",
+				"noLessons": next((e.title for e in day_events if agenda.suspends_lessons(e)), ""),
+				"examPeriod": agenda.exam_period(d, student_group) or "",
+				"events": [e.title for e in day_events],
+				"cells": cells,
+			}
+		)
 
 	return {"weekStart": str(dates[0]), "periods": periods, "days": days}
 
@@ -978,4 +993,8 @@ def check_conflicts(
 	holiday = ctx.holiday_reason(schedule_date)
 	result = student_conflicts(student_group, schedule_date, exam, from_time, to_time)
 	result["holiday"] = holiday
+	from match_schools.api import agenda
+
+	# Not a refusal: a trip day may still be the day the office wants.
+	result["agenda"] = agenda.lessons_suspended(student_group, schedule_date) or ""
 	return result

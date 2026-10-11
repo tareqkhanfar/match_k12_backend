@@ -167,6 +167,7 @@ FINANCE_MODULES = {"fees", "billing", "receivables", "statement", "fee_reports"}
 _COMMON_MODULES = {
 	"auth", "security", "notifications", "academic_context", "help_center",
 	"workspace", "workspaces", "mail", "messaging", "community", "surveys", "alerts",
+	"agenda.options", "agenda.events", "agenda.upcoming", "agenda.day",
 }
 
 # The supervisor reads the academic side of their sections.

@@ -1,0 +1,161 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MS-AGD-.YYYY.-.#####",
+ "creation": "2026-10-11 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "event_type",
+  "status",
+  "from_date",
+  "to_date",
+  "all_day",
+  "from_time",
+  "to_time",
+  "column_break_1",
+  "audience",
+  "programs",
+  "groups",
+  "location",
+  "academic_year",
+  "section_details",
+  "description",
+  "no_lessons",
+  "synced_dates",
+  "notified"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "العنوان",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "event_type",
+   "fieldtype": "Link",
+   "label": "النوع",
+   "options": "MS Agenda Type",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "الحالة",
+   "options": "مؤكد\nمبدئي\nملغى",
+   "default": "مؤكد"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "من تاريخ",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "إلى تاريخ"
+  },
+  {
+   "fieldname": "all_day",
+   "fieldtype": "Check",
+   "label": "طوال اليوم",
+   "default": "1"
+  },
+  {
+   "fieldname": "from_time",
+   "fieldtype": "Time",
+   "label": "من الساعة"
+  },
+  {
+   "fieldname": "to_time",
+   "fieldtype": "Time",
+   "label": "إلى الساعة"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "audience",
+   "fieldtype": "Select",
+   "label": "الفئة",
+   "options": "school\nprograms\ngroups\nstaff",
+   "default": "school"
+  },
+  {
+   "fieldname": "programs",
+   "fieldtype": "Small Text",
+   "label": "الصفوف (JSON)"
+  },
+  {
+   "fieldname": "groups",
+   "fieldtype": "Small Text",
+   "label": "الشعب (JSON)"
+  },
+  {
+   "fieldname": "location",
+   "fieldtype": "Data",
+   "label": "المكان"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "العام الدراسي",
+   "options": "Academic Year"
+  },
+  {
+   "fieldname": "section_details",
+   "fieldtype": "Section Break",
+   "label": "التفاصيل"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "الوصف"
+  },
+  {
+   "fieldname": "no_lessons",
+   "fieldtype": "Check",
+   "label": "تعليق الحصص في هذا الحدث"
+  },
+  {
+   "fieldname": "synced_dates",
+   "fieldtype": "Small Text",
+   "label": "أيام أُضيفت لقائمة العطل (JSON)"
+  },
+  {
+   "fieldname": "notified",
+   "fieldtype": "Check",
+   "label": "أُرسل التنبيه"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Agenda Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "title"
+}

@@ -862,10 +862,17 @@ def _attendance_rows(start, end, program=None, student_group=None) -> dict:
 		):
 			taken.setdefault(r.student_group, set()).add(str(r.date))
 
-	day_keys = [str(d) for d in days]
+	all_keys = [str(d) for d in days]
+	# A trip or activity day that suspended a section's lessons is not a day
+	# its register was owed (agenda).
+	from match_schools.api.agenda import suspended_days
+
+	off_school, off_group = suspended_days(start, end)
 	rows = []
-	per_day = {d: 0 for d in day_keys}
+	per_day = {d: 0 for d in all_keys}
 	for s in sections:
+		off = off_school | off_group.get(s["id"], set())
+		day_keys = [d for d in all_keys if d not in off]
 		mine = taken.get(s["id"], set())
 		done = [d for d in day_keys if d in mine]
 		missing = [d for d in day_keys if d not in mine]
@@ -888,23 +895,29 @@ def _attendance_rows(start, end, program=None, student_group=None) -> dict:
 		)
 	rows.sort(key=lambda r: (r["pct"] if r["pct"] is not None else 0, r["sectionLabel"]))
 
-	expected = len(sections) * len(day_keys)
+	expected = sum(r["schoolDays"] for r in rows)
 	done_total = sum(r["taken"] for r in rows)
+	# Per day, only the sections whose register was owed that day.
+	owed = {
+		d: sum(1 for s in sections if d not in (off_school | off_group.get(s["id"], set())))
+		for d in all_keys
+	}
 	daily = [
 		{
 			"date": d,
 			"label": d[5:],
 			"weekday": DAY_AR.get(WEEK[getdate(d).weekday()], ""),
 			"taken": per_day[d],
-			"missing": len(sections) - per_day[d],
-			"pct": _pct(per_day[d], len(sections)),
+			"missing": max(owed[d] - per_day[d], 0),
+			"pct": _pct(per_day[d], owed[d]),
 		}
-		for d in day_keys
+		for d in all_keys
+		if owed[d]
 	]
 	return {
 		"summary": {
 			"sections": len(sections),
-			"schoolDays": len(day_keys),
+			"schoolDays": len(all_keys),
 			"expected": expected,
 			"taken": done_total,
 			"missing": expected - done_total,

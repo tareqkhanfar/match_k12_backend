@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:type_key",
+ "creation": "2026-10-11 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "type_key",
+  "label",
+  "color",
+  "icon",
+  "sort_order",
+  "is_active",
+  "is_system",
+  "section_effects",
+  "closes_school",
+  "no_lessons",
+  "exam_period",
+  "staff_only",
+  "notify"
+ ],
+ "fields": [
+  {
+   "fieldname": "type_key",
+   "fieldtype": "Data",
+   "label": "المفتاح",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "الاسم",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "color",
+   "fieldtype": "Data",
+   "label": "اللون"
+  },
+  {
+   "fieldname": "icon",
+   "fieldtype": "Data",
+   "label": "الأيقونة"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "الترتيب"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "فعّال",
+   "default": "1"
+  },
+  {
+   "fieldname": "is_system",
+   "fieldtype": "Check",
+   "label": "من النظام"
+  },
+  {
+   "fieldname": "section_effects",
+   "fieldtype": "Section Break",
+   "label": "الأثر على النظام"
+  },
+  {
+   "fieldname": "closes_school",
+   "fieldtype": "Check",
+   "label": "عطلة — تُغلق المدرسة (لا حضور ولا حصص ولا امتحانات)"
+  },
+  {
+   "fieldname": "no_lessons",
+   "fieldtype": "Check",
+   "label": "تُعلَّق الحصص للفئة المعنية"
+  },
+  {
+   "fieldname": "exam_period",
+   "fieldtype": "Check",
+   "label": "فترة امتحانات"
+  },
+  {
+   "fieldname": "staff_only",
+   "fieldtype": "Check",
+   "label": "للطاقم فقط (لا يظهر للطلاب وأولياء الأمور)"
+  },
+  {
+   "fieldname": "notify",
+   "fieldtype": "Check",
+   "label": "تنبيه الفئة المعنية عند الإضافة"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Match Schools",
+ "name": "MS Agenda Type",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "naming_rule": "By fieldname",
+ "title_field": "label"
+}

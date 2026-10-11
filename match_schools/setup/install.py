@@ -15,7 +15,19 @@ def after_install():
 	apply_doctype_permissions()
 	sync_accounting_workspace()
 	seed_workspace_templates()
+	seed_agenda()
 	frappe.db.commit()
+
+
+def seed_agenda():
+	"""The agenda's types, and the existing holidays as agenda events (once)."""
+	from match_schools.api.agenda import migrate_holidays, seed_types
+
+	try:
+		seed_types()
+		migrate_holidays()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Agenda seed failed")
 
 
 def seed_workspace_templates():
