@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import cint, flt
 
 from match_schools.api.utils import (
+	hides_finance,
 	BACK_OFFICE,
 	build_order_by,
 	fail,
@@ -487,7 +488,7 @@ def get_student(student: str, persona: str = None):
 	enrollment = _latest_enrollment(student)
 	# A teacher opens a student to teach them; their fees are between the
 	# office and the family.
-	fees = _fee_totals(student) if persona != ROLE_TEACHER else None
+	fees = _fee_totals(student) if persona != ROLE_TEACHER and not hides_finance() else None
 
 	return {
 		"profile": {

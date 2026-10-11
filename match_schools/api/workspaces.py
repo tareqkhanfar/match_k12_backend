@@ -29,7 +29,11 @@ from frappe.utils import cint
 from match_schools.api import custom_pages, forms
 from match_schools.api.custom_pages import assert_administrator, is_administrator
 from match_schools.api.utils import (
-	PERSONA_LABELS_AR,
+	ROLE_LABELS_AR,
+	ROLE_NURSE,
+	ROLE_SUPERVISOR,
+	ROLE_VICE_PRINCIPAL,
+	get_role,
 	ROLE_ADMIN,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
@@ -42,6 +46,12 @@ from match_schools.api.utils import (
 )
 
 ALL_ROLES = (ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+# What a workspace can be given to: every role in the school, the staff
+# roles included — a workspace for «كل المشرفين» must not reach the teachers.
+SCHOOL_ROLES = (
+	ROLE_ADMIN, ROLE_VICE_PRINCIPAL, ROLE_SECRETARY, ROLE_SUPERVISOR, ROLE_NURSE,
+	ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT,
+)
 BLOCK_TYPES = ("shortcuts", "links", "numbers", "text")
 ITEM_KINDS = ("screen", "page", "url")
 
@@ -159,7 +169,8 @@ def _row(doc, users: int | None = None) -> dict:
 		"description": doc.description or "",
 		"isActive": cint(doc.is_active),
 		"sortOrder": cint(doc.sort_order),
-		"personas": [p for p in _json(doc.get("personas"), []) if p in ALL_ROLES],
+		"personas": [p for p in _json(doc.get("personas"), []) if p in SCHOOL_ROLES],
+		"defaultRoles": [p for p in _json(doc.get("default_roles"), []) if p in SCHOOL_ROLES],
 		"buttons": sum(len(b.get("items", [])) for b in layout["blocks"]),
 		**({"users": users} if users is not None else {}),
 	}
@@ -199,7 +210,7 @@ def _all_assignments() -> dict[str, dict]:
 	return out
 
 
-def _role_workspaces(persona: str) -> list[str]:
+def _role_workspaces(role: str) -> list[str]:
 	"""Active workspaces every user of this role has."""
 	rows = frappe.get_all(
 		"MS Workspace",
@@ -208,7 +219,19 @@ def _role_workspaces(persona: str) -> list[str]:
 		order_by="sort_order asc, title asc",
 		limit_page_length=0,
 	)
-	return [r.name for r in rows if persona in _json(r.personas, [])]
+	return [r.name for r in rows if role in _json(r.personas, [])]
+
+
+def _role_default(role: str) -> str:
+	"""The workspace a role lands on when its people were given none by name."""
+	rows = frappe.get_all(
+		"MS Workspace",
+		filters={"is_active": 1},
+		fields=["name", "default_roles"],
+		order_by="sort_order asc, title asc",
+		limit_page_length=0,
+	)
+	return next((r.name for r in rows if role in _json(r.default_roles, [])), "")
 
 
 def _write_assignment(user: str, workspaces: list[str], default: str, hide_system: int):
@@ -217,8 +240,8 @@ def _write_assignment(user: str, workspaces: list[str], default: str, hide_syste
 	for w in workspaces:
 		if w in existing and w not in clean:
 			clean.append(w)
-	persona = get_persona(user)
-	reachable = set(clean) | set(_role_workspaces(persona) if persona else [])
+	role = get_role(user)
+	reachable = set(clean) | set(_role_workspaces(role) if role else [])
 	default = default if default in reachable else ""
 	hide_system = 1 if cint(hide_system) and reachable else 0
 	name = frappe.db.get_value("MS Workspace Assignment", {"user": user}, "name")
@@ -244,8 +267,9 @@ def mine(persona: str = None):
 
 	`default` empty means their role's menu, as before workspaces existed."""
 	mine_ = _assignment(frappe.session.user)
+	role = get_role()
 	ids = list(mine_["workspaces"])
-	for w in _role_workspaces(persona):
+	for w in _role_workspaces(role):
 		if w not in ids:
 			ids.append(w)
 	docs = {
@@ -273,6 +297,10 @@ def mine(persona: str = None):
 		)
 	available = {w["id"] for w in out}
 	default = mine_["default"] if mine_["default"] in available else ""
+	if not default and not mine_["default"]:
+		# Nobody chose for this person: their role's default, if it has one.
+		role_default = _role_default(role)
+		default = role_default if role_default in available else ""
 	hide = bool(mine_["hideSystem"]) and bool(out)
 	if hide and not default:
 		default = out[0]["id"]
@@ -295,13 +323,13 @@ def _users_of(workspace: str, assignments: dict | None = None) -> list[dict]:
 	)
 	out = []
 	for u in users:
-		p = get_persona(u)
+		p = get_role(u)
 		out.append(
 			{
 				"user": u,
 				"name": names.get(u) or u,
 				"persona": p or "",
-				"personaLabel": PERSONA_LABELS_AR.get(p, p or ""),
+				"personaLabel": ROLE_LABELS_AR.get(p, p or ""),
 				"isDefault": assignments[u]["default"] == workspace,
 			}
 		)
@@ -360,7 +388,7 @@ def catalog(persona: str = None):
 	return {
 		"pages": [custom_pages._page_row(p) for p in pages],
 		"cards": list(cards.values()),
-		"personas": [{"key": p, "label": PERSONA_LABELS_AR.get(p, p)} for p in ALL_ROLES],
+		"personas": [{"key": p, "label": ROLE_LABELS_AR.get(p, p)} for p in SCHOOL_ROLES],
 	}
 
 
@@ -383,7 +411,12 @@ def save_workspace(payload: str | dict, persona: str = None):
 	doc.description = _short(data.get("description"), 500)
 	doc.is_active = 1 if cint(data.get("isActive", 1)) else 0
 	doc.sort_order = cint(data.get("sortOrder"))
-	doc.personas = json.dumps([p for p in (data.get("personas") or []) if p in ALL_ROLES])
+	defaults = [p for p in (data.get("defaultRoles") or []) if p in SCHOOL_ROLES]
+	personas = [p for p in (data.get("personas") or []) if p in SCHOOL_ROLES]
+	# A role's default is necessarily one of its workspaces.
+	personas += [p for p in defaults if p not in personas]
+	doc.personas = json.dumps(personas)
+	doc.default_roles = json.dumps(defaults)
 	doc.layout = json.dumps(normalize_layout(data.get("layout")), ensure_ascii=False)
 	doc.save(ignore_permissions=True)
 
@@ -455,7 +488,7 @@ def assignments(search: str = "", persona: str = None):
 	all_a = _all_assignments()
 	out = []
 	for r in rows:
-		p = get_persona(r.name)
+		p = get_role(r.name)
 		if not p:
 			continue
 		a = all_a.get(r.name) or {"workspaces": [], "default": "", "hideSystem": 0}
@@ -464,9 +497,10 @@ def assignments(search: str = "", persona: str = None):
 				"user": r.name,
 				"name": r.full_name or r.name,
 				"persona": p,
-				"personaLabel": PERSONA_LABELS_AR.get(p, p),
+				"personaLabel": ROLE_LABELS_AR.get(p, p),
 				"workspaces": a["workspaces"],
 				"roleWorkspaces": _role_workspaces(p),
+				"roleDefault": _role_default(p),
 				"default": a["default"],
 				"hideSystem": a["hideSystem"],
 			}
@@ -558,3 +592,45 @@ def from_category(category: str, title: str = None, persona: str = None):
 		"pagesCreated": created,
 		"pages": len(page_ids),
 	}
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN)
+def templates(persona: str = None):
+	"""The ready-made workspaces one can start from."""
+	assert_administrator()
+	from match_schools.setup.workspace_templates import TEMPLATES
+
+	taken = set(frappe.get_all("MS Workspace", pluck="title", limit_page_length=0))
+	return {
+		"templates": [
+			{
+				"key": key,
+				"title": t["title"],
+				"icon": t["icon"],
+				"color": t["color"],
+				"description": t["description"],
+				"roles": t["roles"],
+				"rolesLabel": "، ".join(ROLE_LABELS_AR.get(r, r) for r in t["roles"]),
+				"buttons": sum(len(b.get("items", [])) for b in t["blocks"]),
+				"exists": t["title"] in taken,
+			}
+			for key, t in TEMPLATES.items()
+		]
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN)
+def from_template(key: str, persona: str = None):
+	"""A new workspace from a template — an ordinary one, edited freely. Given
+	to the template's role as its default only when that role has none yet."""
+	assert_administrator()
+	from match_schools.setup.workspace_templates import TEMPLATES, create_from_template
+
+	if key not in TEMPLATES:
+		return fail("Unknown template.", "قالب غير معروف.")
+	defaults = [r for r in TEMPLATES[key]["roles"] if not _role_default(r)]
+	name = create_from_template(key, default_roles=defaults)
+	frappe.db.commit()
+	return {"id": name}

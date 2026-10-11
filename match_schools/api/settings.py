@@ -74,6 +74,7 @@ def get_settings(persona: str = None):
 			"student_open_messaging": _student_open_messaging(),
 			# Only class teachers (and the office) take attendance.
 			"attendance_homeroom_only": _attendance_homeroom_only(),
+			"vp_sees_finance": frappe.db.get_default("ms_vp_sees_finance") == "1",
 		},
 		"counts": {
 			"students": frappe.db.count("Student", {"enabled": 1}),
@@ -152,6 +153,18 @@ def save_settings(payload: str | dict, persona: str = None):
 
 		frappe.db.set_default(HOMEROOM_ONLY_KEY, "1" if cint(data.get("attendance_homeroom_only")) else "0")
 		updated.append("attendance_homeroom_only")
+	if "vp_sees_finance" in data:
+		from match_schools.api.utils import ROLE_ADMIN as _ADMIN, VP_FINANCE_KEY, get_role
+
+		# The vice principal shares this screen; opening finance to them is
+		# the principal's decision, not theirs.
+		if get_role() != _ADMIN:
+			return fail(
+				message_en="Only the principal decides this.",
+				message_ar="إظهار الأمور المالية لنائب المدير قرار المدير وحده.",
+			)
+		frappe.db.set_default(VP_FINANCE_KEY, "1" if cint(data.get("vp_sees_finance")) else "0")
+		updated.append("vp_sees_finance")
 
 	# --- School (Company) details ---
 	company = data.get("company")

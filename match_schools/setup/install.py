@@ -3,7 +3,7 @@
 
 import frappe
 
-from match_schools.api.utils import FRAPPE_ROLE_BY_PERSONA
+from match_schools.api.utils import ALL_FRAPPE_ROLES
 
 
 def after_install():
@@ -14,7 +14,18 @@ def after_install():
 	install_admission_workflow()
 	apply_doctype_permissions()
 	sync_accounting_workspace()
+	seed_workspace_templates()
 	frappe.db.commit()
+
+
+def seed_workspace_templates():
+	"""The new staff roles' workspaces, once per site (setup/workspace_templates.py)."""
+	from match_schools.setup.workspace_templates import seed
+
+	try:
+		seed()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Workspace templates seed failed")
 
 
 def sync_accounting_workspace():
@@ -156,8 +167,8 @@ def patch_fees_income_account_fetch():
 
 
 def create_persona_roles():
-	"""Create the four Match Schools personas as Frappe roles (idempotent)."""
-	for role_name in FRAPPE_ROLE_BY_PERSONA.values():
+	"""Create the Match Schools personas and staff roles as Frappe roles (idempotent)."""
+	for role_name in ALL_FRAPPE_ROLES.values():
 		if frappe.db.exists("Role", role_name):
 			continue
 		role = frappe.get_doc(

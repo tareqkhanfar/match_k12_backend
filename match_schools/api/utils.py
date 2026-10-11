@@ -51,6 +51,57 @@ PERSONA_PRIORITY = (ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER, ROLE_STUDENT, ROLE
 # Personas that manage school-wide records rather than only their own scope.
 BACK_OFFICE = (ROLE_ADMIN, ROLE_SECRETARY)
 
+# --- Staff roles that ride on a persona --------------------------------------
+# A school's staff is more than four kinds of people. Rather than teach every
+# one of four hundred permission checks about each new kind, each of these
+# roles *is* one of the personas above for those checks, and `role_policy`
+# (applied by `ms_endpoint` to every call) narrows what it may reach:
+#
+# * نائب المدير — the principal's powers, finance hidden unless the school
+#   turns it on (`VP_FINANCE_KEY`).
+# * المشرف — a teacher's view over the sections and grades they supervise
+#   (`supervised_groups`), academic screens only, and nothing written.
+# * الممرض — the office's reach over students, for health records, clinic
+#   visits and nursing forms only.
+
+ROLE_VICE_PRINCIPAL = "vice_principal"
+ROLE_SUPERVISOR = "supervisor"
+ROLE_NURSE = "nurse"
+
+FRAPPE_ROLE_BY_STAFF_ROLE = {
+	ROLE_VICE_PRINCIPAL: "MS Vice Principal",
+	ROLE_SUPERVISOR: "MS Supervisor",
+	ROLE_NURSE: "MS Nurse",
+}
+STAFF_ROLE_BASE = {
+	ROLE_VICE_PRINCIPAL: ROLE_ADMIN,
+	ROLE_SUPERVISOR: ROLE_TEACHER,
+	ROLE_NURSE: ROLE_SECRETARY,
+}
+ROLE_LABELS_AR = {
+	**PERSONA_LABELS_AR,
+	ROLE_VICE_PRINCIPAL: "نائب المدير",
+	ROLE_SUPERVISOR: "مشرف",
+	ROLE_NURSE: "ممرض",
+}
+ALL_FRAPPE_ROLES = {**FRAPPE_ROLE_BY_PERSONA, **FRAPPE_ROLE_BY_STAFF_ROLE}
+
+# Who a user is when they hold several roles: the first that matches. A
+# teacher who is also given «مشرف» stays a teacher — supervising is read-only,
+# and it must not take their own classes away from them.
+ROLE_PRIORITY = (
+	ROLE_ADMIN,
+	ROLE_VICE_PRINCIPAL,
+	ROLE_SECRETARY,
+	ROLE_NURSE,
+	ROLE_TEACHER,
+	ROLE_SUPERVISOR,
+	ROLE_STUDENT,
+	ROLE_PARENT,
+)
+
+VP_FINANCE_KEY = "ms_vp_sees_finance"
+
 
 def ok(data: Any = None, message_en: str = "", message_ar: str = "") -> dict:
 	return {
@@ -70,8 +121,8 @@ def fail(message_en: str = "", message_ar: str = "", data: Any = None) -> dict:
 	}
 
 
-def get_persona(user: str | None = None) -> str | None:
-	"""Resolve the frontend persona for a user from their Frappe roles."""
+def get_role(user: str | None = None) -> str | None:
+	"""The user's role in the school — a persona, or a staff role riding on one."""
 	user = user or frappe.session.user
 	if user == "Guest":
 		return None
@@ -82,10 +133,153 @@ def get_persona(user: str | None = None) -> str | None:
 	if "Administrator" in roles or "System Manager" in roles:
 		return ROLE_ADMIN
 
-	for persona in PERSONA_PRIORITY:
-		if FRAPPE_ROLE_BY_PERSONA[persona] in roles:
-			return persona
+	for role in ROLE_PRIORITY:
+		if ALL_FRAPPE_ROLES[role] in roles:
+			return role
 	return None
+
+
+def get_persona(user: str | None = None) -> str | None:
+	"""Resolve the frontend persona for a user from their Frappe roles."""
+	role = get_role(user)
+	return STAFF_ROLE_BASE.get(role, role)
+
+
+def vp_sees_finance() -> bool:
+	return frappe.db.get_default(VP_FINANCE_KEY) == "1"
+
+
+def hides_finance(user: str | None = None) -> bool:
+	"""Whether money stays out of what this user sees: the supervisor and the
+	nurse always, the vice principal unless the school opened it."""
+	role = get_role(user)
+	if role in (ROLE_SUPERVISOR, ROLE_NURSE):
+		return True
+	return role == ROLE_VICE_PRINCIPAL and not vp_sees_finance()
+
+
+# Finance: the vice principal's screens leave these out unless the school
+# turns them on.
+FINANCE_MODULES = {"fees", "billing", "receivables", "statement", "fee_reports"}
+
+# Everything common to any signed-in staff member: their account, the
+# header, notifications, help, their workspace.
+_COMMON_MODULES = {
+	"auth", "security", "notifications", "academic_context", "help_center",
+	"workspace", "workspaces", "mail", "messaging", "community", "surveys", "alerts",
+}
+
+# The supervisor reads the academic side of their sections.
+SUPERVISOR_MODULES = _COMMON_MODULES | {
+	"academics", "attendance", "gradebook", "gradeflow", "records", "exams",
+	"timetable", "timetable_grid", "class_log", "evaluations", "periodic_evaluations",
+	"assignments", "quizzes", "resources", "resources_hub", "students", "comparison",
+	"assessment_plan", "lesson_plans", "weekly_plan", "scheduling", "certificates",
+	"dashboard", "connections", "sections", "export", "student_forms", "wellbeing.list_behaviour",
+	"wellbeing.behaviour_summary", "dossier", "roles", "bell_schedules", "calendar",
+}
+# The few things a read-only account still sends: its own password, marking
+# a notification read, a message.
+SUPERVISOR_WRITES = {"auth", "security", "notifications", "mail", "messaging", "export", "roles", "surveys"}
+
+# The nurse: health, clinic visits and nursing forms.
+NURSE_MODULES = _COMMON_MODULES | {
+	"wellbeing.get_health_record", "wellbeing.save_health_record", "wellbeing.save_health_visit",
+	"wellbeing.delete_health_visit", "wellbeing.list_health_records", "wellbeing.list_health_visits",
+	"wellbeing.health", "health_reports", "attachments", "forms", "forms_print", "custom_pages",
+	"students.list_students", "students.get_student", "students.search_students", "roles",
+	"export", "student_forms",
+}
+NURSE_FORM_CATEGORY = "nursing"
+
+
+def _allowed(name: str, module: str, rules: set[str]) -> bool:
+	"""A module in the set, or this very function (`module.function`), or a
+	function whose name starts with an entry's (`wellbeing.health…`)."""
+	if module in rules:
+		return True
+	full = f"{module}.{name}"
+	return any(full == r or (("." in r) and full.startswith(r)) for r in rules)
+
+
+def _nurse_form_ok(kwargs: dict) -> bool:
+	"""A nursing form only — whichever of category, template or entry the call names."""
+	category = kwargs.get("category")
+	if category:
+		return category == NURSE_FORM_CATEGORY
+	for key, doctype in (("template", "MS Form Template"), ("entry", "MS Form Entry")):
+		value = kwargs.get(key)
+		if value and frappe.db.exists(doctype, value):
+			return frappe.db.get_value(doctype, value, "category") == NURSE_FORM_CATEGORY
+	payload = kwargs.get("payload")
+	if payload:
+		data = parse_json_arg(payload, {}) or {}
+		if isinstance(data, dict):
+			if data.get("category"):
+				return data["category"] == NURSE_FORM_CATEGORY
+			if data.get("template") and frappe.db.exists("MS Form Template", data["template"]):
+				return frappe.db.get_value("MS Form Template", data["template"], "category") == NURSE_FORM_CATEGORY
+	# Listing the files themselves (`categories`) is narrowed by the screen.
+	return True
+
+
+def role_policy(role: str | None, module: str, name: str, kwargs: dict) -> dict | None:
+	"""What a staff role may not do here, as a refusal envelope; None if allowed."""
+	if role == ROLE_VICE_PRINCIPAL:
+		if module in FINANCE_MODULES and not vp_sees_finance():
+			return fail(
+				"Finance is not open to the vice principal.",
+				"الأمور المالية غير متاحة لنائب المدير — يفعّلها المدير من إعدادات المدرسة.",
+			)
+		return None
+	if role == ROLE_SUPERVISOR:
+		if not _allowed(name, module, SUPERVISOR_MODULES):
+			return fail("Not open to supervisors.", "هذه الشاشة خارج صلاحيات المشرف (الأمور الأكاديمية فقط).")
+		method = getattr(getattr(frappe.local, "request", None), "method", "GET")
+		if method == "POST" and not _allowed(name, module, SUPERVISOR_WRITES):
+			return fail("Supervisors read only.", "حساب المشرف للاطلاع فقط — لا يمكنه التعديل.")
+		return None
+	if role == ROLE_NURSE:
+		if not _allowed(name, module, NURSE_MODULES):
+			return fail("Not open to the nurse.", "هذه الشاشة خارج صلاحيات التمريض.")
+		if module in ("forms", "forms_print") and not _nurse_form_ok(kwargs):
+			return fail("Nursing forms only.", "التمريض يصل إلى نماذج التمريض فقط.")
+		if module == "custom_pages" and kwargs.get("page"):
+			template = frappe.db.get_value("MS Custom Page", kwargs["page"], "template")
+			if not template or frappe.db.get_value("MS Form Template", template, "category") != NURSE_FORM_CATEGORY:
+				return fail("Nursing pages only.", "التمريض يصل إلى صفحات نماذج التمريض فقط.")
+		return None
+	return None
+
+
+def supervised_groups(user: str | None = None, period: bool = True) -> list[str]:
+	"""The sections a supervisor watches: those named on their staff file,
+	and every section of the grades named there."""
+	user = user or frappe.session.user
+	row = frappe.db.get_value(
+		"MS Staff Member", {"user": user}, ["supervised_groups", "supervised_programs"], as_dict=True
+	)
+	if not row:
+		return []
+	groups = set(parse_json_arg(row.supervised_groups, []) or [])
+	programs = [p for p in (parse_json_arg(row.supervised_programs, []) or []) if p]
+	if programs:
+		f: dict = {"program": ["in", programs], "disabled": 0}
+		if period:
+			apply_period(f, "Student Group")
+		groups |= set(frappe.get_all("Student Group", filters=f, pluck="name", limit_page_length=0))
+	if not groups:
+		return []
+	f = {"name": ["in", sorted(groups)], "disabled": 0}
+	if period:
+		apply_period(f, "Student Group")
+	return frappe.get_all("Student Group", filters=f, pluck="name", limit_page_length=0)
+
+
+# What a supervisor's scope carries where a teacher's carries their Instructor:
+# `instructor_groups` and `courses_taught` answer it with the supervised
+# sections and all of their subjects.
+SUPERVISOR_SCOPE = "__ms_supervisor__"
 
 
 def account_block_reason(user: str | None = None) -> dict | None:
@@ -275,7 +469,13 @@ def ms_endpoint(*allowed_personas: str):
 			persona = require_persona(*allowed_personas)
 			kwargs.pop("persona", None)
 			started = time.monotonic()
-			label = f"{fn.__module__.rsplit('.', 1)[-1]}.{fn.__name__}"
+			module = fn.__module__.rsplit(".", 1)[-1]
+			label = f"{module}.{fn.__name__}"
+			role = get_role()
+			if role in STAFF_ROLE_BASE:
+				refusal = role_policy(role, module, fn.__name__, kwargs)
+				if refusal:
+					return refusal
 			try:
 				data = fn(*args, persona=persona, **kwargs)
 			except frappe.ValidationError as e:
@@ -531,7 +731,9 @@ def resolve_scope(persona: str) -> dict:
 		scope["student"] = student
 		scope["students"] = [student] if student else []
 	elif persona == ROLE_TEACHER:
-		scope["instructor"] = get_linked_instructor()
+		scope["instructor"] = (
+			SUPERVISOR_SCOPE if get_role() == ROLE_SUPERVISOR else get_linked_instructor()
+		)
 	elif persona == ROLE_PARENT:
 		guardian = get_linked_guardian()
 		scope["guardian"] = guardian
@@ -757,6 +959,8 @@ def instructor_groups(
 	"""
 	if not instructor:
 		return []
+	if instructor == SUPERVISOR_SCOPE:
+		return supervised_groups(period=period)
 
 	groups: set[str] = set(
 		frappe.get_all(

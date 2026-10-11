@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import add_months, cint, flt, getdate, today
 
 from match_schools.api.utils import (
+	hides_finance,
 	hhmm,
 	BACK_OFFICE,
 	ROLE_ADMIN,
@@ -78,7 +79,7 @@ def _admin_dashboard() -> dict:
 		"grade_distribution": _grade_distribution(academic_year),
 		"performance": _performance_by_course(academic_year),
 		"gender_split": _gender_split(),
-		"fee_collection": _fee_collection_trend(),
+		"fee_collection": [] if hides_finance() else _fee_collection_trend(),
 		"announcements": _recent_announcements(),
 		"academic_year": academic_year,
 	}

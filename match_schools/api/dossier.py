@@ -16,6 +16,7 @@ import frappe
 from frappe.utils import cint, flt, getdate, nowdate
 
 from match_schools.api.utils import (
+	hides_finance,
 	apply_period,
 	BACK_OFFICE,
 	fail,
@@ -856,7 +857,7 @@ def student_dossier(student: str, persona: str = None):
 		"quizzes": _quizzes(student),
 		# Money is between the school's office and the family. A teacher opens a
 		# student to teach them, and their fees are not the teacher's business.
-		"billing": _billing(student) if persona != ROLE_TEACHER else None,
+		"billing": _billing(student) if persona != ROLE_TEACHER and not hides_finance() else None,
 		"services": _services(student),
 		"alerts": _alerts(student),
 		# `timetable` stays the array of dated lessons that the previous build

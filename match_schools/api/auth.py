@@ -15,6 +15,11 @@ from frappe.auth import LoginManager
 from frappe.utils import cint
 
 from match_schools.api.utils import (
+	ROLE_LABELS_AR,
+	ROLE_SUPERVISOR,
+	STAFF_ROLE_BASE,
+	get_role,
+	hides_finance,
 	account_block_reason,
 	fail,
 	get_default_academic_term,
@@ -262,10 +267,18 @@ def _session_payload() -> dict:
 			profile["display_name"] = guardian.guardian_name or profile["display_name"]
 			profile["image"] = guardian.image or profile["image"]
 
+	role = get_role()
+	staff_role = role if role in STAFF_ROLE_BASE else None
 	return {
 		"user": user,
 		"email": user_doc.get("email") or user,
 		"role": persona,
+		# A staff role riding on the persona (vice principal, supervisor,
+		# nurse): the screens follow `role`, and narrow by this.
+		"staffRole": staff_role,
+		"roleLabel": ROLE_LABELS_AR.get(role or "", ""),
+		"readOnly": staff_role == ROLE_SUPERVISOR,
+		"hidesFinance": hides_finance(),
 		"name": profile["display_name"],
 		"image": profile["image"],
 		"language": user_doc.get("language") or "ar",

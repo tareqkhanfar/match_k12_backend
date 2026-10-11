@@ -22,6 +22,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime
 
 from match_schools.api.utils import (
+	SUPERVISOR_SCOPE,
 	BACK_OFFICE,
 	ROLE_ADMIN,
 	ROLE_PARENT,
@@ -59,6 +60,10 @@ def courses_of_instructor(instructor: str | None) -> set[str]:
 	"""
 	if not instructor:
 		return set()
+	if instructor == SUPERVISOR_SCOPE:
+		from match_schools.api.academics import courses_taught
+
+		return set(courses_taught(SUPERVISOR_SCOPE))
 
 	courses = {
 		r.course
@@ -170,6 +175,11 @@ def teacher_teaches_in_group(persona: str, student_group: str, course: str) -> b
 	instructor = resolve_scope(persona).get("instructor")
 	if not instructor:
 		return False
+	if instructor == SUPERVISOR_SCOPE:
+		# A supervisor reads every subject of the sections they watch.
+		from match_schools.api.academics import courses_taught
+
+		return course in courses_taught(SUPERVISOR_SCOPE, student_group)
 	if frappe.db.exists(
 		"Course Schedule",
 		{
@@ -211,6 +221,11 @@ def teaching_pairs(instructor: str | None) -> dict[str, list[str]]:
 	pairs: dict[str, set[str]] = {}
 	if not instructor:
 		return {}
+	if instructor == SUPERVISOR_SCOPE:
+		from match_schools.api.academics import courses_taught
+		from match_schools.api.utils import instructor_groups
+
+		return {g: courses_taught(SUPERVISOR_SCOPE, g) for g in instructor_groups(SUPERVISOR_SCOPE)}
 	rows = frappe.get_all(
 		"Course Schedule",
 		filters={"instructor": instructor, "docstatus": ["<", 2]},

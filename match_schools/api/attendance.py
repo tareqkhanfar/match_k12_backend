@@ -9,6 +9,7 @@ from frappe.utils import add_days, flt, getdate, today
 
 from match_schools.api import academic_context as ctx
 from match_schools.api.utils import (
+	SUPERVISOR_SCOPE,
 	apply_period,
 	BACK_OFFICE,
 	fail,
@@ -112,7 +113,8 @@ def teacher_attendance_groups(instructor: str | None, period: bool = True) -> li
 	or — when the school restricts attendance — only those they are مربي of."""
 	if not instructor:
 		return []
-	if not homeroom_only():
+	# A supervisor watches their sections whoever takes the register.
+	if not homeroom_only() or instructor == SUPERVISOR_SCOPE:
 		return instructor_groups(instructor, period=period)
 	filters: dict = {"ms_homeroom_instructor": instructor, "disabled": 0}
 	if period:

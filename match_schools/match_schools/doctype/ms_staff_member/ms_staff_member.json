@@ -11,6 +11,8 @@
   "full_name",
   "job_title",
   "staff_role",
+  "supervised_programs",
+  "supervised_groups",
   "status",
   "user",
   "image",
@@ -53,8 +55,20 @@
    "fieldname": "staff_role",
    "fieldtype": "Select",
    "label": "الدور في النظام",
-   "options": "secretary",
+   "options": "secretary\nvice_principal\nsupervisor\nnurse",
    "default": "secretary"
+  },
+  {
+   "fieldname": "supervised_programs",
+   "fieldtype": "Small Text",
+   "label": "الصفوف التي يشرف عليها (JSON)",
+   "depends_on": "eval:doc.staff_role=='supervisor'"
+  },
+  {
+   "fieldname": "supervised_groups",
+   "fieldtype": "Small Text",
+   "label": "الشعب التي يشرف عليها (JSON)",
+   "depends_on": "eval:doc.staff_role=='supervisor'"
   },
   {
    "fieldname": "status",
@@ -135,7 +149,7 @@
  "image_field": "image",
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-09-26 00:00:00.000000",
+ "modified": "2026-10-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Match Schools",
  "name": "MS Staff Member",

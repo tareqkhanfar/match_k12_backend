@@ -15,6 +15,7 @@
   "is_active",
   "sort_order",
   "personas",
+  "default_roles",
   "section_layout",
   "layout"
  ],
@@ -64,6 +65,11 @@
    "label": "متاحة لكل مستخدمي الأدوار (JSON)"
   },
   {
+   "fieldname": "default_roles",
+   "fieldtype": "Small Text",
+   "label": "الافتراضية لأدوار (JSON)"
+  },
+  {
    "fieldname": "section_layout",
    "fieldtype": "Section Break",
    "label": "المحتوى"
@@ -76,7 +82,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-05 00:00:00.000000",
+ "modified": "2026-10-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Match Schools",
  "name": "MS Workspace",

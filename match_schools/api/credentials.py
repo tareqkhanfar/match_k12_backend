@@ -29,8 +29,13 @@ from frappe.utils import cint
 from frappe.utils.password import update_password
 
 from match_schools.api.utils import (
+	ALL_FRAPPE_ROLES,
 	FRAPPE_ROLE_BY_PERSONA,
+	FRAPPE_ROLE_BY_STAFF_ROLE,
 	ROLE_ADMIN,
+	ROLE_NURSE,
+	ROLE_SUPERVISOR,
+	ROLE_VICE_PRINCIPAL,
 	fail,
 	ROLE_PARENT,
 	ROLE_SECRETARY,
@@ -46,6 +51,9 @@ PREFIX_BY_PERSONA = {
 	ROLE_PARENT: "g",
 	ROLE_SECRETARY: "sc",
 	ROLE_ADMIN: "ad",
+	ROLE_VICE_PRINCIPAL: "vp",
+	ROLE_SUPERVISOR: "sv",
+	ROLE_NURSE: "nr",
 }
 
 # Ambiguous characters are left out: a password is read off a printed slip and
@@ -179,7 +187,7 @@ def create_account(
 	user.enabled = 1
 	user.insert(ignore_permissions=True)
 
-	user.add_roles(FRAPPE_ROLE_BY_PERSONA[persona])
+	user.add_roles(ALL_FRAPPE_ROLES[persona])
 	update_password(user.name, password)
 
 	# The password was printed on a slip, so require a change at first login
@@ -253,6 +261,14 @@ CREDENTIAL_SOURCES = {
 	"Guardian": (ROLE_PARENT, "ولي الأمر"),
 	"MS Staff Member": (ROLE_SECRETARY, "السكرتير"),
 }
+
+def staff_account_role(doctype: str, name: str, role: str) -> str:
+	"""The role a new login gets: a staff file's own role (vice principal,
+	supervisor, nurse), else the record type's."""
+	if doctype == "MS Staff Member":
+		return frappe.db.get_value(doctype, name, "staff_role") or ROLE_SECRETARY
+	return role
+
 
 # Where each record keeps the person's name.
 NAME_FIELD = {
@@ -405,7 +421,7 @@ def issue_account(doctype: str = None, name: str = None, persona: str = None):
 	name_field = NAME_FIELD[doctype]
 	full_name = frappe.db.get_value(doctype, name, name_field) or name
 
-	credentials = create_account(role, name, full_name)
+	credentials = create_account(staff_account_role(doctype, name, role), name, full_name)
 	_link_user(doctype, name, credentials["user"])
 	frappe.db.commit()
 
@@ -607,15 +623,22 @@ def account_candidates(doctype: str = None, group: str = None, persona: str = No
 
 
 def _sync_staff():
-	"""A file for every secretary account that has none yet.
+	"""A file for every office-staff account that has none yet.
 
 	Secretaries used to be bare Users; each gets their file the first time
-	the office looks, so nobody is missing from the list.
+	the office looks, so nobody is missing from the list. The same goes for
+	the vice principal, supervisors and the nurse when their role was given
+	from the desk rather than from the staff screen.
 	"""
-	role = FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY]
-	users = frappe.get_all("Has Role", filters={"role": role, "parenttype": "User"}, pluck="parent")
+	by_role = {FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY]: ROLE_SECRETARY}
+	by_role.update({v: k for k, v in FRAPPE_ROLE_BY_STAFF_ROLE.items()})
+	users = {}
+	for r in frappe.get_all(
+		"Has Role", filters={"role": ["in", list(by_role)], "parenttype": "User"}, fields=["parent", "role"]
+	):
+		users.setdefault(r.parent, by_role[r.role])
 	have = set(frappe.get_all("MS Staff Member", filters={"user": ["is", "set"]}, pluck="user"))
-	for u in users:
+	for u, staff_role in users.items():
 		if u in have or u in ("Administrator", "Guest") or not frappe.db.exists("User", u):
 			continue
 		if "System Manager" in frappe.get_roles(u):
@@ -624,6 +647,7 @@ def _sync_staff():
 		doc = frappe.new_doc("MS Staff Member")
 		doc.full_name = info.full_name or u.split("@")[0]
 		doc.user = u
+		doc.staff_role = staff_role
 		doc.phone = info.mobile_no
 		doc.status = "Active" if cint(info.enabled) else "Inactive"
 		if info.email and not info.email.endswith("@" + login_domain()):
@@ -701,7 +725,7 @@ def issue_accounts(doctype: str = None, names: str | list = None, mode: str = "a
 				note="" if cint(u.enabled) else "الحساب معطّل — فعّله ليتمكن من الدخول",
 			)
 		else:
-			creds = create_account(role, name, full_name)
+			creds = create_account(staff_account_role(doctype, name, role), name, full_name)
 			_link_user(doctype, name, creds["user"])
 			row.update(user=creds["user"], username=creds["username"], password=creds["password"], status="created", note="")
 		rows.append(row)

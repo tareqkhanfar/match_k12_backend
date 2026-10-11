@@ -14,6 +14,7 @@ import frappe
 from frappe.utils import nowdate
 
 from match_schools.api.utils import (
+	hides_finance,
 	fail,
 	get_default_academic_year,
 	get_persona,
@@ -107,15 +108,17 @@ def shortcuts(persona: str = None):
 			_safe(lambda: frappe.db.count("Course")),
 			"", "/app/subjects",
 		)
-		add(
-			"unpaid", "الفواتير",
-			_safe(
-				lambda: frappe.db.count(
-					"Sales Invoice", {"docstatus": 1, "status": ["in", ["Unpaid", "Overdue"]]}
-				)
-			),
-			"غير مدفوعة", "/app/fees", "danger",
-		)
+		# Money stays off the cards of whoever does not see the finance screens.
+		if not hides_finance():
+			add(
+				"unpaid", "الفواتير",
+				_safe(
+					lambda: frappe.db.count(
+						"Sales Invoice", {"docstatus": 1, "status": ["in", ["Unpaid", "Overdue"]]}
+					)
+				),
+				"غير مدفوعة", "/app/fees", "danger",
+			)
 		add(
 			"admissions", "طلبات الالتحاق",
 			_safe(

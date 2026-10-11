@@ -16,6 +16,7 @@ from match_schools.api.utils import (
 	get_default_academic_year,
 	hhmm,
 	instructor_groups,
+	SUPERVISOR_SCOPE,
 	ms_endpoint,
 	parse_json_arg,
 	resolve_scope,
@@ -177,6 +178,8 @@ def courses_taught(instructor: str, student_group: str = None) -> list[str]:
 	"""
 	if not instructor:
 		return []
+	if instructor == SUPERVISOR_SCOPE:
+		return _supervised_courses(student_group)
 
 	filters = {"instructor": instructor, "docstatus": ["<", 2]}
 	if student_group:
@@ -208,6 +211,31 @@ def courses_taught(instructor: str, student_group: str = None) -> list[str]:
 				taught.add(g.course)
 
 	return sorted(taught)
+
+
+def _supervised_courses(student_group: str | None) -> list[str]:
+	"""A supervisor oversees every subject of their sections: the grade's
+	curriculum, plus whatever the timetable teaches there."""
+	groups = instructor_groups(SUPERVISOR_SCOPE)
+	if student_group:
+		groups = [g for g in groups if g == student_group]
+	if not groups:
+		return []
+	courses: set[str] = set()
+	programs = {
+		p for p in frappe.get_all("Student Group", filters={"name": ["in", groups]}, pluck="program") if p
+	}
+	for p in programs:
+		courses |= set(_courses_of_program(p))
+	courses |= {
+		c
+		for c in frappe.get_all(
+			"MS Timetable Slot", filters={"student_group": ["in", groups], "active": 1}, pluck="course",
+			limit_page_length=0,
+		)
+		if c
+	}
+	return sorted(courses)
 
 
 
