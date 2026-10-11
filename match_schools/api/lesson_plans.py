@@ -14,7 +14,7 @@ preparation stay with last week.
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import add_days, cint, getdate
 
 from match_schools.api.utils import (
 	ROLE_ADMIN,
@@ -229,6 +229,124 @@ def delete_lesson_plan(course_schedule: str = None, persona: str = None):
 		"data": {"deleted": bool(name)},
 		"message_en": "Lesson plan removed.",
 		"message_ar": "تم حذف تحضير الحصة.",
+	}
+
+
+def _hhmm(value) -> str:
+	"""08:00 from a timedelta or "8:00:00" — str() alone gives "8:00:"."""
+	if not value:
+		return ""
+	parts = str(value).split(":")
+	return f"{int(parts[0]):02d}:{parts[1]}" if len(parts) > 1 else str(value)
+
+
+COPIED_FIELDS = ("title", "objectives", "content", "homework", "resources", "notes")
+COPY_WINDOW_DAYS = 7
+
+
+@frappe.whitelist()
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def copy_targets(course_schedule: str = None, persona: str = None):
+	"""Where this lesson's preparation can be copied: the same teacher's lessons
+	of the same subject in their other sections, within a week either side —
+	the parallel lesson a teacher of two sections prepares twice."""
+	lesson = _lesson(course_schedule) if course_schedule else None
+	if not lesson:
+		return fail(message_en="Lesson not found.", message_ar="لم يتم العثور على الحصة.")
+	if not _may_edit(persona, lesson):
+		frappe.throw(_("This lesson is not yours."), frappe.PermissionError)
+	date = getdate(lesson.schedule_date)
+	rows = frappe.get_all(
+		"Course Schedule",
+		filters={
+			"course": lesson.course,
+			"instructor": lesson.instructor,
+			"student_group": ["!=", lesson.student_group],
+			"schedule_date": ["between", [add_days(date, -COPY_WINDOW_DAYS), add_days(date, COPY_WINDOW_DAYS)]],
+			"docstatus": ["<", 2],
+		},
+		fields=["name", "student_group", "schedule_date", "from_time", "to_time"],
+		order_by="schedule_date asc, from_time asc",
+		limit_page_length=200,
+	)
+	names = dict(
+		frappe.get_all(
+			"Student Group",
+			filters={"name": ["in", list({r.student_group for r in rows}) or [""]]},
+			fields=["name", "student_group_name"],
+			as_list=True,
+		)
+	)
+	planned = set(
+		frappe.get_all(
+			"MS Lesson Plan", filters={"course_schedule": ["in", [r.name for r in rows] or [""]]}, pluck="course_schedule"
+		)
+	)
+	return {
+		"lessons": [
+			{
+				"course_schedule": r.name,
+				"student_group": r.student_group,
+				"class_name": names.get(r.student_group) or r.student_group,
+				"date": str(r.schedule_date),
+				"from": _hhmm(r.from_time),
+				"to": _hhmm(r.to_time),
+				"hasPlan": r.name in planned,
+				"sameDay": getdate(r.schedule_date) == date,
+			}
+			for r in rows
+		]
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
+def copy_lesson_plan(source: str = None, targets: str | list = None, overwrite: int = 0, persona: str = None):
+	"""Copy one lesson's preparation onto other lessons. A lesson that already
+	has its own is left alone unless `overwrite` is set. Attachments stay with
+	the original."""
+	lesson = _lesson(source) if source else None
+	name = frappe.db.get_value("MS Lesson Plan", {"course_schedule": source}, "name") if lesson else None
+	if not name:
+		return fail(message_en="Save this lesson's plan first.", message_ar="احفظ تحضير هذه الحصة أولاً ثم انسخه.")
+	if not _may_edit(persona, lesson):
+		frappe.throw(_("This lesson is not yours."), frappe.PermissionError)
+	src = frappe.get_doc("MS Lesson Plan", name)
+	wanted = frappe.parse_json(targets) if isinstance(targets, str) else (targets or [])
+	copied, skipped = 0, 0
+	for target in wanted:
+		other = _lesson(target)
+		if not other or not _may_edit(persona, other) or other.course != lesson.course:
+			skipped += 1
+			continue
+		existing = frappe.db.get_value("MS Lesson Plan", {"course_schedule": target}, "name")
+		if existing and not cint(overwrite):
+			skipped += 1
+			continue
+		doc = frappe.get_doc("MS Lesson Plan", existing) if existing else frappe.new_doc("MS Lesson Plan")
+		doc.course_schedule = target
+		doc.student_group = other.student_group
+		doc.course = other.course
+		doc.instructor = other.instructor
+		doc.schedule_date = other.schedule_date
+		group = frappe.db.get_value(
+			"Student Group", other.student_group, ["academic_year", "academic_term"], as_dict=True
+		) or frappe._dict()
+		doc.academic_year = group.get("academic_year") or get_default_academic_year()
+		doc.academic_term = group.get("academic_term") or get_default_academic_term()
+		for field in COPIED_FIELDS:
+			doc.set(field, src.get(field))
+		doc.is_published = src.is_published
+		doc.prepared_by = frappe.session.user
+		doc.prepared_on = frappe.utils.now()
+		doc.save(ignore_permissions=True)
+		copied += 1
+	frappe.db.commit()
+	return {
+		"success": True,
+		"data": {"copied": copied, "skipped": skipped},
+		"message_en": f"Copied to {copied} lessons.",
+		"message_ar": f"نُسخ التحضير إلى {copied} حصة" + (f"، وتُركت {skipped} لها تحضير خاص" if skipped else ""),
 	}
 
 
