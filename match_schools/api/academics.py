@@ -706,7 +706,48 @@ def timetable(
 		"week_end": str(end),
 		"days": days,
 		"periods": periods,
+		"info": _timetable_info(student_group, instructor, days),
 	}
+
+
+def _section_supervisors(student_group: str) -> list[str]:
+	"""Who supervises this section: staff files naming it, or its grade."""
+	program = frappe.db.get_value("Student Group", student_group, "program")
+	names = []
+	for row in frappe.get_all(
+		"MS Staff Member",
+		filters={"staff_role": "supervisor", "status": ["!=", "Inactive"]},
+		fields=["full_name", "supervised_groups", "supervised_programs"],
+		limit_page_length=0,
+	):
+		groups = parse_json_arg(row.supervised_groups, []) or []
+		programs = parse_json_arg(row.supervised_programs, []) or []
+		if student_group in groups or (program and program in programs):
+			names.append(row.full_name)
+	return sorted(names)
+
+
+def _timetable_info(student_group: str | None, instructor: str | None, days: dict) -> dict:
+	"""What sits under the grid's title: a section's class teacher and
+	supervisors; a teacher's weekly quota against the lessons they have."""
+	info: dict = {}
+	if student_group:
+		homeroom = frappe.db.get_value("Student Group", student_group, "ms_homeroom_instructor")
+		info["homeroom"] = (
+			frappe.db.get_value("Instructor", homeroom, "instructor_name") or homeroom if homeroom else ""
+		)
+		info["supervisors"] = _section_supervisors(student_group)
+	if instructor and frappe.db.exists("Instructor", instructor):
+		info["quota"] = cint(frappe.db.get_value("Instructor", instructor, "ms_weekly_quota"))
+		# The weekly pattern is the teacher's real load; the dated week can be
+		# short a day for a holiday.
+		info["weeklyLessons"] = (
+			frappe.db.count("MS Timetable Slot", {"instructor": instructor, "active": 1})
+			if frappe.db.table_exists("MS Timetable Slot")
+			else 0
+		)
+		info["thisWeek"] = sum(len(v) for v in days.values())
+	return info
 
 
 def _week_periods(rows: list, student_group: str | None) -> list[dict]:
