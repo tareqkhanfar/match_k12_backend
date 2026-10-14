@@ -177,7 +177,7 @@ SUPERVISOR_MODULES = _COMMON_MODULES | {
 	"assignments", "quizzes", "resources", "resources_hub", "students", "comparison",
 	"assessment_plan", "lesson_plans", "weekly_plan", "scheduling", "certificates",
 	"dashboard", "connections", "sections", "export", "student_forms", "wellbeing.list_behaviour",
-	"wellbeing.behaviour_summary", "dossier", "roles", "bell_schedules", "calendar",
+	"wellbeing.behaviour_summary", "dossier", "roles", "bell_schedules", "calendar", "absence_report",
 }
 # The few things a read-only account still sends: its own password, marking
 # a notification read, a message.
