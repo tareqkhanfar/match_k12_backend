@@ -168,6 +168,8 @@ _COMMON_MODULES = {
 	"auth", "security", "notifications", "academic_context", "help_center",
 	"workspace", "workspaces", "mail", "messaging", "community", "surveys", "alerts",
 	"agenda.options", "agenda.events", "agenda.upcoming", "agenda.day",
+	# Their own profile and password — the first sign-in demands a new one.
+	"settings.change_password", "settings.my_profile", "settings.save_my_profile",
 }
 
 # The supervisor reads the academic side of their sections.
@@ -181,7 +183,10 @@ SUPERVISOR_MODULES = _COMMON_MODULES | {
 }
 # The few things a read-only account still sends: its own password, marking
 # a notification read, a message.
-SUPERVISOR_WRITES = {"auth", "security", "notifications", "mail", "messaging", "export", "roles", "surveys"}
+SUPERVISOR_WRITES = {
+	"auth", "security", "notifications", "mail", "messaging", "export", "roles", "surveys",
+	"settings.change_password", "settings.save_my_profile",
+}
 
 # The nurse: health, clinic visits and nursing forms.
 NURSE_MODULES = _COMMON_MODULES | {
