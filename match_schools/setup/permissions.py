@@ -11,13 +11,16 @@ to call. Administrator never hit this because it bypasses permission checks.
 
 import frappe
 
-from match_schools.api.utils import FRAPPE_ROLE_BY_PERSONA
+from match_schools.api.utils import ALL_FRAPPE_ROLES, FRAPPE_ROLE_BY_PERSONA, FRAPPE_ROLE_BY_STAFF_ROLE
 
 ADMIN = FRAPPE_ROLE_BY_PERSONA["admin"]
 SECRETARY = FRAPPE_ROLE_BY_PERSONA["secretary"]
 TEACHER = FRAPPE_ROLE_BY_PERSONA["teacher"]
 STUDENT = FRAPPE_ROLE_BY_PERSONA["student"]
 PARENT = FRAPPE_ROLE_BY_PERSONA["parent"]
+VICE_PRINCIPAL = FRAPPE_ROLE_BY_STAFF_ROLE["vice_principal"]
+SUPERVISOR = FRAPPE_ROLE_BY_STAFF_ROLE["supervisor"]
+NURSE = FRAPPE_ROLE_BY_STAFF_ROLE["nurse"]
 
 # Permission levels, from least to most.
 READ = {"read": 1}
@@ -192,11 +195,58 @@ MATRIX: dict[str, dict[str, dict]] = {
 }
 
 
+# The staff roles, worked out from the matrix so a doctype added above reaches
+# them too. The vice principal works as the principal. The supervisor reads
+# what a teacher reads and writes only messages, survey answers and files.
+# The nurse writes health records, visits and nursing forms, and reads the
+# student lists those are picked from. The API (`utils.role_policy`) narrows
+# each further; these rows are what Frappe's own checks see underneath.
+SUPERVISOR_WRITES = ("MS Message", "MS Survey Response", "MS Survey Answer", "MS Attachment", "File")
+NURSE_LEVELS = {
+	"MS Health Record": FULL,
+	"MS Health Visit": FULL,
+	"MS Form Entry": WRITE,
+	"MS Message": WRITE,
+	"MS Survey Response": WRITE,
+	"MS Survey Answer": WRITE,
+	"MS Attachment": WRITE,
+	"File": WRITE,
+	**dict.fromkeys(
+		(
+			"Student", "Guardian", "Student Guardian", "Student Group", "Student Group Student",
+			"Program", "Academic Year", "Academic Term", "Program Enrollment", "Instructor",
+			"MS Form Template",
+		),
+		READ,
+	),
+}
+
+
+def _read_only(level: dict) -> dict:
+	return {k: v for k, v in level.items() if k in REPORT}
+
+
+def staff_matrix() -> dict[str, dict[str, dict]]:
+	"""MATRIX with the three staff roles added."""
+	out = {}
+	for doctype, roles in MATRIX.items():
+		roles = dict(roles)
+		if ADMIN in roles:
+			roles[VICE_PRINCIPAL] = roles[ADMIN]
+		if TEACHER in roles:
+			teacher = roles[TEACHER]
+			roles[SUPERVISOR] = teacher if doctype in SUPERVISOR_WRITES else _read_only(teacher)
+		if doctype in NURSE_LEVELS:
+			roles[NURSE] = NURSE_LEVELS[doctype]
+		out[doctype] = roles
+	return out
+
+
 def apply_permissions():
 	"""Create or refresh the Custom DocPerm rows for every Match Schools role."""
 	applied, skipped = 0, []
 
-	for doctype, roles in MATRIX.items():
+	for doctype, roles in staff_matrix().items():
 		if not frappe.db.exists("DocType", doctype):
 			# Education may not ship every doctype in all versions.
 			skipped.append(doctype)
@@ -241,6 +291,6 @@ def _set_perm(doctype: str, role: str, level: dict):
 
 def remove_permissions():
 	"""Drop every Match Schools permission row — used when uninstalling."""
-	roles = list(FRAPPE_ROLE_BY_PERSONA.values())
+	roles = list(ALL_FRAPPE_ROLES.values())
 	frappe.db.delete("Custom DocPerm", {"role": ["in", roles]})
 	frappe.clear_cache()
