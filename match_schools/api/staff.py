@@ -18,7 +18,10 @@ from match_schools.api.credentials import (
 	_link_user,
 )
 from match_schools.api.utils import (
+	ALL_FRAPPE_ROLES,
 	FRAPPE_ROLE_BY_PERSONA,
+	ROLE_PRIORITY,
+	get_role,
 	FRAPPE_ROLE_BY_STAFF_ROLE,
 	ROLE_ADMIN,
 	ROLE_LABELS_AR,
@@ -35,15 +38,19 @@ FRAPPE_STAFF_ROLES = {ROLE_SECRETARY: FRAPPE_ROLE_BY_PERSONA[ROLE_SECRETARY], **
 
 
 def _apply_staff_role(user: str | None, role: str):
-	"""Give the login exactly this staff role. The principal's own account and
-	system managers are left as they are: their role comes from elsewhere."""
+	"""Give the login this staff role, and take away every school role that
+	outranks it — a user resolves to their highest role, so a nurse who still
+	held «MS School Admin» worked as the principal. System managers and the
+	person saving (one cannot demote oneself here) are left as they are."""
 	if not user or user in ("Administrator", "Guest") or not frappe.db.exists("User", user):
 		return
 	held = set(frappe.get_roles(user))
-	if "System Manager" in held or FRAPPE_ROLE_BY_PERSONA[ROLE_ADMIN] in held:
+	if "System Manager" in held or user == frappe.session.user:
 		return
 	doc = frappe.get_doc("User", user)
-	stale = [r for k, r in FRAPPE_STAFF_ROLES.items() if k != role and r in held]
+	outrank = ROLE_PRIORITY[: ROLE_PRIORITY.index(role)]
+	stale = [ALL_FRAPPE_ROLES[k] for k in outrank if ALL_FRAPPE_ROLES[k] in held]
+	stale += [r for k, r in FRAPPE_STAFF_ROLES.items() if k != role and r in held and r not in stale]
 	if stale:
 		doc.remove_roles(*stale)
 	if FRAPPE_STAFF_ROLES[role] not in held:
@@ -74,6 +81,9 @@ def _row(d) -> dict:
 			"lastLogin": str(u.last_login or ""),
 		}
 	role = d.get("staff_role") or ROLE_SECRETARY
+	# What the login actually works as — a stronger role left on the account
+	# wins over the file's, and the screen must say so.
+	effective = get_role(user) if user and frappe.db.exists("User", user) else None
 	programs = parse_json_arg(d.get("supervised_programs"), []) or []
 	groups = parse_json_arg(d.get("supervised_groups"), []) or []
 	group_names = _names("Student Group", "student_group_name", groups)
@@ -82,6 +92,9 @@ def _row(d) -> dict:
 		"fullName": d.full_name,
 		"role": role,
 		"roleLabel": ROLE_LABELS_AR.get(role, role),
+		"effectiveRole": effective or "",
+		"effectiveRoleLabel": ROLE_LABELS_AR.get(effective or "", ""),
+		"roleConflict": bool(effective) and effective != role,
 		"supervisedPrograms": programs,
 		"supervisedGroups": [{"id": g, "label": group_names.get(g) or g} for g in groups],
 		"jobTitle": d.job_title or "",
