@@ -197,6 +197,8 @@ NURSE_MODULES = _COMMON_MODULES | {
 	"export", "student_forms",
 	# The section list a nursing form for a whole section, or its pupils, is picked from.
 	"attendance.my_groups",
+	# Who is away and why, with their guardians — following up a sick pupil.
+	"absence_report",
 }
 NURSE_FORM_CATEGORY = "nursing"
 
