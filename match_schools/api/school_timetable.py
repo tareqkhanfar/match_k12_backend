@@ -435,19 +435,23 @@ def _differs(s: dict, old) -> bool:
 
 @frappe.whitelist(methods=["POST"])
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY)
-def save(slots: str | list, limits: str | dict = None, persona: str = None):
-	"""Store the school's week. Refused while it has a single error.
+def save(changes: str | list, deletes: str | list = None, limits: str | dict = None, persona: str = None):
+	"""Store what changed on the sheet. Refused while it has an error.
 
-	Applied as a difference: an unchanged lesson keeps its row, so saving a
-	sheet where three cells moved touches three rows, and only the sections
-	and teachers those cells belong to are re-synced.
+	The page sends only its changes — the cells it added or edited, and the
+	stored lessons it removed — and they are laid over the week as it stands
+	now. Sending the whole week instead would let a second tab, opened before
+	another saved, delete everything added since it loaded. The checks run on
+	the week as it will be, so a cell clashing with a lesson saved elsewhere in
+	the meantime is still caught.
 	"""
 	if _job().get("state") == "running":
 		return fail(
 			"Lessons are being generated — wait for it to finish.",
 			"يجري توليد الحصص الآن — انتظر حتى ينتهي ثم احفظ.",
 		)
-	proposed = _proposed(slots)
+	upserts = _proposed(changes)
+	removing = {str(d) for d in (parse_json_arg(deletes) or []) if d}
 	new_limits = parse_json_arg(limits, {}) or {}
 	all_limits = {**_limits(), **{k: cint(v) for k, v in new_limits.items() if cint(v) > 0}}
 	existing = {
@@ -459,12 +463,27 @@ def save(slots: str | list, limits: str | dict = None, persona: str = None):
 			limit_page_length=0,
 		)
 	}
+	edits = {u["id"]: u for u in upserts if u["id"] and u["id"] in existing}
+	week = []
+	for name, old in existing.items():
+		if name in removing:
+			continue
+		week.append(edits.get(name) or {
+			"k": name, "id": name, "day": old.day, "period": cint(old.period_order),
+			"group": old.student_group, "course": old.course,
+			"instructor": old.instructor or "", "room": old.room or "",
+		})
+	# New cells — and an edit of a lesson someone else has since deleted,
+	# which is put back as new rather than lost.
+	inserts = [dict(u, id="") for u in upserts if u["id"] not in edits]
+	week += inserts
+
 	groups, teachers = _meta()
-	problems = validate(proposed, groups, teachers, all_limits)
+	problems = validate(week, groups, teachers, all_limits)
 	# An error stops the save only when this edit is part of it. A clash the
 	# week already had, between cells nobody touched, is shown but does not
 	# hold every other change in the school hostage.
-	changed = {s["k"] for s in proposed if _differs(s, existing.get(s["id"]))}
+	changed = {u["k"] for u in upserts}
 	errors = []
 	for p in problems:
 		if p["level"] != "error":
@@ -482,8 +501,7 @@ def save(slots: str | list, limits: str | dict = None, persona: str = None):
 	year, term = get_default_academic_year(), get_default_academic_term()
 	touched_groups: set[str] = set()
 	touched_teachers: set[str] = set()
-	kept: set[str] = set()
-	created = updated = 0
+	created = updated = removed = 0
 
 	def times(s):
 		for p in groups[s["group"]]["clock"]:
@@ -491,10 +509,18 @@ def save(slots: str | list, limits: str | dict = None, persona: str = None):
 				return f"{p['from']}:00", f"{p['to']}:00"
 		return None, None
 
-	for s in proposed:
+	for name in removing:
+		old = existing.get(name)
+		if not old:
+			continue
+		touched_groups.add(old.student_group)
+		touched_teachers.add(old.instructor or "")
+		frappe.delete_doc("MS Timetable Slot", name, ignore_permissions=True, force=True)
+		removed += 1
+
+	for s in list(edits.values()) + inserts:
 		old = existing.get(s["id"]) if s["id"] else None
 		if old:
-			kept.add(old.name)
 			if not _differs(s, old):
 				continue
 			touched_groups |= {old.student_group, s["group"]}
@@ -519,22 +545,13 @@ def save(slots: str | list, limits: str | dict = None, persona: str = None):
 		else:
 			doc.save(ignore_permissions=True)
 
-	removed = 0
-	for name, old in existing.items():
-		if name in kept:
-			continue
-		touched_groups.add(old.student_group)
-		touched_teachers.add(old.instructor or "")
-		frappe.delete_doc("MS Timetable Slot", name, ignore_permissions=True, force=True)
-		removed += 1
-
 	tg._save_daily_limits(new_limits)
 	for group in touched_groups:
 		if group:
 			sync_group_instructors(group)
 	# The class plans follow the sheet, as they follow the teacher screen.
 	by_teacher: dict[str, list] = {}
-	for s in proposed:
+	for s in week:
 		if s["instructor"] in touched_teachers and s["instructor"]:
 			by_teacher.setdefault(s["instructor"], []).append({"studentGroup": s["group"], "course": s["course"]})
 	for teacher, rows in by_teacher.items():
@@ -555,7 +572,7 @@ def save(slots: str | list, limits: str | dict = None, persona: str = None):
 		"created": created,
 		"updated": updated,
 		"removed": removed,
-		"unchanged": len(kept) - updated,
+		"unchanged": len(existing) - updated - removed,
 		"groups": len([g for g in touched_groups if g]),
 		"warnings": len(problems),
 		"job": sync,
