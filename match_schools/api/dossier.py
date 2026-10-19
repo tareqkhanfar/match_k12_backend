@@ -110,7 +110,7 @@ def _student_identity(student: str) -> dict | None:
 			"name", "student_name", "gender", "image", "date_of_birth",
 			"student_email_id", "student_mobile_number", "joining_date",
 			"address_line_1", "city", "nationality", "blood_group", "enabled",
-			"user", "middle_name", "last_name",
+			"user", "middle_name", "last_name", "ms_father_mobile", "ms_mother_mobile",
 		],
 		as_dict=True,
 	)
@@ -132,6 +132,8 @@ def _student_identity(student: str) -> dict | None:
 		"age": age,
 		"email": doc.student_email_id,
 		"phone": doc.student_mobile_number,
+		"fatherMobile": doc.ms_father_mobile or "",
+		"motherMobile": doc.ms_mother_mobile or "",
 		"joined": str(doc.joining_date or ""),
 		"address": doc.address_line_1 or "",
 		"city": doc.city,

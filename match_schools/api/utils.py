@@ -195,8 +195,9 @@ NURSE_MODULES = _COMMON_MODULES | {
 	"wellbeing.health", "health_reports", "attachments", "forms", "forms_print", "custom_pages",
 	"students.list_students", "students.get_student", "students.search_students", "roles",
 	"export", "student_forms",
-	# The section list a nursing form for a whole section, or its pupils, is picked from.
-	"attendance.my_groups",
+	# Taking the register (asked for 2026-10-19) — and the section list a
+	# nursing form for a whole section is picked from.
+	"attendance",
 	# Who is away and why, with their guardians — following up a sick pupil.
 	"absence_report",
 }

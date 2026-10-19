@@ -119,6 +119,8 @@ SOURCES = {
 	"student.nationality": ("الجنسية", "الطالب", "student"),
 	"student.blood_group": ("فصيلة الدم", "الطالب", "student"),
 	"student.mobile": ("هاتف الطالب", "الطالب", "student"),
+	"student.father_mobile": ("جوال الأب", "الطالب", "student"),
+	"student.mother_mobile": ("جوال الأم", "الطالب", "student"),
 	"student.email": ("بريد الطالب", "الطالب", "student"),
 	"student.address": ("العنوان", "الطالب", "student"),
 	"student.joining_date": ("تاريخ الالتحاق", "الطالب", "student"),
@@ -171,7 +173,7 @@ def _student_record(student: str) -> dict:
 			[
 				"name", "student_name", "first_name", "ms_id_number", "date_of_birth", "gender",
 				"nationality", "blood_group", "student_mobile_number", "student_email_id",
-				"address_line_1", "city", "joining_date",
+				"address_line_1", "city", "joining_date", "ms_father_mobile", "ms_mother_mobile",
 			],
 			as_dict=True,
 		)
@@ -322,6 +324,8 @@ def resolve_sources(
 				"nationality": st.get("nationality"),
 				"blood_group": st.get("blood_group"),
 				"mobile": st.get("student_mobile_number"),
+				"father_mobile": st.get("ms_father_mobile"),
+				"mother_mobile": st.get("ms_mother_mobile"),
 				"email": st.get("student_email_id"),
 				"address": "، ".join(x for x in (st.get("address_line_1"), st.get("city")) if x),
 				"joining_date": str(st.get("joining_date") or ""),

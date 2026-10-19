@@ -205,6 +205,8 @@ SUPERVISOR_WRITES = ("MS Message", "MS Survey Response", "MS Survey Answer", "MS
 NURSE_LEVELS = {
 	"MS Health Record": FULL,
 	"MS Health Visit": FULL,
+	# The register: a correction cancels the submitted record and files a new one.
+	"Student Attendance": FULL,
 	"MS Form Entry": WRITE,
 	"MS Message": WRITE,
 	"MS Survey Response": WRITE,

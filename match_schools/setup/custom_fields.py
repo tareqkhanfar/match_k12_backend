@@ -33,6 +33,24 @@ CUSTOM_FIELDS = {
 	],
 	"Student": [
 		dict(ID_NUMBER, reqd=0),
+		# On the student's own file, so the office reaches a parent from the
+		# child's record even before a guardian account exists.
+		{
+			"fieldname": "ms_father_mobile",
+			"label": "رقم جوال الأب",
+			"fieldtype": "Data",
+			"options": "Phone",
+			"insert_after": "student_mobile_number",
+			"translatable": 0,
+		},
+		{
+			"fieldname": "ms_mother_mobile",
+			"label": "رقم جوال الأم",
+			"fieldtype": "Data",
+			"options": "Phone",
+			"insert_after": "ms_father_mobile",
+			"translatable": 0,
+		},
 	],
 	# An excused absence is only as useful as its reason: "بعذر" without one
 	# tells a parent nothing and a report less.
