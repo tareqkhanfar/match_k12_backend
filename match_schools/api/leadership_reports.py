@@ -374,9 +374,10 @@ def _marks_rows(program=None, student_group=None, teacher=None, as_of=None) -> d
 	rows = []
 	for (group, course), teachers in pairs.items():
 		section = by_id[group]
-		skey = (course, section["program"])
+		# Per section: a section's own assessments are due there and nowhere else.
+		skey = (course, section["program"], group)
 		if skey not in schemes:
-			schemes[skey] = resolve_scheme(course, section["program"] or None)
+			schemes[skey] = resolve_scheme(course, section["program"] or None, group)
 		scheme = schemes[skey]
 		students = section["students"]
 		cols = filled.get((group, course), {})

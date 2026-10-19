@@ -292,6 +292,8 @@ def _tree(components: list) -> list[dict]:
 			"type": c.get("component_type"),
 			"maxScore": flt(c.get("max_score")),
 			"parent": parent,
+			"sectionOnly": bool(c.get("ms_section_item")),
+			"sectionOverride": bool(c.get("ms_section_override")),
 		}
 		if parent in categories:
 			categories[parent]["children"].append(child)
@@ -312,13 +314,25 @@ def get_plan(course: str = None, program: str = None, academic_term: str = None,
 	Reading one in order to total a student's own marks is not, so the body
 	lives in `_read_plan()` and is called directly by the calculation.
 	"""
-	return _read_plan(course=course, program=program, academic_term=academic_term, persona=persona)
+	plan = _read_plan(course=course, program=program, academic_term=academic_term, persona=persona)
+	if plan.get("scheme"):
+		from match_schools.api.section_plan import section_changes
+
+		# What each section changed for itself from its marks sheet — shown
+		# beside the grade's plan so nobody wonders why 4-أ has a fifth test.
+		plan["sectionChanges"] = section_changes(plan["scheme"])
+	return plan
 
 
 def _read_plan(
-	course: str = None, program: str = None, academic_term: str = None, persona: str = None
+	course: str = None,
+	program: str = None,
+	academic_term: str = None,
+	persona: str = None,
+	student_group: str = None,
 ) -> dict:
-	"""The plan itself, with no persona gate.
+	"""The plan itself, with no persona gate — as `student_group` sits it when
+	one is named (its own assessments and maximums laid over the grade's).
 
 	Deliberately not an endpoint: a student totalling their own subject has to
 	read the plan that defines it. The caller is responsible for having
@@ -340,16 +354,9 @@ def _read_plan(
 
 	components = []
 	if scheme:
-		components = frappe.get_all(
-			"MS Grade Scheme Component",
-			filters={"parent": scheme.name, "parenttype": "MS Grade Scheme"},
-			fields=[
-				"component_name", "component_type", "weight", "max_score",
-				"ms_parent_component", "ms_quarter", "idx",
-			],
-			order_by="idx",
-			limit_page_length=0,
-		)
+		from match_schools.api.section_plan import plan_rows
+
+		components = plan_rows(scheme.name, student_group)
 
 	categories, orphans = _tree(components)
 
@@ -1061,7 +1068,7 @@ def save_rule(
 	assert_entry_allowed(persona, student_group, course, academic_term)
 
 	# How many assessments the plan actually defines under this category.
-	available = _assessments_of(course, category, academic_term)
+	available = _assessments_of(course, category, academic_term, student_group)
 	n = cint(count_n)
 
 	if count_mode == "best":
@@ -1113,25 +1120,24 @@ def save_rule(
 	}
 
 
-def _assessments_of(course: str, category: str, academic_term: str | None) -> list[dict]:
-	"""The assessments the plan defines inside one category."""
+def _assessments_of(
+	course: str, category: str, academic_term: str | None, student_group: str | None = None
+) -> list[dict]:
+	"""The assessments the plan defines inside one category — this section's
+	own included when one is named."""
 	filters = {"course": course}
 	if academic_term:
 		filters["academic_term"] = academic_term
 	scheme = frappe.db.get_value("MS Grade Scheme", filters, "name")
 	if not scheme:
 		return []
-	return frappe.get_all(
-		"MS Grade Scheme Component",
-		filters={
-			"parent": scheme,
-			"parenttype": "MS Grade Scheme",
-			"ms_parent_component": category,
-		},
-		fields=["component_name", "max_score"],
-		order_by="idx",
-		limit_page_length=0,
-	)
+	from match_schools.api.section_plan import plan_rows
+
+	return [
+		{"component_name": r.component_name, "max_score": r.max_score}
+		for r in plan_rows(scheme, student_group)
+		if r.get("ms_parent_component") == category
+	]
 
 
 def _apply_rule(scores: list[dict], mode: str, n: int) -> tuple[list[dict], list[dict]]:
@@ -1190,7 +1196,9 @@ def compute_marks(
 	# read the plan behind it. Going through the endpoints would raise
 	# PermissionError here and silently fall back to a flat average — which is
 	# exactly how the portal came to show 78.9 for a subject worth 84.5.
-	plan_res = _read_plan(course=course, academic_term=academic_term, persona=persona)
+	plan_res = _read_plan(
+		course=course, academic_term=academic_term, persona=persona, student_group=student_group
+	)
 	plan = plan_res.get("data") if isinstance(plan_res, dict) and "data" in plan_res else plan_res
 	quarters = plan.get("quarters") or []
 	if not quarters:

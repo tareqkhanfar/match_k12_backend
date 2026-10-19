@@ -225,8 +225,13 @@ def delete_scheme(scheme: str, persona: str = None):
 	}
 
 
-def resolve_scheme(course: str, program: str = None) -> dict | None:
-	"""Best matching scheme: course+program, then course, then a global default."""
+def resolve_scheme(course: str, program: str = None, student_group: str = None) -> dict | None:
+	"""Best matching scheme: course+program, then course, then a global default.
+
+	With a section, the plan as that section sits it — its own assessments and
+	changes laid over the grade's plan (`section_plan.plan_rows`)."""
+	from match_schools.api.section_plan import plan_rows
+
 	for filters in (
 		{"course": course, "program": program},
 		{"course": course},
@@ -238,6 +243,7 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 		name = frappe.db.get_value("MS Grade Scheme", clean, "name")
 		if name:
 			doc = frappe.get_doc("MS Grade Scheme", name)
+			rows = plan_rows(doc.name, student_group)
 			# A plan is a tree: categories carry the weight, and the individual
 			# assessments sit beneath them. Marks are entered against the
 			# assessments — a category with children is a total, not something
@@ -245,7 +251,7 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 			# marked directly, which is how the flat plans that predate the
 			# tree keep working.
 			children_of: dict[str, list] = {}
-			for c in doc.components:
+			for c in rows:
 				parent = c.get("ms_parent_component")
 				if parent:
 					children_of.setdefault(parent, []).append(c)
@@ -258,7 +264,7 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 			# Plans saved from now on refuse duplicate names outright; this
 			# keeps the screen usable on plans built before that check.
 			seen_names: set[str] = set()
-			for c in doc.components:
+			for c in rows:
 				if c.component_name in seen_names:
 					continue
 				if c.get("ms_parent_component"):
@@ -274,7 +280,7 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 			# show the arithmetic — none of which is recoverable from a flat
 			# list of markable assessments.
 			parents = []
-			for c in doc.components:
+			for c in rows:
 				kids = children_of.get(c.component_name)
 				if c.get("ms_parent_component") or not kids:
 					continue
@@ -308,6 +314,9 @@ def resolve_scheme(course: str, program: str = None) -> dict | None:
 						"max_score": flt(c.max_score),
 						"quarter": c.get("ms_quarter"),
 						"category": c.get("ms_parent_component"),
+						# This section's own assessment, or its own maximum.
+						"sectionOnly": bool(c.get("ms_section_item")),
+						"sectionOverride": bool(c.get("ms_section_override")),
 					}
 					for c in markable
 				],
@@ -347,7 +356,7 @@ def get_entry_sheet(
 
 	academic_term = academic_term or group.academic_term or get_default_academic_term()
 	academic_year = group.academic_year or get_default_academic_year()
-	scheme = resolve_scheme(course, group.program)
+	scheme = resolve_scheme(course, group.program, student_group)
 
 	roster = frappe.get_all(
 		"Student Group Student",
@@ -865,14 +874,16 @@ def set_aggregation(
 	mode: str = "sum",
 	n: int = 0,
 	program: str = None,
+	student_group: str = None,
 	persona: str = None,
 ):
 	"""Change how a category combines the assessments inside it.
 
-	The choice belongs to the plan, not to one class: a teacher who decides to
-	count the best three of four short tests means it for everyone sitting that
-	plan. It is stored on the category and every sheet reading that plan picks
-	it up, which is why the sheet refetches rather than guessing locally.
+	From a marks sheet the choice is that section's: two sections of the same
+	subject may count their short tests differently, and one teacher's choice
+	must not move another class's totals. It is stored as the section's own
+	override (`section_plan`). Only the back office, with no section named,
+	still sets it on the grade's plan for everyone.
 	"""
 	from match_schools.api.gradeflow import assert_teacher_owns_course
 
@@ -894,6 +905,41 @@ def set_aggregation(
 		return fail(
 			message_en="Give how many assessments to keep or drop.",
 			message_ar="حدّد عدد الاختبارات المطلوب احتسابها أو استبعادها.",
+		)
+
+	if student_group:
+		from match_schools.api import section_plan
+
+		scheme, rows, _group = _sheet_plan(persona, student_group, course)
+		head = next(
+			(c for c in rows if c.component_name == component_name and not c.get("ms_parent_component")),
+			None,
+		)
+		if not head:
+			return fail(
+				message_en="That category is not in this plan.",
+				message_ar="هذا البند غير موجود في خطة المادة.",
+			)
+		section_plan.put(scheme, student_group, "override", component_name, aggregation=mode, aggregation_n=n)
+		frappe.db.commit()
+		label = {
+			"sum": "جمع العلامات",
+			"average": "متوسط النسب",
+			"best_n": f"أفضل {n}",
+			"worst_drop": f"استبعاد أدنى {n}",
+		}[mode]
+		return {
+			"success": True,
+			"data": {"component": component_name, "mode": mode, "n": n, "sectionOnly": True},
+			"message_en": "Rule set for this class.",
+			"message_ar": f"احتساب «{component_name}»: {label} — لهذه الشعبة فقط.",
+		}
+	if persona == ROLE_TEACHER:
+		# An app from before section rules would otherwise set it for every
+		# class of the grade.
+		return fail(
+			message_en="Choose the class first — update the app.",
+			message_ar="طريقة الاحتساب أصبحت لكل شعبة على حدة — حدّث الصفحة أو التطبيق ثم أعد المحاولة.",
 		)
 
 	scheme_name = frappe.db.get_value("MS Grade Scheme", {"course": course, "program": program}, "name") \
@@ -949,9 +995,11 @@ def set_aggregation(
 
 
 def _sheet_plan(persona: str, student_group: str, course: str):
-	"""The plan the sheet for this class and subject shows, once the caller
-	may change it: they teach it and its marks are still open to them."""
+	"""The plan the sheet for this class and subject shows — as this section
+	sits it — once the caller may change it: they teach it here and its marks
+	are still open to them."""
 	from match_schools.api.gradeflow import assert_entry_allowed, assert_teacher_teaches
+	from match_schools.api.section_plan import plan_rows
 
 	assert_teacher_teaches(persona, student_group, course)
 	group = frappe.db.get_value(
@@ -964,7 +1012,7 @@ def _sheet_plan(persona: str, student_group: str, course: str):
 	scheme = resolve_scheme(course, group.program)
 	if not scheme:
 		frappe.throw(_("This subject has no assessment plan yet."))
-	return frappe.get_doc("MS Grade Scheme", scheme["id"]), group
+	return scheme["id"], plan_rows(scheme["id"], student_group), group
 
 
 @frappe.whitelist(methods=["POST"])
@@ -977,19 +1025,24 @@ def add_assessment(
 	max_score: float = None,
 	persona: str = None,
 ):
-	"""Add an assessment under a category that already has some.
+	"""Add an assessment under a category that already has some — in this
+	section only.
 
-	Only beside existing children: a category marked directly has marks of
-	its own, and turning it into a heading would orphan them.
+	The grade's plan is not touched: a missing mark counts as zero, so an
+	assessment added to the shared plan lowered every pupil's total in the
+	sections that never sat it. Only beside existing children: a category
+	marked directly has marks of its own, and turning it into a heading
+	would orphan them.
 	"""
+	from match_schools.api import section_plan
+
 	name = (name or "").strip()
 	if not (student_group and course and parent and name):
 		return fail(message_en="Category and name are required.", message_ar="حدّد البند واسم الامتحان.")
 	if len(name) > 140:
 		return fail(message_en="Name too long.", message_ar="اسم الامتحان طويل جداً.")
 
-	doc, _group = _sheet_plan(persona, student_group, course)
-	rows = list(doc.components)
+	scheme, rows, _group = _sheet_plan(persona, student_group, course)
 	head = next((c for c in rows if c.component_name == parent and not c.get("ms_parent_component")), None)
 	siblings = [c for c in rows if c.get("ms_parent_component") == parent]
 	if not head:
@@ -1005,44 +1058,39 @@ def add_assessment(
 			message_en="Assessments can only be added beside existing ones.",
 			message_ar=f"«{parent}» يُرصد مباشرة وليس تحته امتحانات — الإضافة مسموحة فقط تحت بند فيه امتحانات.",
 		)
-	# Marks are filed by name, so a name anywhere in the plan is taken.
+	# Marks are filed by name. Taken if this section already has it; and a
+	# name another section gave a different category would leave one name
+	# with two meanings, so that is refused too.
 	if any(c.component_name == name for c in rows):
 		return fail(
 			message_en="That name is already in the plan.",
 			message_ar=f"«{name}» موجود في خطة التقييم — اختر اسماً آخر.",
+		)
+	elsewhere = section_plan.name_to_category(scheme).get(name)
+	if elsewhere and elsewhere != parent:
+		return fail(
+			message_en="That name is used under another category.",
+			message_ar=f"«{name}» مستخدم في شعبة أخرى تحت «{elsewhere}» — اختر اسماً آخر.",
 		)
 
 	out_of = flt(max_score) or flt(siblings[-1].max_score)
 	if out_of <= 0:
 		return fail(message_en="The maximum must be positive.", message_ar="العلامة العظمى يجب أن تكون أكبر من صفر.")
 
-	position = rows.index(siblings[-1]) + 1
-	row = doc.append(
-		"components",
-		{
-			"component_name": name,
-			"component_type": siblings[-1].component_type or head.component_type or "Exam",
-			"weight": 0,
-			"max_score": out_of,
-			"ms_quarter": head.get("ms_quarter"),
-			"ms_parent_component": parent,
-		},
+	section_plan.put(
+		scheme, student_group, "assessment", name,
+		parent_component=parent,
+		component_type=siblings[-1].component_type or head.component_type or "Exam",
+		quarter=head.get("ms_quarter"),
+		max_score=out_of,
 	)
-	rows.insert(position, row)
-	doc.components = rows
-	for i, c in enumerate(doc.components, start=1):
-		c.idx = i
-	# The categories' weights are untouched — an assessment carries none — so
-	# the plan's weight check has nothing to say, and must not block this on
-	# an unrelated quarter that drifted out of balance.
-	doc.flags.ignore_validate = True
-	doc.save(ignore_permissions=True)
 	frappe.db.commit()
+	label = frappe.db.get_value("Student Group", student_group, "student_group_name") or student_group
 	return {
 		"success": True,
-		"data": {"component": name, "parent": parent, "max_score": out_of},
-		"message_en": "Assessment added.",
-		"message_ar": f"أُضيف «{name}» تحت «{parent}» (من {out_of:g}) — يظهر لكل شعب هذه المادة.",
+		"data": {"component": name, "parent": parent, "max_score": out_of, "sectionOnly": True},
+		"message_en": "Assessment added for this class.",
+		"message_ar": f"أُضيف «{name}» تحت «{parent}» (من {out_of:g}) — لشعبة {label} فقط.",
 	}
 
 
@@ -1056,15 +1104,18 @@ def set_assessment_max(
 	persona: str = None,
 ):
 	"""Change what an assessment inside a category is out of — its share of
-	the category. A category's own weight is never changed here."""
+	the category — in this section only. A category's own weight is never
+	changed here, and no other section's plan or marks move."""
+	from match_schools.api import section_plan
+
 	out_of = flt(max_score)
 	if not (student_group and course and component_name):
 		return fail(message_en="An assessment is required.", message_ar="حدّد الامتحان.")
 	if out_of <= 0:
 		return fail(message_en="The maximum must be positive.", message_ar="العلامة العظمى يجب أن تكون أكبر من صفر.")
 
-	doc, group = _sheet_plan(persona, student_group, course)
-	row = next((c for c in doc.components if c.component_name == component_name), None)
+	scheme, rows, group = _sheet_plan(persona, student_group, course)
+	row = next((c for c in rows if c.component_name == component_name), None)
 	if not row:
 		return fail(message_en="Unknown assessment.", message_ar="الامتحان غير موجود في خطة التقييم.")
 	if not row.get("ms_parent_component"):
@@ -1074,12 +1125,11 @@ def set_assessment_max(
 		)
 
 	entry_filters = {
+		"student_group": student_group,
 		"course": course,
 		"component_name": component_name,
 		"academic_year": group.academic_year or get_default_academic_year(),
 	}
-	if doc.get("program"):
-		entry_filters["program"] = doc.program
 	above = frappe.db.count("MS Gradebook Entry", {**entry_filters, "score": [">", out_of], "is_bonus": 0})
 	if above:
 		return fail(
@@ -1088,17 +1138,21 @@ def set_assessment_max(
 		)
 
 	previous = flt(row.max_score)
-	frappe.db.set_value("MS Grade Scheme Component", row.name, "max_score", out_of)
-	# Each mark keeps the maximum it was entered against; they follow the
-	# plan so the sheet and the totals read the same figure.
+	if row.get("ms_section_item"):
+		section_plan.put(scheme, student_group, "assessment", component_name, max_score=out_of)
+	else:
+		section_plan.put(scheme, student_group, "override", component_name, max_score=out_of)
+	# Each mark keeps the maximum it was entered against; this section's
+	# follow the change so its sheet and totals read the same figure.
 	for entry in frappe.get_all("MS Gradebook Entry", filters=entry_filters, pluck="name", limit_page_length=0):
 		frappe.db.set_value("MS Gradebook Entry", entry, "max_score", out_of, update_modified=False)
 	frappe.db.commit()
+	label = frappe.db.get_value("Student Group", student_group, "student_group_name") or student_group
 	return {
 		"success": True,
-		"data": {"component": component_name, "max_score": out_of, "previous": previous},
-		"message_en": "Maximum updated.",
-		"message_ar": f"أصبح «{component_name}» من {out_of:g} بدل {previous:g}.",
+		"data": {"component": component_name, "max_score": out_of, "previous": previous, "sectionOnly": True},
+		"message_en": "Maximum updated for this class.",
+		"message_ar": f"أصبح «{component_name}» من {out_of:g} بدل {previous:g} — لشعبة {label} فقط.",
 	}
 
 
@@ -1342,15 +1396,16 @@ def _compute_subject_grade(entries: list[dict]) -> dict:
 			scheme = max(counts, key=lambda k: counts[k])
 
 	if names and scheme:
-		for row in frappe.get_all(
-			"MS Grade Scheme Component",
-			filters={"parent": scheme},
-			fields=[
-				"component_name", "ms_parent_component", "weight",
-				"ms_aggregation", "ms_aggregation_n",
-			],
-			limit_page_length=0,
-		):
+		from match_schools.api.section_plan import name_to_category, plan_rows
+
+		# The plan as the marks' own section sits it: its own assessments and
+		# its own way of combining a category. Without a section on the
+		# entries, every section's own assessments still find their category.
+		group = next((e.get("student_group") for e in graded if e.get("student_group")), None)
+		for name, parent in name_to_category(scheme).items():
+			if name in names:
+				tree[name] = parent
+		for row in plan_rows(scheme, group):
 			if row.get("ms_parent_component"):
 				if row["component_name"] in names:
 					tree[row["component_name"]] = row["ms_parent_component"]
@@ -2470,7 +2525,7 @@ def plan_components(student_group: str = None, course: str = None, persona: str 
 		)
 
 	program = frappe.db.get_value("Student Group", student_group, "program")
-	scheme = resolve_scheme(course, program)
+	scheme = resolve_scheme(course, program, student_group)
 	if not scheme:
 		return {"components": [], "scheme": None}
 
@@ -2542,7 +2597,7 @@ def transfer_assignment_marks(
 	assert_teacher_owns_course(persona, doc.course)
 
 	program = frappe.db.get_value("Student Group", doc.student_group, "program")
-	scheme = resolve_scheme(doc.course, program)
+	scheme = resolve_scheme(doc.course, program, doc.student_group)
 	target = next(
 		(c for c in (scheme or {}).get("components", []) if c["component_name"] == component_name),
 		None,
