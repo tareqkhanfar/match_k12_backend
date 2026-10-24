@@ -170,6 +170,8 @@ _COMMON_MODULES = {
 	"agenda.options", "agenda.events", "agenda.upcoming", "agenda.day",
 	# Their own profile and password — the first sign-in demands a new one.
 	"settings.change_password", "settings.my_profile", "settings.save_my_profile",
+	# Which pages the school has closed to them, and why.
+	"page_blocks.mine",
 }
 
 # The supervisor reads the academic side of their sections.
@@ -487,6 +489,13 @@ def ms_endpoint(*allowed_personas: str):
 				refusal = role_policy(role, module, fn.__name__, kwargs)
 				if refusal:
 					return refusal
+			# A call from a page the school has closed to this person (حجب
+			# الصفحات) — e.g. a tab left open from before the block.
+			from match_schools.api.page_blocks import check_request
+
+			refusal = check_request(module)
+			if refusal:
+				return refusal
 			try:
 				data = fn(*args, persona=persona, **kwargs)
 			except frappe.ValidationError as e:

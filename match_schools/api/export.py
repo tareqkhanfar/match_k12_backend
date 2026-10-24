@@ -13,7 +13,7 @@ from datetime import date, datetime
 
 import frappe
 from frappe import _
-from frappe.utils import flt, today
+from frappe.utils import cint, flt, today
 from frappe.utils.pdf import get_pdf
 
 from match_schools.api.utils import (
@@ -60,16 +60,40 @@ def _fetch_rows(dataset: str, params: dict) -> list[dict]:
 	module = frappe.get_module(module_path)
 	fn = getattr(module, fn_name)
 
-	# Ask for everything, not just the current page.
+	# Ask for everything, not just the current page — of the lists that page.
+	# Only arguments the list accepts are passed: half of these lists take no
+	# `page`, and handing them one failed inside the endpoint, which the
+	# export read as "no rows" — the teachers' Excel came out headings only.
+	import inspect
+
+	accepted = inspect.signature(inspect.unwrap(fn)).parameters
+	takes_any = any(p.kind == p.VAR_KEYWORD for p in accepted.values())
 	params = dict(params or {})
 	params.setdefault("page", 1)
 	params.setdefault("page_size", 2000)
+	params = {k: v for k, v in params.items() if takes_any or (k in accepted and k != "persona")}
 
 	result = fn(**params)
+	if isinstance(result, dict) and result.get("success") is False:
+		# Say why, rather than hand over an empty file.
+		frappe.throw(result.get("message_ar") or result.get("message_en") or _("Could not read the list."))
 	data = result.get("data") if isinstance(result, dict) and "success" in result else result
 
 	if isinstance(data, dict) and "items" in data:
-		return data["items"]
+		items = list(data["items"] or [])
+		# A list that caps its page (students stop at 100) is read page by
+		# page, so the file holds all 338 and not the first 100.
+		total = cint(data.get("total"))
+		page = cint(params.get("page")) or 1
+		while "page" in params and total > len(items) and len(items) < 50000:
+			page += 1
+			more = fn(**{**params, "page": page})
+			more = more.get("data") if isinstance(more, dict) and "success" in more else more
+			chunk = (more or {}).get("items") or [] if isinstance(more, dict) else []
+			if not chunk:
+				break
+			items += chunk
+		return items
 	if isinstance(data, list):
 		return data
 	return []

@@ -75,6 +75,8 @@ def get_settings(persona: str = None):
 			# Only class teachers (and the office) take attendance.
 			"attendance_homeroom_only": _attendance_homeroom_only(),
 			"vp_sees_finance": frappe.db.get_default("ms_vp_sees_finance") == "1",
+			# Teachers print the weekly plan of every subject in their sections.
+			"weekly_plan_all_subjects": frappe.db.get_default("ms_weekly_plan_all_subjects") == "1",
 		},
 		"counts": {
 			"students": frappe.db.count("Student", {"enabled": 1}),
@@ -153,6 +155,11 @@ def save_settings(payload: str | dict, persona: str = None):
 
 		frappe.db.set_default(HOMEROOM_ONLY_KEY, "1" if cint(data.get("attendance_homeroom_only")) else "0")
 		updated.append("attendance_homeroom_only")
+	if "weekly_plan_all_subjects" in data:
+		from match_schools.api.weekly_plan import ALL_SUBJECTS_KEY
+
+		frappe.db.set_default(ALL_SUBJECTS_KEY, "1" if cint(data.get("weekly_plan_all_subjects")) else "0")
+		updated.append("weekly_plan_all_subjects")
 	if "vp_sees_finance" in data:
 		from match_schools.api.utils import ROLE_ADMIN as _ADMIN, VP_FINANCE_KEY, get_role
 

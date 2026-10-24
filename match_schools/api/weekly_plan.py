@@ -219,6 +219,15 @@ def _subjects(group: str, program: str | None, days: list, only_instructor: str 
 	return [{"id": c["id"], "name": escape_html(c["name"]), "cells": cells[c["id"]]} for c in courses]
 
 
+# Off: a teacher prints their own subjects. On: every subject of a section
+# they teach — the school's choice (إعدادات المدرسة).
+ALL_SUBJECTS_KEY = "ms_weekly_plan_all_subjects"
+
+
+def teachers_print_all_subjects() -> bool:
+	return frappe.db.get_default(ALL_SUBJECTS_KEY) == "1"
+
+
 @frappe.whitelist()
 @ms_endpoint(ROLE_ADMIN, ROLE_SECRETARY, ROLE_TEACHER)
 def weekly_plan(
@@ -231,8 +240,8 @@ def weekly_plan(
 	"""One section's week as a printable page.
 
 	The office prints the whole section. A teacher prints the subjects they
-	teach there with their own preparation only — reading a colleague's
-	preparation is not something the lesson screen offers either.
+	teach there with their own preparation only — unless the school has
+	chosen to let teachers print every subject of a section they teach.
 	"""
 	if not student_group or not frappe.db.exists("Student Group", student_group):
 		return fail(message_en="Choose a section.", message_ar="اختر الشعبة.")
@@ -249,6 +258,8 @@ def weekly_plan(
 		if not only_instructor or student_group not in set(instructor_groups(only_instructor, period=False)):
 			frappe.throw(frappe._("This section is not yours."), frappe.PermissionError)
 		only_courses = set(teaching_pairs(only_instructor).get(student_group, []))
+		if teachers_print_all_subjects():
+			only_instructor = only_courses = None
 
 	subjects = _subjects(student_group, group.program, days, only_instructor, only_courses)
 	# The browser sends the Umm al-Qura dates. Without them the line is left to
